@@ -1,5 +1,5 @@
 docker:
-  registry: docker.trt.com
+  registry: docker.test.com
   registry_prefix: docker.demo.com/demo
   default_push: false
   expose_port: 8080

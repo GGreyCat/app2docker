@@ -1,118 +1,211 @@
-# jar2docker.py
-
-import http.server
-import json
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import os
-import socketserver
 import re
+import io
+import sys
 import yaml
-import base64
-# --- 模拟 Docker 模块 ---
-try:
-    import docker
+import json
+import shutil
+import hashlib
+import tempfile
+import subprocess
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
+from pathlib import Path
 
-    DOCKER_AVAILABLE = True
-except (ImportError, ModuleNotFoundError) as e:
-    print(f"⚠️ 未安装 docker 模块: {e}")
-    print("🔧 启用模拟模式（仅用于调试）")
-    DOCKER_AVAILABLE = False
-
-try:
-    client = docker.from_env() if DOCKER_AVAILABLE else None
-except Exception as e:
-    print(f"⚠️ Docker 服务未运行: {e}")
-    print("🔧 启用模拟模式")
-    DOCKER_AVAILABLE = False
-    client = None
-
-# --- 其他配置 ---
-UPLOAD_DIR = "uploads"
-DOCKER_BUILD_DIR = "docker_build"
+# ============= 配置 =============
 CONFIG_FILE = "config.yml"
-STATIC_FILE = "index.html"
+UPLOAD_DIR = "uploads"
+BUILD_DIR = "docker_build"
+TEMPLATES_DIR = "templates"
+INDEX_FILE = "index.html"
 
-for d in [UPLOAD_DIR, DOCKER_BUILD_DIR]:
-    os.makedirs(d, exist_ok=True)
+# 确保目录存在
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(BUILD_DIR, exist_ok=True)
+os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
+# ============= 工具函数 =============
+def get_safe_filename(filename):
+    """生成安全的文件名"""
+    name = re.sub(r'[^a-zA-Z0-9_.-]', '_', filename)
+    return name[:255]
 
+def generate_image_name(jar_path):
+    """根据 JAR 文件名智能生成镜像名"""
+    jar_name = os.path.basename(jar_path)
+    if jar_name.endswith('.jar'):
+        jar_name = jar_name[:-4]
+    # 移除版本号等，保留主名
+    parts = re.split(r'[-_.]', jar_name)
+    if len(parts) > 1:
+        # 取第一个有意义的部分
+        base_name = parts[0].lower()
+        if not base_name or len(base_name) < 2:
+            base_name = "myapp"
+        return f"{base_name}/{jar_name.lower()}"
+    return f"myapp/{jar_name.lower()}"
 
-def load_config():
-    """加载 config.yml，不存在则返回带默认 docker 配置的空结构"""
-    if not os.path.exists(CONFIG_FILE):
-        default_config = {
-            "docker": {
+# ============= HTTP 处理器 =============
+class Jar2DockerHandler(BaseHTTPRequestHandler):
+    server_version = "Jar2Docker/1.0"
+
+    def _send_json(self, code, data):
+        """发送 JSON 响应"""
+        try:
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+        except Exception as e:
+            print(f"❌ 发送 JSON 响应失败: {e}")
+
+    def _send_html(self, content):
+        """发送 HTML 响应"""
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            if isinstance(content, str):
+                content = content.encode('utf-8')
+            self.wfile.write(content)
+        except Exception as e:
+            print(f"❌ 发送 HTML 响应失败: {e}")
+
+    def _send_file(self, filepath, content_type='application/octet-stream'):
+        """发送文件"""
+        try:
+            if not os.path.exists(filepath):
+                self.send_error(404, "File not found")
+                return False
+
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(os.path.getsize(filepath)))
+            self.end_headers()
+
+            with open(filepath, 'rb') as f:
+                shutil.copyfileobj(f, self.wfile)
+            return True
+        except Exception as e:
+            print(f"❌ 发送文件 {filepath} 失败: {e}")
+            return False
+
+    def load_config(self):
+        """加载配置，不冲掉其他部分"""
+        if not os.path.exists(CONFIG_FILE):
+            default_config = {
+                "docker": {
+                    "registry": "docker.io",
+                    "registry_prefix": "",
+                    "default_push": False,
+                    "expose_port": 8080
+                }
+            }
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                yaml.dump(default_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            print(f"🆕 配置文件 {CONFIG_FILE} 不存在，已创建默认配置")
+            return default_config
+
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"⚠️ 读取配置失败，使用默认配置: {e}")
+            config = {}
+
+        if 'docker' not in config:
+            config['docker'] = {
                 "registry": "docker.io",
                 "registry_prefix": "",
                 "default_push": False,
                 "expose_port": 8080
             }
-        }
-        # 创建默认配置文件（只包含 docker，不影响未来扩展）
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            yaml.dump(default_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-        print(f"🆕 配置文件 {CONFIG_FILE} 不存在，已创建默认配置")
-        return default_config
+            # 保存回去
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
-    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f) or {}
+        return config
 
-    # 确保 docker 配置存在
-    if 'docker' not in config:
-        config['docker'] = {
-            "registry": "docker.io",
-            "registry_prefix": "",
-            "default_push": False,
-            "expose_port": 8080
-        }
-        # 保存回去（可选，确保下次不用再补）
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    def do_GET(self):
+        """处理 GET 请求"""
+        path = self.path.split('?')[0]
 
-    return config
+        if path == '/get-config':
+            self.handle_get_config()
+        elif path == '/list-templates':
+            self.handle_list_templates()
+        elif path == '/':
+            self.serve_index()
+        elif path == '/index.html':
+            self.serve_index()
+        elif path.startswith('/static/') or path.startswith('/img.'):
+            # 简单静态文件服务
+            filepath = path.lstrip('/')
+            if os.path.exists(filepath):
+                content_type = 'image/png' if filepath.endswith('.png') else 'text/css'
+                self._send_file(filepath, content_type)
+            else:
+                self.send_error(404)
+        else:
+            self.send_error(404)
 
-CONFIG = load_config()
+    def serve_index(self):
+        """返回 index.html"""
+        if os.path.exists(INDEX_FILE):
+            with open(INDEX_FILE, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self._send_html(content)
+        else:
+            self.send_error(404, "index.html not found")
 
+    def handle_get_config(self):
+        """获取当前配置"""
+        try:
+            config = self.load_config()
+            docker_config = config.get('docker', {})
+            self._send_json(200, {"docker": docker_config})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._send_json(500, {"error": f"获取配置失败: {str(e)}"})
 
+    def handle_list_templates(self):
+        """列出模板"""
+        try:
+            if not os.path.exists(TEMPLATES_DIR):
+                templates = []
+            else:
+                templates = [
+                    f.replace('.Dockerfile', '')
+                    for f in os.listdir(TEMPLATES_DIR)
+                    if f.endswith('.Dockerfile')
+                ]
+            self._send_json(200, {"templates": templates})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._send_json(500, {"error": "获取模板列表失败"})
 
-def require_auth(handler):
-    """装饰器：检查 Basic Auth"""
-    config = CONFIG['server']
-    username = config['username']
-    password = config['password']
-    expected_auth = base64.b64encode(f"{username}:{password}".encode()).decode()
+    def do_POST(self):
+        """处理 POST 请求"""
+        if self.path == '/upload':
+            self.handle_upload()
+        elif self.path == '/save-config':
+            self.handle_save_config()
+        elif self.path == '/suggest-image-name':  # ← 新增
+            self.handle_suggest_image_name()  # ← 新增
+        else:
+            self.send_error(404)
 
-    auth_header = handler.headers.get('Authorization')
-    if not auth_header:
-        return False
-
-    if not auth_header.startswith('Basic '):
-        return False
-
-    encoded = auth_header.split(' ')[1]
-    return encoded == expected_auth
-
-def auth_required(func):
-    """装饰器：用于 do_GET/do_POST"""
-    def wrapper(self, *args, **kwargs):
-        if not require_auth(self):
-            self.send_response(401)
-            self.send_header('WWW-Authenticate', 'Basic realm="jar2docker"')
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(b'<h1>401 Unauthorized</h1><p>Authentication required.</p>')
-            return
-        return func(self, *args, **kwargs)
-    return wrapper
-
-# --- HTTP 处理器 ---
-class UploadHandler(http.server.BaseHTTPRequestHandler):
     def handle_save_config(self):
-        """保存全局配置到 config.yml，只更新 docker 部分，保留其他配置"""
+        """保存全局配置，只更新 docker 部分"""
         try:
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
 
-            # 解析表单（和上传逻辑一致）
             boundary = self.headers['Content-Type'].split("boundary=")[1].encode()
             parts = body.split(b'--' + boundary)
             form_data = {}
@@ -130,36 +223,32 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
                         except:
                             continue
 
-            # 构造新的 docker 配置
             new_docker_config = {
                 "registry": form_data.get("registry", "docker.io").strip(),
                 "registry_prefix": form_data.get("registry_prefix", "").strip().rstrip('/'),
                 "default_push": (form_data.get("default_push") == "on"),
-                "expose_port": int(form_data.get("expose_port", "8080")) if form_data.get("expose_port",
-                                                                                          "").isdigit() else 8080
+                "expose_port": int(form_data.get("expose_port", "8080")) if form_data.get("expose_port", "").isdigit() else 8080
             }
 
-            # 🆕 读取现有完整配置（如果存在）
             full_config = {}
             if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                    full_config = yaml.safe_load(f) or {}
-                print(f"📄 读取现有配置: {full_config}")
+                try:
+                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                        full_config = yaml.safe_load(f) or {}
+                except:
+                    pass
 
-            # 🆕 只更新 docker 部分，保留其他部分
             if 'docker' not in full_config:
                 full_config['docker'] = {}
             full_config['docker'].update(new_docker_config)
 
-            # 🆕 写回完整配置
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 yaml.dump(full_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
-            print(f"✅ 配置已更新到 {CONFIG_FILE}: {full_config}")
-
+            print(f"✅ 配置已更新: {full_config['docker']}")
             self._send_json(200, {
                 "message": "Docker 配置保存成功！",
-                "docker_config": full_config.get('docker')
+                "docker_config": full_config['docker']
             })
 
         except Exception as e:
@@ -169,336 +258,235 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
             clean_error_msg = re.sub(r'[\x00-\x1F\x7F]', ' ', error_msg).strip()
             self._send_json(500, {"error": f"保存配置失败: {clean_error_msg}"})
 
-    def handle_get_config(self):
-        """返回当前 config.yml 中的配置"""
+    def handle_suggest_image_name(self):
+        """根据上传的 JAR 文件名，返回建议的镜像名"""
         try:
-            config = load_config()  # 复用你已有的 load_config 方法
-            docker_config = config.get('docker', {})
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
 
-            self._send_json(200, {
-                "docker": docker_config
-            })
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            error_msg = str(e)
-            clean_error_msg = re.sub(r'[\x00-\x1F\x7F]', ' ', error_msg).strip()
-            self._send_json(500, {"error": f"获取配置失败: {clean_error_msg}"})
-
-    @auth_required
-    def do_GET(self):
-
-        if self.path == '/' or self.path == '/index.html':
-            self._serve_file(STATIC_FILE, 'text/html')
-        elif self.path == '/list_templates':
-            self._list_templates()
-        elif self.path.startswith('/get_default_image'):
-            self._get_default_image()
-        if self.path == '/get-config':
-            return self.handle_get_config()
-        else:
-            self.send_error(404)
-
-    @auth_required
-    def _serve_file(self, path, ctype):
-        if os.path.exists(path):
-            self.send_response(200)
-            self.send_header('Content-type', ctype)
-            self.end_headers()
-            with open(path, 'rb') as f:
-                self.wfile.write(f.read())
-        else:
-            self.send_error(404)
-
-    @auth_required
-    def _get_default_image(self):
-        """根据上传的 jar 文件名，生成推荐的镜像名"""
-        from urllib.parse import parse_qs, urlparse
-        query = urlparse(self.path).query
-        jarname = parse_qs(query).get('jarname', ['app'])[0]
-
-        # 清理文件名
-        if '.' in jarname:
-            basename = jarname.rsplit('.', 1)[0]  # 去掉扩展名
-        else:
-            basename = jarname
-
-        # 简单清洗：转小写，替换非法字符
-        import re
-        clean_name = re.sub(r'[^a-z0-9\-_.]+', '-', basename.lower())
-        clean_name = clean_name.strip('.-_')
-
-        # 构造默认镜像名（可从配置读取前缀）
-        registry_prefix = CONFIG['docker'].get('registry_prefix', 'myapp')
-        default_image = f"{registry_prefix}/{clean_name}"
-
-        self._send_json(200, {
-            "default_image": default_image,
-            "default_tag": "latest"
-        })
-
-    @auth_required
-    def _list_templates(self):
-        """列出 templates 目录下的所有模板文件（基于文件名）"""
-        template_dir = CONFIG['templates']['directory']
-        templates = {}
-
-        if not os.path.exists(template_dir):
-            os.makedirs(template_dir, exist_ok=True)
-            # 可选：创建一个默认模板
-            default_template = """FROM openjdk:11-jre
-    COPY app.jar app.jar
-    CMD ["java", "-jar", "app.jar"]
-    """
-            with open(os.path.join(template_dir, "dragonwell8.Dockerfile"), "w", encoding="utf-8") as f:
-                f.write(default_template)
-            print(f"✅ 已创建默认模板: {template_dir}/dragonwell8.Dockerfile")
-
-        try:
-            for filename in os.listdir(template_dir):
-                if filename.startswith(".") or not filename.endswith(".Dockerfile"):
-                    continue  # 跳过隐藏文件和非 Dockerfile
-
-                template_id = os.path.splitext(filename)[0]  # 去掉 .Dockerfile
-                filepath = os.path.join(template_dir, filename)
-
-                with open(filepath, "r", encoding="utf-8") as f:
-                    content = f.read()
-
-                templates[template_id] = {
-                    "name": template_id.capitalize(),  # 可在前端自定义
-                    "description": f"使用模板: {filename}",
-                    "content": content.strip()
-                }
-
-            # 返回第一个作为默认（可自定义逻辑）
-            default_template_id = next(iter(templates)) if templates else None
-
-            self._send_json(200, {
-                "templates": templates,
-                "default": default_template_id,
-                "count": len(templates)
-            })
-
-        except Exception as e:
-            print(f"❌ 读取模板失败: {e}")
-            self._send_json(500, {"error": f"读取模板目录失败: {str(e)}"})
-
-    def handle_upload(self):
-        content_length = int(self.headers['Content-Length'])
-        body = self.rfile.read(content_length)
-
-        try:
             boundary = self.headers['Content-Type'].split("boundary=")[1].encode()
             parts = body.split(b'--' + boundary)
-            form_data = {}
-            jar_data = None
 
-            for part in parts[1:-1]:  # 跳过首尾空部分
-                if b'\r\n\r\n' not in part:
-                    continue
-                header_end = part.find(b'\r\n\r\n')
-                headers = part[:header_end].decode('utf-8', errors='ignore')
-                data = part[header_end + 4:].rstrip(b'\r\n')
+            jar_filename = None
+            for part in parts[1:-1]:
+                if b'\r\n\r\n' in part and b'name="jar_file"' in part and b'filename="' in part:
+                    headers = part[:part.find(b'\r\n\r\n')].decode('utf-8', errors='ignore')
+                    match = re.search(r'filename="(.+?)"', headers)
+                    if match:
+                        jar_filename = match.group(1)
+                        break
 
-                if 'filename=' in headers:
-                    try:
-                        filename = headers.split('filename=')[1].split('"')[1]
-                        if filename.endswith('.jar'):
-                            jar_data = data
-                            form_data['original_filename'] = filename
-                    except Exception as e:
-                        print(f"⚠️ 解析文件名失败: {e}")
-                        continue
-                else:
-                    try:
-                        field_name = headers.split('name="')[1].split('"')[0]
-                        form_data[field_name] = data.decode('utf-8', errors='ignore')
-                    except Exception as e:
-                        print(f"⚠️ 解析字段 {headers} 失败: {e}")
-                        continue
+            if not jar_filename:
+                self._send_json(400, {"error": "未找到 JAR 文件"})
+                return
 
-            if not jar_data:
-                self._send_json(400, {"error": "未上传 JAR 文件"})
-                return  # 👈 必须 return
+            # 生成建议镜像名
+            suggested_name = generate_image_name(jar_filename)  # 注意：这里传的是文件名，不是路径！
 
-            # 获取表单字段
-            jar_basename = form_data.get('original_filename', 'app.jar').replace('.jar', '')
-            image_name = form_data.get('imagename') or f"myapp/{jar_basename}"
-            tag = form_data.get('tag') or 'latest'
-            full_tag = f"{image_name}:{tag}"
-            should_push = form_data.get('push') == 'on'
-            selected_template = form_data.get('template') or 'simple'  # 👈 你漏了这行！
-
-            print(f"📦 接收到上传: {form_data.get('original_filename')}")
-            print(f"🏷️  镜像名: {full_tag}")
-            print(f"🧱 模板: {selected_template}")
-
-            # 模拟模式（Docker 不可用）
-            if not DOCKER_AVAILABLE:
-                build_context = os.path.join(DOCKER_BUILD_DIR, image_name.replace('/', '_'))
-                os.makedirs(build_context, exist_ok=True)
-                with open(os.path.join(build_context, 'app.jar'), 'wb') as f:
-                    f.write(jar_data)
-                print(f"🧪 模拟模式：已保存 JAR 到 {build_context}")
-                self._send_json(200, {
-                    "message": "✅ 模拟成功：JAR 已接收（Docker 不可用）",
-                    "image_name": full_tag,
-                    "pushed": False,
-                    "build_log": "Mock build: Success\nStep 1: COPY app.jar\nStep 2: CMD java -jar"
-                })
-                return  # 👈 必须 return
-
-            # === 真实 Docker 构建 ===
-            elif DOCKER_AVAILABLE and client:
-                try:
-                    # --- 1. 准备构建上下文 ---
-                    build_context = os.path.join(DOCKER_BUILD_DIR, image_name.replace('/', '_'))
-                    print(f"📁 创建构建目录: {build_context}")
-                    os.makedirs(build_context, exist_ok=True)
-
-                    # --- 2. 保存 JAR 文件 ---
-                    jar_path = os.path.join(build_context, 'app.jar')
-                    print(f"📄 保存 JAR 文件: {jar_path} ({len(jar_data)} 字节)")
-                    with open(jar_path, 'wb') as f:
-                        f.write(jar_data)
-
-                    # --- 3. 读取 Dockerfile 模板 ---
-                    template_dir = CONFIG['templates']['directory']
-                    template_file = os.path.join(template_dir, f"{selected_template}.Dockerfile")
-                    print(f"📜 读取模板: {template_file}")
-
-                    if not os.path.exists(template_file):
-                        raise FileNotFoundError(f"模板文件不存在: {template_file}")
-
-                    with open(template_file, 'r', encoding='utf-8') as f:
-                        dockerfile_content = f.read()
-
-                    # --- 4. 写入 Dockerfile ---
-                    dockerfile_path = os.path.join(build_context, 'Dockerfile')
-                    with open(dockerfile_path, 'w', encoding='utf-8') as f:
-                        f.write(dockerfile_content)
-                    print(f"✅ Dockerfile 已写入，内容预览:\n{dockerfile_content[:150]}...")
-
-                    # --- 5. 构建镜像 ---
-                    print(f"\n" + "=" * 60)
-                    print(f"🚀 开始构建镜像: {full_tag}")
-                    print("=" * 60)
-
-                    build_log = []
-                    build_stream = client.api.build(
-                        path=build_context,
-                        tag=full_tag,
-                        rm=True,
-                        decode=True,
-                    )
-
-                    build_succeeded = False
-                    last_error = None
-
-                    for chunk in build_stream:
-                        if 'stream' in chunk:
-                            line = chunk['stream']
-                            build_log.append(line)
-                            print("🏗️  ", line.rstrip())
-
-                        if 'error' in chunk:
-                            error_detail = chunk['error']
-                            last_error = error_detail
-                            print(f"\n🔥 [DOCKER ERROR]: {error_detail}\n")
-
-                        if 'errorDetail' in chunk:
-                            error_detail = chunk.get('errorDetail', {}).get('message', 'Unknown error')
-                            last_error = error_detail
-                            print(f"\n💥 [ERROR DETAIL]: {error_detail}\n")
-
-                        if 'aux' in chunk and 'ID' in chunk['aux']:
-                            build_succeeded = True
-
-                    if not build_succeeded:
-                        full_log = "".join(build_log)
-                        print(f"\n" + "❌" * 50)
-                        print("❌ DOCKER 构建失败！完整日志如下：")
-                        print(full_log)
-                        print("❌" * 50)
-                        raise Exception(f"Docker 构建失败！最后错误: {last_error or '未知错误'}")
-
-                    print(f"\n✅ 镜像构建成功: {full_tag}\n")
-
-                    # --- 6. 推送（可选）---
-                    push_log = []
-                    if should_push:
-                        print(f"📤 开始推送镜像: {full_tag}")
-                        push_stream = client.images.push(full_tag, stream=True, decode=True)
-                        for chunk in push_stream:
-                            if 'status' in chunk:
-                                line = chunk['status']
-                                push_log.append(line)
-                                print("📡 ", line)
-                            if 'error' in chunk:
-                                raise Exception(f"推送失败: {chunk['error']}")
-
-                    # --- 7. 返回成功 ---
-                    self._send_json(200, {
-                        "message": "构建成功！",
-                        "image_name": full_tag,
-                        "pushed": should_push,
-                        "pushed_to": full_tag if should_push else "",
-                        "build_log": "".join(build_log),
-                        "push_log": "\n".join(push_log) if should_push else ""
-                    })
-                    return  # 👈 必须 return
-
-                except Exception as e:
-                    error_msg = str(e)
-                    clean_error_msg = re.sub(r'[\x00-\x1F\x7F]', ' ', error_msg).strip()
-                    print(f"❌ 构建或推送失败: {clean_error_msg}")
-                    # 打印完整堆栈
-                    import traceback
-                    traceback.print_exc()
-                    self._send_json(500, {"error": f"构建失败: {clean_error_msg}"})
-                    return  # 👈 必须 return
-
-            # 正常情况不应该走到这里
-            self._send_json(500, {"error": "未知错误：未进入任何构建分支"})
-            return
+            self._send_json(200, {
+                "suggested_imagename": suggested_name
+            })
 
         except Exception as e:
-            error_msg = str(e)
-            clean_error_msg = re.sub(r'[\x00-\x1F\x7F]', ' ', error_msg).strip()
-            print(f"❌ 请求处理失败: {clean_error_msg}")
             import traceback
             traceback.print_exc()
-            self._send_json(500, {"error": f"服务器内部错误: {clean_error_msg}"})
-            return  # 👈 必须 return
+            self._send_json(500, {"error": f"生成镜像名失败: {str(e)}"})
 
-    def do_POST(self):
-        if self.path == '/upload':
-            return self.handle_upload()
-        elif self.path == '/save-config':
-            return self.handle_save_config()
-        else:
-            self.send_error(404)
-
-
-    def _send_json(self, status_code, data):
-        self.send_response(status_code)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
-
-
-if __name__ == "__main__":
-
-    # server.port指定端口
-    PORT = int(os.environ.get('server.port', 8000))
-    print(f"🌐 调试模式启动: http://localhost:{PORT}/")
-    print(f"📁 上传目录: {os.path.abspath(UPLOAD_DIR)}")
-    print(f"🛠️  DOCKER_AVAILABLE = {DOCKER_AVAILABLE}")
-
-    with socketserver.TCPServer(("", PORT), UploadHandler) as httpd:
+    def handle_upload(self):
+        """处理上传和构建"""
         try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\n🛑 已停止")
+            content_type = self.headers.get('Content-Type', '')
+            if 'multipart/form-data' not in content_type:
+                self.send_error(400, "Content-Type must be multipart/form-data")
+                return
+
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+
+            boundary = content_type.split("boundary=")[1].encode()
+            parts = body.split(b'--' + boundary)
+
+            jar_file = None
+            custom_dockerfile = None
+            imagename = "myapp/demo"
+            tag = "latest"
+            template_name = ""
+            push_image = False
+
+            for part in parts[1:-1]:
+                if b'\r\n\r\n' in part:
+                    header_end = part.find(b'\r\n\r\n')
+                    headers = part[:header_end].decode('utf-8', errors='ignore')
+                    data = part[header_end + 4:].rstrip(b'\r\n')
+
+                    if 'name="jar_file"' in headers and b'filename="' in part:
+                        filename = re.search(r'filename="(.+?)"', headers)
+                        if filename:
+                            original_name = filename.group(1)
+                            safe_name = get_safe_filename(original_name)
+                            jar_path = os.path.join(UPLOAD_DIR, safe_name)
+                            with open(jar_path, 'wb') as f:
+                                f.write(data)
+                            jar_file = jar_path
+                            # 自动生成镜像名
+                            imagename = generate_image_name(jar_path)
+
+                    elif 'name="custom_dockerfile"' in headers and b'filename="' in part:
+                        filename = re.search(r'filename="(.+?)"', headers)
+                        if filename:
+                            safe_name = get_safe_filename(filename.group(1))
+                            df_path = os.path.join(BUILD_DIR, "Dockerfile.custom")
+                            with open(df_path, 'wb') as f:
+                                f.write(data)
+                            custom_dockerfile = df_path
+
+                    elif 'name="template"' in headers:
+                        template_name = data.decode('utf-8', errors='ignore').strip()
+
+                    elif 'name="imagename"' in headers:
+                        imagename = data.decode('utf-8', errors='ignore').strip() or imagename
+
+                    elif 'name="tag"' in headers:
+                        tag = data.decode('utf-8', errors='ignore').strip() or "latest"
+
+                    elif 'name="push_image"' in headers:
+                        push_image = True
+
+            if not jar_file:
+                self.send_error(400, "JAR file is required")
+                return
+
+            # 准备构建目录
+            build_id = hashlib.md5(str(jar_file).encode()).hexdigest()[:8]
+            build_path = os.path.join(BUILD_DIR, build_id)
+            os.makedirs(build_path, exist_ok=True)
+
+            # 复制 JAR
+            jar_dest = os.path.join(build_path, os.path.basename(jar_file))
+            shutil.copy2(jar_file, jar_dest)
+
+            # 准备 Dockerfile
+            dockerfile_path = os.path.join(build_path, "Dockerfile")
+            config = self.load_config()
+            expose_port = config['docker']['expose_port']
+
+            if custom_dockerfile:
+                shutil.copy2(custom_dockerfile, dockerfile_path)
+            elif template_name:
+                template_file = os.path.join(TEMPLATES_DIR, template_name + ".Dockerfile")
+                if os.path.exists(template_file):
+                    with open(template_file, 'r', encoding='utf-8') as src, open(dockerfile_path, 'w', encoding='utf-8') as dst:
+                        content = src.read()
+                        content = content.replace("${EXPOSE_PORT}", str(expose_port))
+                        dst.write(content)
+                else:
+                    self.send_error(400, f"Template {template_name} not found")
+                    return
+            else:
+                # 默认模板
+                with open(dockerfile_path, 'w', encoding='utf-8') as f:
+                    f.write(f"""FROM openjdk:11-jre-slim
+WORKDIR /app
+COPY . .
+EXPOSE {expose_port}
+ENTRYPOINT ["java", "-jar", "{os.path.basename(jar_file)}"]
+""")
+
+            # 构建镜像
+            full_imagename = imagename
+            prefix = config['docker']['registry_prefix'].strip()
+            if prefix:
+                full_imagename = f"{prefix}/{full_imagename}".lstrip('/')
+
+            image_tag = f"{full_imagename}:{tag}"
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('X-Accel-Buffering', 'no')  # 禁用 nginx 缓冲
+            self.end_headers()
+
+            # 实时输出构建日志
+            def build_and_stream():
+                try:
+                    cmd = ['docker', 'build', '-t', image_tag, build_path]
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        universal_newlines=True
+                    )
+
+                    for line in proc.stdout:
+                        try:
+                            self.wfile.write(line.encode('utf-8'))
+                            self.wfile.flush()
+                        except:
+                            break
+
+                    proc.wait()
+
+                    if proc.returncode == 0:
+                        self.wfile.write(f"\n✅ 镜像构建成功: {image_tag}\n".encode('utf-8'))
+
+                        # 推送镜像（如果勾选）
+                        if push_image:
+                            self.wfile.write(f"\n📤 正在推送镜像到仓库...\n".encode('utf-8'))
+                            push_cmd = ['docker', 'push', image_tag]
+                            push_proc = subprocess.Popen(
+                                push_cmd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True,
+                                bufsize=1
+                            )
+                            for line in push_proc.stdout:
+                                try:
+                                    self.wfile.write(line.encode('utf-8'))
+                                    self.wfile.flush()
+                                except:
+                                    break
+                            push_proc.wait()
+                            if push_proc.returncode == 0:
+                                self.wfile.write(f"\n✅ 镜像推送成功！\n".encode('utf-8'))
+                            else:
+                                self.wfile.write(f"\n❌ 镜像推送失败！\n".encode('utf-8'))
+                    else:
+                        self.wfile.write(f"\n❌ 镜像构建失败！\n".encode('utf-8'))
+
+                except Exception as e:
+                    self.wfile.write(f"\n❌ 构建异常: {str(e)}\n".encode('utf-8'))
+
+            # 在线程中执行构建，避免阻塞
+            thread = threading.Thread(target=build_and_stream)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=600)  # 最多等待10分钟
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            if not self.wfile.closed:
+                self.wfile.write(f"❌ 上传处理失败: {str(e)}\n".encode('utf-8'))
+
+    def log_message(self, format, *args):
+        """简化日志输出"""
+        return
+
+# ============= 启动服务器 =============
+if __name__ == '__main__':
+    port = 8000
+    server = HTTPServer(('0.0.0.0', port), Jar2DockerHandler)
+    print(f"🚀 Jar2Docker 服务已启动: http://localhost:{port}")
+    print(f"📁 上传目录: {UPLOAD_DIR}")
+    print(f"🏗️  构建目录: {BUILD_DIR}")
+    print(f"📋 模板目录: {TEMPLATES_DIR}")
+    print(f"⚙️  配置文件: {CONFIG_FILE}")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n👋 服务已停止")
+        server.server_close()
