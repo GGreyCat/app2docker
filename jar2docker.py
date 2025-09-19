@@ -1,12 +1,11 @@
 # jar2docker.py
 
 import http.server
-import socketserver
-import os
 import json
+import os
+import socketserver
+import re
 import yaml
-import base64
-
 
 # --- 模拟 Docker 模块 ---
 try:
@@ -191,80 +190,195 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path != '/upload':
-            return self.send_error(404)
+            self.send_error(404)
+            return  # 👈 必须 return
 
-        # 简化表单解析（实际中可用 cgi 或 multipart）
         content_length = int(self.headers['Content-Length'])
         body = self.rfile.read(content_length)
-        # 这里省略复杂解析，仅做演示
 
-        # 模拟接收数据
-        import tempfile
-        import shutil
-        from io import BytesIO
-
-        # 模拟提取 jarfile 和字段
         try:
             boundary = self.headers['Content-Type'].split("boundary=")[1].encode()
             parts = body.split(b'--' + boundary)
             form_data = {}
             jar_data = None
 
-            for part in parts[1:-1]:
-                if b'\r\n\r\n' in part:
-                    header_end = part.find(b'\r\n\r\n')
-                    headers = part[:header_end].decode()
-                    data = part[header_end + 4:].rstrip(b'\r\n')
+            for part in parts[1:-1]:  # 跳过首尾空部分
+                if b'\r\n\r\n' not in part:
+                    continue
+                header_end = part.find(b'\r\n\r\n')
+                headers = part[:header_end].decode('utf-8', errors='ignore')
+                data = part[header_end + 4:].rstrip(b'\r\n')
 
-                    if 'filename=' in headers:
+                if 'filename=' in headers:
+                    try:
                         filename = headers.split('filename=')[1].split('"')[1]
                         if filename.endswith('.jar'):
                             jar_data = data
                             form_data['original_filename'] = filename
-                    else:
+                    except Exception as e:
+                        print(f"⚠️ 解析文件名失败: {e}")
+                        continue
+                else:
+                    try:
                         field_name = headers.split('name="')[1].split('"')[0]
-                        form_data[field_name] = data.decode()
+                        form_data[field_name] = data.decode('utf-8', errors='ignore')
+                    except Exception as e:
+                        print(f"⚠️ 解析字段 {headers} 失败: {e}")
+                        continue
 
             if not jar_data:
-                return self._send_json(400, {"error": "未上传 JAR 文件"})
+                self._send_json(400, {"error": "未上传 JAR 文件"})
+                return  # 👈 必须 return
 
+            # 获取表单字段
             jar_basename = form_data.get('original_filename', 'app.jar').replace('.jar', '')
             image_name = form_data.get('imagename') or f"myapp/{jar_basename}"
             tag = form_data.get('tag') or 'latest'
             full_tag = f"{image_name}:{tag}"
             should_push = form_data.get('push') == 'on'
+            selected_template = form_data.get('template') or 'simple'  # 👈 你漏了这行！
 
-            # 模拟构建过程
-            build_context = os.path.join(DOCKER_BUILD_DIR, image_name.replace('/', '_'))
-            os.makedirs(build_context, exist_ok=True)
+            print(f"📦 接收到上传: {form_data.get('original_filename')}")
+            print(f"🏷️  镜像名: {full_tag}")
+            print(f"🧱 模板: {selected_template}")
 
-            with open(os.path.join(build_context, 'app.jar'), 'wb') as f:
-                f.write(jar_data)
-
-            # ✅ 核心：如果没有 Docker，就模拟成功
+            # 模拟模式（Docker 不可用）
             if not DOCKER_AVAILABLE:
+                build_context = os.path.join(DOCKER_BUILD_DIR, image_name.replace('/', '_'))
+                os.makedirs(build_context, exist_ok=True)
+                with open(os.path.join(build_context, 'app.jar'), 'wb') as f:
+                    f.write(jar_data)
                 print(f"🧪 模拟模式：已保存 JAR 到 {build_context}")
-                return self._send_json(200, {
+                self._send_json(200, {
                     "message": "✅ 模拟成功：JAR 已接收（Docker 不可用）",
                     "image_name": full_tag,
                     "pushed": False,
                     "build_log": "Mock build: Success\nStep 1: COPY app.jar\nStep 2: CMD java -jar"
                 })
+                return  # 👈 必须 return
 
-            # --- 真实 Docker 构建（仅当可用时）---
-            # （保留你原来的 docker 构建逻辑）
-            # ...
+            # === 真实 Docker 构建 ===
+            elif DOCKER_AVAILABLE and client:
+                try:
+                    # --- 1. 准备构建上下文 ---
+                    build_context = os.path.join(DOCKER_BUILD_DIR, image_name.replace('/', '_'))
+                    print(f"📁 创建构建目录: {build_context}")
+                    os.makedirs(build_context, exist_ok=True)
 
-            self._send_json(200, {
-                "message": "构建成功！",
-                "image_name": full_tag,
-                "pushed": should_push,
-                "pushed_to": full_tag if should_push else ""
-            })
+                    # --- 2. 保存 JAR 文件 ---
+                    jar_path = os.path.join(build_context, 'app.jar')
+                    print(f"📄 保存 JAR 文件: {jar_path} ({len(jar_data)} 字节)")
+                    with open(jar_path, 'wb') as f:
+                        f.write(jar_data)
+
+                    # --- 3. 读取 Dockerfile 模板 ---
+                    template_dir = CONFIG['templates']['directory']
+                    template_file = os.path.join(template_dir, f"{selected_template}.Dockerfile")
+                    print(f"📜 读取模板: {template_file}")
+
+                    if not os.path.exists(template_file):
+                        raise FileNotFoundError(f"模板文件不存在: {template_file}")
+
+                    with open(template_file, 'r', encoding='utf-8') as f:
+                        dockerfile_content = f.read()
+
+                    # --- 4. 写入 Dockerfile ---
+                    dockerfile_path = os.path.join(build_context, 'Dockerfile')
+                    with open(dockerfile_path, 'w', encoding='utf-8') as f:
+                        f.write(dockerfile_content)
+                    print(f"✅ Dockerfile 已写入，内容预览:\n{dockerfile_content[:150]}...")
+
+                    # --- 5. 构建镜像 ---
+                    print(f"\n" + "=" * 60)
+                    print(f"🚀 开始构建镜像: {full_tag}")
+                    print("=" * 60)
+
+                    build_log = []
+                    build_stream = client.api.build(
+                        path=build_context,
+                        tag=full_tag,
+                        rm=True,
+                        decode=True,
+                    )
+
+                    build_succeeded = False
+                    last_error = None
+
+                    for chunk in build_stream:
+                        if 'stream' in chunk:
+                            line = chunk['stream']
+                            build_log.append(line)
+                            print("🏗️  ", line.rstrip())
+
+                        if 'error' in chunk:
+                            error_detail = chunk['error']
+                            last_error = error_detail
+                            print(f"\n🔥 [DOCKER ERROR]: {error_detail}\n")
+
+                        if 'errorDetail' in chunk:
+                            error_detail = chunk.get('errorDetail', {}).get('message', 'Unknown error')
+                            last_error = error_detail
+                            print(f"\n💥 [ERROR DETAIL]: {error_detail}\n")
+
+                        if 'aux' in chunk and 'ID' in chunk['aux']:
+                            build_succeeded = True
+
+                    if not build_succeeded:
+                        full_log = "".join(build_log)
+                        print(f"\n" + "❌" * 50)
+                        print("❌ DOCKER 构建失败！完整日志如下：")
+                        print(full_log)
+                        print("❌" * 50)
+                        raise Exception(f"Docker 构建失败！最后错误: {last_error or '未知错误'}")
+
+                    print(f"\n✅ 镜像构建成功: {full_tag}\n")
+
+                    # --- 6. 推送（可选）---
+                    push_log = []
+                    if should_push:
+                        print(f"📤 开始推送镜像: {full_tag}")
+                        push_stream = client.images.push(full_tag, stream=True, decode=True)
+                        for chunk in push_stream:
+                            if 'status' in chunk:
+                                line = chunk['status']
+                                push_log.append(line)
+                                print("📡 ", line)
+                            if 'error' in chunk:
+                                raise Exception(f"推送失败: {chunk['error']}")
+
+                    # --- 7. 返回成功 ---
+                    self._send_json(200, {
+                        "message": "构建成功！",
+                        "image_name": full_tag,
+                        "pushed": should_push,
+                        "pushed_to": full_tag if should_push else "",
+                        "build_log": "".join(build_log),
+                        "push_log": "\n".join(push_log) if should_push else ""
+                    })
+                    return  # 👈 必须 return
+
+                except Exception as e:
+                    error_msg = str(e)
+                    clean_error_msg = re.sub(r'[\x00-\x1F\x7F]', ' ', error_msg).strip()
+                    print(f"❌ 构建或推送失败: {clean_error_msg}")
+                    # 打印完整堆栈
+                    import traceback
+                    traceback.print_exc()
+                    self._send_json(500, {"error": f"构建失败: {clean_error_msg}"})
+                    return  # 👈 必须 return
+
+            # 正常情况不应该走到这里
+            self._send_json(500, {"error": "未知错误：未进入任何构建分支"})
+            return
 
         except Exception as e:
-            self._send_json(500, {"error": str(e)})
-
+            error_msg = str(e)
+            clean_error_msg = re.sub(r'[\x00-\x1F\x7F]', ' ', error_msg).strip()
+            print(f"❌ 请求处理失败: {clean_error_msg}")
+            import traceback
+            traceback.print_exc()
+            self._send_json(500, {"error": f"服务器内部错误: {clean_error_msg}"})
+            return  # 👈 必须 return
     def _send_json(self, status_code, data):
         self.send_response(status_code)
         self.send_header('Content-type', 'application/json')
