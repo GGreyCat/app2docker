@@ -2,326 +2,328 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>JAR to Docker 🐳</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jar2Docker - 一键构建 & 推送 Docker 镜像</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 900px;
-            margin: 30px auto;
-            padding: 20px;
-            background-color: #f9f9f9;
+        body { padding-top: 2rem; background: #f8f9fa; }
+        .card { box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15); margin-bottom: 2rem; }
+        .log-container {
+            background: #2d2d2d; color: #f8f9fa; font-family: 'Courier New', monospace;
+            height: 400px; overflow-y: auto; padding: 1rem; border-radius: 0.5rem;
+            white-space: pre-wrap; word-wrap: break-word;
         }
-        h1 {
-            color: #2c3e50;
-            text-align: center;
+        .log-container .error { color: #ff6b6b; font-weight: bold; }
+        .log-container .success { color: #51cf66; font-weight: bold; }
+        .template-preview {
+            background: #f1f3f5; padding: 1rem; border-radius: 0.5rem;
+            font-family: 'Courier New', monospace; font-size: 0.9em;
+            max-height: 200px; overflow-y: auto;
         }
-        .section {
-            background: white;
-            padding: 20px;
-            margin: 20px 0;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        label {
-            display: block;
-            margin: 10px 0 5px;
-            font-weight: bold;
-        }
-        input, select, button {
-            width: 100%;
-            padding: 8px;
-            margin: 5px 0 15px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        button {
-            background-color: #3498db;
-            color: white;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        button:hover {
-            background-color: #2980b9;
-        }
-        .btn-secondary {
-            background-color: #95a5a6;
-        }
-        .btn-secondary:hover {
-            background-color: #7f8c8d;
-        }
-        .flex {
-            display: flex;
-            gap: 10px;
-        }
-        .flex > * {
-            flex: 1;
-        }
-        #currentConfig {
-            background: #f0f7ff;
-            padding: 15px;
-            border-left: 4px solid #3498db;
-            margin-top: 20px;
-        }
-        #configModal {
-            display: none;
-            position: fixed;
-            top: 15%;
-            left: 25%;
-            right: 25%;
-            background: white;
-            padding: 25px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            z-index: 1000;
-        }
-        .modal-title {
-            margin-top: 0;
-            color: #2c3e50;
-        }
+        .btn-build { position: relative; }
+        .spinner { display: none; margin-left: 0.5rem; }
+        #imagename, #tag { font-family: 'Courier New', monospace; }
     </style>
 </head>
 <body>
-    <h1>🚀 JAR to Docker</h1>
+    <div class="container">
+        <div class="text-center mb-4">
+            <h1><i class="fas fa-box-open text-primary"></i> Jar2Docker</h1>
+            <p class="lead text-muted">上传 JAR 文件，一键构建并推送 Docker 镜像</p>
+        </div>
 
-    <!-- 当前配置显示区 -->
-    <div class="section" hidden>
-        <h3>📊 当前全局配置</h3>
-        <div id="currentConfigDisplay">
-            正在加载配置...
+        <!-- 配置卡片 -->
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5><i class="fas fa-cog"></i> Docker 配置</h5>
+            </div>
+            <div class="card-body">
+                <form id="configForm" accept-charset="UTF-8">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Registry 地址</label>
+                            <input type="text" name="registry" class="form-control" placeholder="docker.io">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">镜像前缀（可选）</label>
+                            <input type="text" name="registry_prefix" class="form-control" placeholder="your-namespace">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">暴露端口</label>
+                            <input type="number" name="expose_port" class="form-control" value="8080">
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check">
+                                <input type="checkbox" name="default_push" class="form-check-input" id="defaultPush">
+                                <label class="form-check-label" for="defaultPush">默认推送镜像</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <button type="submit" class="btn btn-outline-primary w-100">
+                                <i class="fas fa-save"></i> 保存配置
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 上传构建卡片 -->
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5><i class="fas fa-cloud-upload-alt"></i> 上传 JAR 并构建</h5>
+            </div>
+            <div class="card-body">
+                <form id="uploadForm" enctype="multipart/form-data" accept-charset="UTF-8">
+                    <div class="mb-3">
+                        <label class="form-label">选择 JAR 文件 <span class="text-danger">*</span></label>
+                        <input type="file" name="jar_file" class="form-control" accept=".jar" required>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">使用模板</label>
+                            <select name="template" class="form-select">
+                            </select>
+                            <div class="form-text">选择预设 Dockerfile 模板</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">或上传自定义 Dockerfile</label>
+                            <input type="file" name="custom_dockerfile" class="form-control" accept=".dockerfile,.txt">
+                        </div>
+                    </div>
+
+                    <div class="template-preview mb-3 d-none">
+                        <label class="form-label">模板预览</label>
+                        <div class="template-content"></div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">镜像名称</label>
+                            <input type="text" name="imagename" id="imagename" class="form-control" placeholder="myapp/demo" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">标签</label>
+                            <input type="text" name="tag" id="tag" class="form-control" value="latest">
+                        </div>
+                        <div class="col-md-3 d-flex align-items-end">
+                            <div class="form-check">
+                                <input type="checkbox" name="push_image" class="form-check-input" id="pushImage">
+                                <label class="form-check-label" for="pushImage">构建后推送</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-lg btn-build w-100">
+                        <i class="fas fa-hammer"></i> 开始构建
+                        <span class="spinner-border spinner-border-sm spinner ms-2" role="status"></span>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 构建日志卡片 -->
+        <div class="card">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-terminal"></i> 构建日志</h5>
+                <button class="btn btn-sm btn-outline-light" id="clearLog"><i class="fas fa-trash"></i></button>
+            </div>
+            <div class="card-body p-0">
+                <div class="log-container" id="buildLog"></div>
+            </div>
         </div>
     </div>
 
-    <!-- 主上传表单 -->
-    <div class="section">
-        <h3>📦 上传 JAR & 构建 Docker 镜像</h3>
-        <form id="uploadForm" enctype="multipart/form-data">
-            <label>JAR 文件:</label>
-            <input type="file" name="jar_file" accept=".jar" required />
-
-            <div class="flex">
-                <div>
-                    <label>选择 Dockerfile 模板:</label>
-                    <select name="template" id="templateSelect">
-                        <option value="">加载中...</option>
-                    </select>
-                </div>
-                <div>
-                    <label>或上传自定义 Dockerfile:</label>
-                    <input type="file" name="custom_dockerfile" accept=".dockerfile,.txt" />
-                </div>
-            </div>
-
-            <label>镜像名称:</label>
-            <input type="text" name="imagename" id="imagename" placeholder="如: mygroup/myapp" value="myapp/demo">
-
-            <div class="flex">
-                <div>
-                    <label>标签:</label>
-                    <input type="text" name="tag" value="latest" />
-                </div>
-                <div>
-                    <label>推送到远程仓库</label>
-                    <input type="checkbox" name="push_image" style="width:auto; margin-top:25px;" />
-                </div>
-            </div>
-
-            <button type="submit">🚀 开始构建</button>
-        </form>
-    </div>
-
-    <!-- 设置按钮 -->
-    <div style="text-align: center; margin: 20px 0;">
-        <button id="btnConfig" class="btn-secondary">⚙️ 设置全局配置</button>
-    </div>
-
-    <!-- 全局配置弹窗 -->
-    <div id="configModal">
-        <h3 class="modal-title">⚙️ 全局 Docker 配置</h3>
-        <form id="configForm" enctype="multipart/form-data">
-            <label>镜像仓库地址 (registry):</label>
-            <input type="text" name="registry" placeholder="如: docker.io 或 harbor.example.com" />
-
-            <label>镜像前缀 (registry_prefix):</label>
-            <input type="text" name="registry_prefix" placeholder="如: mycompany/myteam" />
-
-            <label>
-                <input type="checkbox" name="default_push" />
-                默认推送镜像
-            </label>
-
-            <label>应用暴露端口 (expose_port):</label>
-            <input type="number" name="expose_port" min="1" max="65535" value="8080" />
-
-            <div style="margin-top: 20px; display: flex; gap: 10px;">
-                <button type="submit" style="flex:1;">💾 保存配置</button>
-                <button type="button" onclick="document.getElementById('configModal').style.display='none'" style="flex:1;" class="btn-secondary">取消</button>
-            </div>
-        </form>
-    </div>
-
-    <!-- 构建日志输出区 -->
-    <div class="section" id="logSection" style="display:none;">
-        <h3>📋 构建日志</h3>
-        <pre id="buildLog" style="background:#2c3e50; color:#ecf0f1; padding:15px; border-radius:5px; overflow:auto; max-height:400px;"></pre>
-    </div>
-
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // ========== 页面初始化 ==========
-        document.addEventListener('DOMContentLoaded', function() {
-            loadTemplates();
-            loadCurrentConfig();
-        });
+        $(function() {
+            const $log = $('#buildLog');
+            const $form = $('#uploadForm');
+            const $configForm = $('#configForm');
+            const $templateSelect = $('select[name="template"]');
+            const $templatePreview = $('.template-preview');
+            const $templateContent = $('.template-content');
+            const $spinner = $('.spinner');
+            const $pushImage = $('#pushImage');
+            const $defaultPush = $('#defaultPush');
 
-        // ========== 加载模板列表 ==========
-        async function loadTemplates() {
-            try {
-                const res = await fetch('/list-templates');
-                const data = await res.json();
-                const select = document.getElementById('templateSelect');
-                select.innerHTML = '';
-                if (data.templates && data.templates.length > 0) {
-                    data.templates.forEach(t => {
-                        const opt = document.createElement('option');
-                        opt.value = t;
-                        opt.textContent = t;
-                        select.appendChild(opt);
+            // 加载配置
+            function loadConfig() {
+                $.getJSON('/get-config')
+                    .done(data => {
+                        const docker = data.docker || {};
+                        $('input[name="registry"]').val(docker.registry || 'docker.io');
+                        $('input[name="registry_prefix"]').val(docker.registry_prefix || '');
+                        $('input[name="expose_port"]').val(docker.expose_port || 8080);
+                        $defaultPush.prop('checked', !!docker.default_push);
+                        $pushImage.prop('checked', !!docker.default_push);
+                    })
+                    .fail(err => {
+                        appendLog('❌ 加载配置失败，请检查服务是否正常', 'error');
                     });
-                } else {
-                    select.innerHTML = '<option value="">无模板</option>';
+            }
+
+            // 加载模板列表
+            function loadTemplates() {
+                $.getJSON('/list-templates')
+                    .done(data => {
+                        (data.templates || []).forEach(t => {
+                            $templateSelect.append(`<option value="${t}">${t}</option>`);
+                        });
+                    })
+                    .fail(() => {
+                        appendLog('⚠️ 加载模板列表失败', 'error');
+                    });
+            }
+
+            // 预览模板
+            $templateSelect.on('change', function() {
+                const template = $(this).val();
+                if (!template) {
+                    $templatePreview.addClass('d-none');
+                    return;
                 }
-            } catch (err) {
-                console.error("加载模板失败", err);
-                document.getElementById('templateSelect').innerHTML = '<option value="">加载失败</option>';
-            }
-        }
+                $.post('/suggest-image-name', new FormData($form[0]), null, false)
+                    .done(() => {}) // trick: 触发文件上传以获取文件名
+                    .always(() => {
+                        $.get(`/templates/${template}.Dockerfile`)
+                            .done(content => {
+                                $templateContent.text(content);
+                                $templatePreview.removeClass('d-none');
+                            })
+                            .fail(() => {
+                                $templateContent.text('❌ 无法加载模板内容');
+                                $templatePreview.removeClass('d-none');
+                            });
+                    });
+            });
 
-        // ========== 加载并显示当前配置 ==========
-        async function loadCurrentConfig() {
-            try {
-                const res = await fetch('/get-config');
-                const result = await res.json();
-                if (!res.ok) throw new Error(result.error);
+            // 文件选择后建议镜像名
+            $('input[name="jar_file"]').on('change', function() {
+                if (!this.files.length) return;
+                const formData = new FormData();
+                formData.append('jar_file', this.files[0]);
 
-                const d = result.docker || {};
-                const display = document.getElementById('currentConfigDisplay');
-                display.innerHTML = `
-                    <p><strong>仓库地址:</strong> ${d.registry || '未设置'}</p>
-                    <p><strong>镜像前缀:</strong> ${d.registry_prefix || '<em>无</em>'}</p>
-                    <p><strong>默认推送:</strong> ${d.default_push ? '✅ 是' : '❌ 否'}</p>
-                    <p><strong>暴露端口:</strong> ${d.expose_port || 8080}</p>
-                `;
-            } catch (err) {
-                document.getElementById('currentConfigDisplay').innerText = '❌ 加载配置失败: ' + err.message;
-            }
-        }
-
-        // ========== 打开设置弹窗时加载最新配置 ==========
-        document.getElementById('btnConfig').onclick = async function() {
-            try {
-                const res = await fetch('/get-config');
-                const result = await res.json();
-                if (!res.ok) throw new Error(result.error);
-
-                const d = result.docker || {};
-                const form = document.getElementById('configForm');
-                form.registry.value = d.registry || 'docker.io';
-                form.registry_prefix.value = d.registry_prefix || '';
-                form.default_push.checked = !!d.default_push;
-                form.expose_port.value = d.expose_port || 8080;
-
-                document.getElementById('configModal').style.display = 'block';
-            } catch (err) {
-                alert('❌ 加载配置失败: ' + err.message);
-            }
-        };
-
-        // ========== 保存全局配置 ==========
-        document.getElementById('configForm').onsubmit = async function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-
-            try {
-                const res = await fetch('/save-config', {
-                    method: 'POST',
-                    body: formData
+                $.ajax({
+                    url: '/suggest-image-name',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(res) {
+                        if (res.suggested_imagename) {
+                            $('input[name="imagename"]').val(res.suggested_imagename);
+                        }
+                    },
+                    error: function() {
+                        appendLog('⚠️ 自动生成镜像名失败', 'error');
+                    }
                 });
-                const result = await res.json();
+            });
 
-                if (res.ok) {
-                    alert('✅ ' + result.message);
-                    document.getElementById('configModal').style.display = 'none';
-                    // 刷新页面配置显示
-                    loadCurrentConfig();
-                } else {
-                    alert('❌ ' + result.error);
-                }
-            } catch (err) {
-                alert('❌ 请求失败: ' + err.message);
-            }
-        };
-
-        // ========== 上传 JAR 并构建 ==========
-        document.getElementById('uploadForm').onsubmit = async function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-
-            // 显示日志区域
-            document.getElementById('logSection').style.display = 'block';
-            const logEl = document.getElementById('buildLog');
-            logEl.innerText = '⏳ 正在上传并构建镜像，请稍候...\n';
-
-            try {
-                const res = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
+            // 保存配置
+            $configForm.on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                $.ajax({
+                    url: '/save-config',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(res) {
+                        if (res.message) {
+                            appendLog(`✅ ${res.message}`, 'success');
+                            $pushImage.prop('checked', res.docker_config?.default_push || false);
+                        }
+                    },
+                    error: function(xhr) {
+                        try {
+                            const res = JSON.parse(xhr.responseText);
+                            appendLog(`❌ ${res.error}`, 'error');
+                        } catch {
+                            appendLog('❌ 保存配置失败', 'error');
+                        }
+                    }
                 });
+            });
 
-                if (!res.body) throw new Error("ReadableStream not supported");
+            // 构建处理
+            $form.on('submit', function(e) {
+                e.preventDefault();
 
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder();
+                $log.empty();
+                $spinner.show();
+                $('button[type="submit"]').prop('disabled', true);
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    const chunk = decoder.decode(value, { stream: true });
-                    logEl.textContent += chunk;
-                    logEl.scrollTop = logEl.scrollHeight; // 自动滚动到底部
-                }
+                const formData = new FormData(this);
 
-                if (res.ok) {
-                    logEl.textContent += '\n✅ 构建完成！';
-                } else {
-                    logEl.textContent += '\n❌ 构建失败，请查看错误信息。';
-                }
-
-            } catch (err) {
-                logEl.textContent += '\n❌ 发生错误: ' + err.message;
-            }
-        };
-        document.getElementById('jar_file').addEventListener('change', async function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const formData = new FormData();
-            formData.append('jar_file', file);
-
-            try {
-                const response = await fetch('/suggest-image-name', {
-                    method: 'POST',
-                    body: formData
+                $.ajax({
+                    url: '/upload',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    xhr: function() {
+                        const xhr = new XMLHttpRequest();
+                        xhr.onreadystatechange = function() {
+                            if (xhr.readyState === 3) {
+                                const lines = xhr.responseText.split('\n');
+                                const newLines = lines.slice(window.lastLogLine || 0);
+                                window.lastLogLine = lines.length;
+                                newLines.forEach(line => {
+                                    if (line.trim()) appendLog(line);
+                                });
+                                $log.scrollTop($log[0].scrollHeight);
+                            }
+                        };
+                        return xhr;
+                    },
+                    success: function(fullText) {
+                        const lines = fullText.split('\n');
+                        lines.forEach(line => {
+                            if (line.trim()) appendLog(line);
+                        });
+                    },
+                    complete: function() {
+                        $spinner.hide();
+                        $('button[type="submit"]').prop('disabled', false);
+                        $log.scrollTop($log[0].scrollHeight);
+                    },
+                    error: function(xhr) {
+                        $spinner.hide();
+                        $('button[type="submit"]').prop('disabled', false);
+                        try {
+                            const res = JSON.parse(xhr.responseText);
+                            appendLog(`❌ ${res.error}`, 'error');
+                        } catch {
+                            appendLog('❌ 上传或构建失败', 'error');
+                        }
+                    }
                 });
-                const result = await response.json();
+            });
 
-                if (result.suggested_imagename) {
-                    document.getElementById('imagename').value = result.suggested_imagename;
-                }
-            } catch (err) {
-                console.error("获取建议镜像名失败:", err);
+            // 清空日志
+            $('#clearLog').on('click', function() {
+                $log.empty();
+            });
+
+            // 日志追加工具函数
+            function appendLog(text, type = '') {
+                const $line = $('<div>').text(text);
+                if (type) $line.addClass(type);
+                if (text.includes('❌')) $line.addClass('error');
+                if (text.includes('✅')) $line.addClass('success');
+                $log.append($line);
+                $log.scrollTop($log[0].scrollHeight);
             }
+
+            // 初始化
+            loadConfig();
+            loadTemplates();
         });
     </script>
 </body>
