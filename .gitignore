@@ -1,0 +1,7 @@
+.idea
+venv/
+.venv/
+dist/
+build/
+.DS_Store
+*.jar
