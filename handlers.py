@@ -49,6 +49,9 @@ except (ImportError, ModuleNotFoundError) as e:
     client = MockDockerClient()
     DOCKER_AVAILABLE = False  # 明确标记为不可用
 
+def natural_sort_key(s):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
 class Jar2DockerHandler(BaseHTTPRequestHandler):
     server_version = "Jar2Docker/1.0"
 
@@ -137,6 +140,7 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
                     for f in os.listdir(TEMPLATES_DIR)
                     if f.endswith('.Dockerfile')
                 ]
+                templates = sorted(templates, key=natural_sort_key)
             self._send_json(200, {"templates": templates})
         except Exception as e:
             import traceback

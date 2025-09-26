@@ -41,6 +41,7 @@ jar2docker/
 - Docker（用于构建镜像）
 - `pip`
 
+
 ### 2. 安装依赖
 
 ```bash
@@ -62,4 +63,5 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   --name jar2docker \
   registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker
+#默认账号密码:admin/admin
 ```
