@@ -50,6 +50,14 @@
                             <input type="text" name="registry_prefix" class="form-control" placeholder="your-namespace">
                         </div>
                         <div class="col-md-4">
+                            <label class="form-label">账号</label>
+                            <input type="text" name="username" class="form-control" value="">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">密码</label>
+                            <input type="password" name="password" class="form-control" value="">
+                        </div>
+                        <div class="col-md-4">
                             <label class="form-label">暴露端口</label>
                             <input type="number" name="expose_port" class="form-control" value="8080">
                         </div>
@@ -158,6 +166,8 @@
                         $('input[name="registry"]').val(docker.registry || 'docker.io');
                         $('input[name="registry_prefix"]').val(docker.registry_prefix || '');
                         $('input[name="expose_port"]').val(docker.expose_port || 8080);
+                        $('input[name="username"]').val(docker.username || '');
+                        $('input[name="password"]').val(docker.password || '');
                         $defaultPush.prop('checked', !!docker.default_push);
                         $pushImage.prop('checked', !!docker.default_push);
                     })

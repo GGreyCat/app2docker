@@ -10,7 +10,7 @@ from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler
 from urllib import parse
 
-from config import load_config, save_config
+from config import load_config, save_config, CONFIG_FILE
 from utils import generate_image_name
 
 UPLOAD_DIR = "uploads"
@@ -245,6 +245,8 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
                 "registry": form_data.get("registry", "docker.io").strip(),
                 "registry_prefix": form_data.get("registry_prefix", "").strip().rstrip('/'),
                 "default_push": (form_data.get("default_push") == "on"),
+                "username" : form_data.get("username", "").strip(),
+                "password" : form_data.get("password", "").strip(),
                 "expose_port": int(form_data.get("expose_port", "8080")) if form_data.get("expose_port", "").isdigit() else 8080
             }
 
@@ -385,6 +387,8 @@ class BuildManager:
 
                 # === 模拟模式 ===
                 if not DOCKER_AVAILABLE:
+
+                    config = load_config()
                     os.makedirs(build_context, exist_ok=True)
                     with open(os.path.join(build_context, 'app.jar'), 'wb') as f:
                         f.write(jar_data)
@@ -402,6 +406,8 @@ class BuildManager:
 
                     if should_push:
                         log("🚀 开始模拟推送...\n")
+                        username = config.get('docker', {}).get('username', None)
+                        log(f"🚀 账号: {username}\n")
                         for i in range(1, 4):
                             log(f"📡 Pushing layer {i}/3...\n")
                         log("✅ 模拟推送完成\n")
@@ -459,8 +465,14 @@ class BuildManager:
 
                 if should_push:
                     log(f"\n📤 开始推送镜像: {full_tag}\n")
+                    username = config.get('docker', {}).get('username', None)
+                    password = config.get('docker', {}).get('password', None)
+                    auth_config = {
+                        "username": username,
+                        "password": password
+                    }
                     try:
-                        push_stream = client.images.push(full_tag, stream=True, decode=True)
+                        push_stream = client.images.push(full_tag, auth_config = auth_config, stream=True, decode=True)
                         for chunk in push_stream:
                             status = chunk.get('status') or chunk.get('progress') or chunk.get('id')
                             if status:
