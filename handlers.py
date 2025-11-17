@@ -274,9 +274,27 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
 
         full_tag = f"{image_name}:{tag}"
         compress_enabled = compress_param in ('gzip', 'gz', 'tgz', '1', 'true', 'yes')
+        config = load_config()
+        docker_cfg = config.get('docker', {})
+        username = docker_cfg.get('username')
+        password = docker_cfg.get('password')
+        auth_config = None
+        if username and password:
+            auth_config = {
+                "username": username,
+                "password": password
+            }
 
         try:
-            pull_stream = client.api.pull(repository=image_name, tag=tag, stream=True, decode=True)
+            pull_kwargs = {
+                "repository": image_name,
+                "tag": tag,
+                "stream": True,
+                "decode": True
+            }
+            if auth_config:
+                pull_kwargs["auth_config"] = auth_config
+            pull_stream = client.api.pull(**pull_kwargs)
             for chunk in pull_stream:
                 if 'error' in chunk:
                     raise RuntimeError(chunk['error'])
