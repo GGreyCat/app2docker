@@ -4,7 +4,7 @@
 set -e
 
 BASE_DIR="static"
-mkdir -p "$BASE_DIR"/{bootstrap,css,js,codemirror/{css,js,mode/yaml},fontawesome}
+mkdir -p "$BASE_DIR"/{bootstrap,css,js,codemirror/{css,js,mode/yaml},fontawesome/webfonts}
 
 echo "开始下载静态资源..."
 
@@ -20,8 +20,21 @@ curl -L -o "$BASE_DIR/js/jquery-3.7.1.min.js" https://code.jquery.com/jquery-3.7
 # Font Awesome
 echo "下载 Font Awesome..."
 curl -L -o "$BASE_DIR/fontawesome/all.min.css" https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css
-# Font Awesome 需要字体文件，这里只下载 CSS，字体文件需要单独下载或使用 CDN
-# 如果需要完全离线，需要下载 webfonts 目录
+echo "下载 Font Awesome 字体文件..."
+curl -L -o "$BASE_DIR/fontawesome/webfonts/fa-solid-900.woff2" https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.woff2
+curl -L -o "$BASE_DIR/fontawesome/webfonts/fa-regular-400.woff2" https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-regular-400.woff2
+curl -L -o "$BASE_DIR/fontawesome/webfonts/fa-brands-400.woff2" https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-brands-400.woff2
+curl -L -o "$BASE_DIR/fontawesome/webfonts/fa-v4compatibility.woff2" https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-v4compatibility.woff2
+
+# 修改 Font Awesome CSS 中的字体路径
+echo "修改 Font Awesome CSS 字体路径..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    sed -i '' 's|https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/|../webfonts/|g' "$BASE_DIR/fontawesome/all.min.css"
+else
+    # Linux
+    sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/|../webfonts/|g' "$BASE_DIR/fontawesome/all.min.css"
+fi
 
 # CodeMirror
 echo "下载 CodeMirror..."
