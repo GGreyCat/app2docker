@@ -1,23 +1,45 @@
 {
-    "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe",
-    "python.terminal.activateEnvironment": true,
-    "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": false,
-    "python.linting.enabled": true,
-    "python.linting.pylintEnabled": false,
-    "python.linting.flake8Enabled": false,
-    "python.formatting.provider": "none",
-    "editor.formatOnSave": false,
-    "files.exclude": {
-        "**/__pycache__": true,
-        "**/*.pyc": true
-    },
-    "files.watcherExclude": {
-        "**/data/uploads/**": true,
-        "**/data/docker_build/**": true,
-        "**/data/exports/**": true,
-        "**/.venv/**": true,
-        "**/venv/**": true,
-        "**/static/**": true
-    }
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit"
+  },
+  
+  // Python 设置
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.analysis.typeCheckingMode": "basic",
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": false,
+  "python.linting.flake8Enabled": true,
+  
+  // Vue 设置
+  "vetur.experimental.templateInterpolationService": true,
+  
+  // 文件关联
+  "files.associations": {
+    "*.Dockerfile": "dockerfile",
+    "*.vue": "vue"
+  },
+  
+  // 排除文件
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/node_modules": true,
+    "**/.venv": true
+  },
+  
+  // 搜索排除
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.venv": true,
+    "**/dist": true,
+    "**/__pycache__": true
+  },
+  
+  // ESLint
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "vue"
+  ]
 }

@@ -1,123 +1,161 @@
-# jar2docker - JAR 包一键转 Docker 镜像工具
+# App2Docker
 
-一个轻量级 Web 工具，将上传的 Java JAR 文件通过 Web 界面一键构建成 Docker 镜像。适合开发、测试环境快速打包部署，支持模板化构建与基本认证。
+🚀 一键将 Java/Node.js 应用打包成 Docker 镜像
 
-![](img.png) <!-- 可选：添加截图 -->
+## ✨ 新架构特性
 
-## 🚀 功能特性
+- **Vue 3 + Vite** 现代化前端框架
+- **组件化开发** 代码清晰易维护
+- **响应式设计** 适配各种屏幕
+- **专业编辑器** 内置代码编辑器
+- **项目类型分类** 模板按类型组织
 
-- ✅ **Web 图形化操作**：无需命令行，拖拽上传 JAR 文件
-- ✅ **自动镜像命名**：根据 JAR 文件名智能生成推荐镜像名（如 `myapp/demo-service`）
-- ✅ **刷新按钮**：一键重新生成推荐名称
-- ✅ **模板化构建**：`templates/` 目录下 `.Dockerfile` 文件自动加载为模板
-- ✅ **模板管理**：Web 端可视化增删改查 Dockerfile 模板
-- ✅ **Compose 镜像导出**：上传 docker-compose.yml 批量下载所有镜像
-- ✅ **HTTP Basic 认证**：全局保护，防止未授权访问
-- ✅ **容器化部署**：自身可运行在 Docker 容器中，调用宿主机 Docker API
-- ✅ **零依赖配置**：首次运行自动生成 `config.yml` 和默认模板
-- ✅ **镜像导出**：一键拉取最新镜像并导出为 `.tar` 或 `.tar.gz`
+## 📁 项目结构
 
-## 📦 项目结构
 ```
 jar2docker/
-├── jar2docker.py            # 主程序（Python HTTP 服务）
-├── templates/               # 内置模板目录（打包在Docker镜像中，只读）
-│   ├── dragonwell8.Dockerfile
-│   ├── dragonwell17.Dockerfile
-│   └── ...
-├── data/                    # 数据目录（所有会更新的数据，Docker卷映射）
-│   ├── config.yml           # 配置文件（首次运行自动生成）
-│   ├── templates/           # 用户自定义模板目录（可读写）
-│   │   └── ...（用户上传或编辑的模板）
-│   ├── uploads/             # 临时存储上传的 JAR 文件
-│   ├── docker_build/        # 构建上下文目录
-│   └── exports/             # 镜像导出目录
-├── static/                  # 静态资源（Bootstrap、FontAwesome、jQuery等）
-├── index.html               # 前端页面
-├── requirements.txt         # Python 依赖
-├── Dockerfile               # 容器化部署文件
-└── README.md                # 本文件
+├── backend/                # Python 后端
+│   ├── app.py             # 主应用
+│   ├── config.py          # 配置管理
+│   ├── handlers.py        # 请求处理器
+│   └── utils.py           # 工具函数
+├── frontend/              # Vue 3 前端
+│   ├── src/
+│   │   ├── components/    # Vue 组件
+│   │   │   ├── BuildPanel.vue         # 构建面板
+│   │   │   ├── ExportPanel.vue        # 导出面板
+│   │   │   ├── ComposePanel.vue       # Compose 面板
+│   │   │   ├── TemplatePanel.vue      # 模板管理
+│   │   │   ├── BuildLogModal.vue      # 构建日志
+│   │   │   └── ConfigModal.vue        # 配置对话框
+│   │   ├── App.vue        # 主应用
+│   │   └── main.js        # 入口文件
+│   ├── package.json
+│   └── vite.config.js     # Vite 配置
+├── data/                  # 数据目录
+│   ├── templates/         # 用户模板
+│   │   ├── jar/          # Java 模板
+│   │   └── nodejs/       # Node.js 模板
+│   ├── uploads/          # 上传文件
+│   ├── docker_build/     # 构建目录
+│   └── exports/          # 导出目录
+├── templates/            # 内置模板
+│   ├── jar/             # Java 模板
+│   └── nodejs/          # Node.js 模板
+├── requirements.txt      # Python 依赖
+├── dev.sh               # 开发启动脚本
+└── README.md
 ```
 
+## 🚀 快速开始
 
-## ⚙️ 快速开始（本地运行）
+### 开发模式
 
-### 1. 准备环境
-
-确保已安装：
-- Python 3.8+（推荐使用 [python.org](https://www.python.org/) 官方安装包，避免 `distutils` 缺失）
-- Docker（用于构建镜像）
-- `pip`
-
-
-### 2. 安装依赖
+1. **安装依赖**
 
 ```bash
+# Python 依赖
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
-python jar2docker.py
-
+# 前端依赖
+cd frontend
+npm install
+cd ..
 ```
-### 2. 构建容器
+
+2. **启动服务**
+
+需要两个终端：
+
 ```bash
-docker build -t jar2docker .
+# 终端 1 - 后端
+python backend/app.py
 
+# 终端 2 - 前端
+cd frontend
+npm run dev
 ```
 
-### 3. 直接使用
+3. **访问应用**
+
+- 前端开发服务器: http://localhost:3000
+- 后端 API 服务器: http://localhost:8000
+
+### 生产模式
+
+1. **构建前端**
+
 ```bash
-docker run -d \
-  -p 8000:8000 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd)/data:/app/data \
-  --name jar2docker \
-  registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker
-
-# 默认账号密码: admin/admin
-# 
-# 说明：
-# - /var/run/docker.sock 映射用于调用宿主机Docker
-# - $(pwd)/data 映射用于持久化配置、模板、上传文件、导出文件等数据
-# - 首次运行会自动创建 data 目录及其子目录
+cd frontend
+npm run build
+cd ..
 ```
 
-## 🧩 模板管理
+2. **启动后端**
 
-### 双模板目录设计
+```bash
+python backend/app.py
+```
 
-系统支持**内置模板**和**用户自定义模板**两种：
+前端构建产物会输出到 `dist/` 目录，后端会自动服务这些静态文件。
 
-1. **内置模板** (`templates/`)
-   - 打包在 Docker 镜像中，提供开箱即用的模板
-   - 只读，不可删除或修改
-   - 包含常用的 Dragonwell 8/17 等模板
-   - Docker 容器重启后依然存在
+## 🎯 功能特性
 
-2. **用户自定义模板** (`data/templates/`)
-   - 通过 Docker 卷映射持久化
-   - 可读写，支持新增、编辑、删除
-   - 用户上传或编辑的模板保存在此
-   - 与宿主机同步，数据持久化
+### 1. 构建镜像
+- 上传 JAR 或 Node.js 应用
+- 选择预设 Dockerfile 模板
+- 一键构建并可选推送
 
-### 模板优先级
+### 2. 导出镜像
+- 导出已构建的 Docker 镜像
+- 支持 tar 和 tar.gz 压缩格式
 
-- 读取时：优先使用用户自定义模板，如果不存在则使用内置模板
-- 编辑内置模板：会在 `data/templates/` 中创建同名文件进行覆盖
-- 删除内置模板：不允许删除，但可以创建同名用户模板覆盖
+### 3. Docker Compose
+- 解析 docker-compose.yml 文件
+- 批量导出镜像
+- 支持文件上传和文本输入
 
-### 使用方法
+### 4. 模板管理
+- 项目类型分类（jar/nodejs）
+- 内置模板 + 用户自定义
+- 内联编辑器
+- 内置模板覆盖机制
 
-- 在 Web 页面中，`模板管理` 卡片会列出所有模板（内置 + 用户自定义）
-- 点击 **新增模板** 创建新的用户自定义模板
-- **预览**：查看任何模板的内容
-- **编辑**：
-  - 编辑内置模板 → 在用户目录创建同名模板覆盖
-  - 编辑用户模板 → 直接修改
-- **删除**：只能删除用户自定义模板，内置模板不可删除
-- 构建表单中的模板下拉框会同步模板列表，选择后即可直接复用
+## 🔧 配置说明
 
-## 🧾 Compose 镜像导出
+配置文件位于 `data/config.yml`
 
-- 点击“上传 JAR 并构建”卡片右上方的 **Docker Compose 镜像导出** 区块，上传 `docker-compose.yml` 或任意 YAML 文本即可自动解析所有 `services.*.image`。
-- 解析结果会列表展示并支持全选/单选，单个镜像可以立即下载，勾选多条后可一键批量下载（前端会依次触发下载，免去逐个操作）。
-- 下载时可选择 `.tar` 或 `.tar.gz` 两种格式，适配不同的传输与存储需求。
+```yaml
+docker:
+  registry: docker.io
+  registry_prefix: your-namespace
+  username: your-username
+  password: your-password
+  expose_port: 8080
+  default_push: false
+```
+
+## 📝 模板系统
+
+模板按项目类型组织在子目录中：
+
+- `templates/jar/` - Java 应用模板（内置，只读）
+- `templates/nodejs/` - Node.js 应用模板（内置，只读）
+- `data/templates/jar/` - Java 应用模板（用户自定义）
+- `data/templates/nodejs/` - Node.js 应用模板（用户自定义）
+
+用户自定义模板优先级高于内置模板。
+
+## 🐳 Docker 部署
+
+```bash
+docker build -t app2docker .
+docker run -d -p 8000:8000 -v /var/run/docker.sock:/var/run/docker.sock app2docker
+```
+
+## 📄 License
+
+MIT
+
