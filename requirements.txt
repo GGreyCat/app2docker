@@ -1,2 +1,12 @@
-docker
-PyYAML
+certifi==2025.11.12
+charset-normalizer==3.4.4
+docker==7.1.0
+fastapi==0.115.6
+idna==3.11
+PyJWT==2.10.1
+python-multipart==0.0.20
+PyYAML==6.0.3
+requests==2.32.5
+urllib3==2.5.0
+uvicorn[standard]==0.34.0
+watchdog==5.0.3
