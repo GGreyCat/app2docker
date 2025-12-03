@@ -7,3 +7,5 @@ build/
 *.jar
 docker_build/
 /__pycache__
+/backend/__pycache__
+/frontend/node_modules
