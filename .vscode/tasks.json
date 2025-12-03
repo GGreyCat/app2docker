@@ -1,0 +1,114 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "运行 Jar2Docker",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "jar2docker.py"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "安装依赖",
+            "type": "shell",
+            "command": "pip",
+            "args": [
+                "install",
+                "-r",
+                "requirements.txt"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "构建 Docker 镜像",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "build",
+                "-t",
+                "jar2docker:latest",
+                "."
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "运行 Docker 容器",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "run",
+                "-d",
+                "-p",
+                "8000:8000",
+                "-v",
+                "/var/run/docker.sock:/var/run/docker.sock",
+                "-v",
+                "${workspaceFolder}/data:/app/data",
+                "--name",
+                "jar2docker",
+                "jar2docker:latest"
+            ],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "停止并删除 Docker 容器",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "stop",
+                "jar2docker",
+                "&&",
+                "docker",
+                "rm",
+                "jar2docker"
+            ],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "查看 Docker 容器日志",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "logs",
+                "-f",
+                "jar2docker"
+            ],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

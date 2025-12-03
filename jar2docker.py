@@ -9,10 +9,12 @@ if __name__ == '__main__':
     server = HTTPServer(('0.0.0.0', port), Jar2DockerHandler)
 
     print(f"🚀 Jar2Docker 服务已启动: http://localhost:{port}")
-    print("📁 上传目录: uploads/")
-    print("🏗️  构建目录: docker_build/")
-    print("📋 模板目录: templates/")
-    print("⚙️  配置文件: config.yml")
+    print("📁 上传目录: data/uploads/")
+    print("🏗️  构建目录: data/docker_build/")
+    print("📋 内置模板: templates/ (只读)")
+    print("📝 用户模板: data/templates/ (可读写)")
+    print("⚙️  配置文件: data/config.yml")
+    print("📦 导出目录: data/exports/")
 
     try:
         server.serve_forever()

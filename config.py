@@ -2,7 +2,8 @@
 import os
 import yaml
 
-CONFIG_FILE = "config.yml"
+# 将配置文件放在data目录中，方便Docker映射
+CONFIG_FILE = "data/config.yml"
 
 def load_config():
     """加载或初始化配置文件"""

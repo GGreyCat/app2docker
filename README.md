@@ -21,13 +21,18 @@
 ```
 jar2docker/
 ├── jar2docker.py            # 主程序（Python HTTP 服务）
-├── templates/               # Dockerfile 模板目录（自动加载）
-│   ├── simple.Dockerfile
-│   ├── springboot.Dockerfile
+├── templates/               # 内置模板目录（打包在Docker镜像中，只读）
+│   ├── dragonwell8.Dockerfile
+│   ├── dragonwell17.Dockerfile
 │   └── ...
-├── uploads/                 # 临时存储上传的 JAR 文件
-├── docker_build/            # 构建上下文目录
-├── config.yml               # 配置文件（首次运行自动生成）
+├── data/                    # 数据目录（所有会更新的数据，Docker卷映射）
+│   ├── config.yml           # 配置文件（首次运行自动生成）
+│   ├── templates/           # 用户自定义模板目录（可读写）
+│   │   └── ...（用户上传或编辑的模板）
+│   ├── uploads/             # 临时存储上传的 JAR 文件
+│   ├── docker_build/        # 构建上下文目录
+│   └── exports/             # 镜像导出目录
+├── static/                  # 静态资源（Bootstrap、FontAwesome、jQuery等）
 ├── index.html               # 前端页面
 ├── requirements.txt         # Python 依赖
 ├── Dockerfile               # 容器化部署文件
@@ -64,17 +69,52 @@ docker build -t jar2docker .
 docker run -d \
   -p 8000:8000 \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $(pwd)/data:/app/data \
   --name jar2docker \
   registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker
-#默认账号密码:admin/admin
+
+# 默认账号密码: admin/admin
+# 
+# 说明：
+# - /var/run/docker.sock 映射用于调用宿主机Docker
+# - $(pwd)/data 映射用于持久化配置、模板、上传文件、导出文件等数据
+# - 首次运行会自动创建 data 目录及其子目录
 ```
 
 ## 🧩 模板管理
 
-- 在 Web 页面中，`模板管理` 卡片会列出 `templates/` 目录下的所有 `.Dockerfile` 模板，并展示文件名、大小与最近更新时间。
-- 点击 **新增模板** 可通过表单或上传现有 Dockerfile 创建模板，系统会自动保存为 `templates/<名称>.Dockerfile`。
-- 通过 **预览 / 编辑 / 删除** 按钮即可在线维护模板内容，无需每次构建时重新上传。
-- 构建表单中的模板下拉框会同步模板列表，选择后即可直接复用，进一步提升重复构建效率。
+### 双模板目录设计
+
+系统支持**内置模板**和**用户自定义模板**两种：
+
+1. **内置模板** (`templates/`)
+   - 打包在 Docker 镜像中，提供开箱即用的模板
+   - 只读，不可删除或修改
+   - 包含常用的 Dragonwell 8/17 等模板
+   - Docker 容器重启后依然存在
+
+2. **用户自定义模板** (`data/templates/`)
+   - 通过 Docker 卷映射持久化
+   - 可读写，支持新增、编辑、删除
+   - 用户上传或编辑的模板保存在此
+   - 与宿主机同步，数据持久化
+
+### 模板优先级
+
+- 读取时：优先使用用户自定义模板，如果不存在则使用内置模板
+- 编辑内置模板：会在 `data/templates/` 中创建同名文件进行覆盖
+- 删除内置模板：不允许删除，但可以创建同名用户模板覆盖
+
+### 使用方法
+
+- 在 Web 页面中，`模板管理` 卡片会列出所有模板（内置 + 用户自定义）
+- 点击 **新增模板** 创建新的用户自定义模板
+- **预览**：查看任何模板的内容
+- **编辑**：
+  - 编辑内置模板 → 在用户目录创建同名模板覆盖
+  - 编辑用户模板 → 直接修改
+- **删除**：只能删除用户自定义模板，内置模板不可删除
+- 构建表单中的模板下拉框会同步模板列表，选择后即可直接复用
 
 ## 🧾 Compose 镜像导出
 

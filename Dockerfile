@@ -18,7 +18,17 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
     pip install --no-cache-dir -r requirements.txt
 
 # 复制项目所有文件到容器
+# 包含 templates/ 目录（内置模板）和所有代码文件
+# data/ 目录通过 .dockerignore 排除，使用 Docker 卷映射
 COPY . .
+
+# 说明：
+# - templates/ 目录包含内置模板，打包在镜像中（只读）
+# - data/ 目录在运行时通过卷映射提供，包含用户数据和自定义模板
+# 
+# 运行容器时映射 data 目录：
+# docker run -v $(pwd)/data:/app/data -v /var/run/docker.sock:/var/run/docker.sock \
+#            -p 8000:8000 jar2docker
 
 # 暴露服务端口（默认 8000）
 EXPOSE 8000

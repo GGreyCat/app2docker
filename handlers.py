@@ -7,6 +7,8 @@ import threading
 import urllib
 import uuid
 import gzip
+import zipfile
+import tarfile
 from datetime import datetime
 from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler
@@ -16,10 +18,13 @@ import yaml
 from config import load_config, save_config, CONFIG_FILE
 from utils import generate_image_name, get_safe_filename
 
-UPLOAD_DIR = "uploads"
-BUILD_DIR = "docker_build"
-EXPORT_DIR = "exports"
-TEMPLATES_DIR = "templates"
+# 目录配置
+UPLOAD_DIR = "data/uploads"
+BUILD_DIR = "data/docker_build"
+EXPORT_DIR = "data/exports"
+# 模板目录：内置模板（只读）+ 用户自定义模板（可读写）
+BUILTIN_TEMPLATES_DIR = "templates"  # 内置模板，打包到Docker镜像中
+USER_TEMPLATES_DIR = "data/templates"  # 用户自定义模板，通过Docker映射持久化
 INDEX_FILE = "index.html"
 
 try:
@@ -60,6 +65,55 @@ except (ImportError, ModuleNotFoundError) as e:
 
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
+# === 模板目录辅助函数 ===
+def get_all_templates():
+    """获取所有模板列表（内置 + 用户自定义），用户模板优先"""
+    templates = {}
+    
+    # 1. 先加载内置模板
+    if os.path.exists(BUILTIN_TEMPLATES_DIR):
+        for f in os.listdir(BUILTIN_TEMPLATES_DIR):
+            if f.endswith('.Dockerfile'):
+                name = f.replace('.Dockerfile', '')
+                templates[name] = {
+                    'name': name,
+                    'path': os.path.join(BUILTIN_TEMPLATES_DIR, f),
+                    'type': 'builtin'
+                }
+    
+    # 2. 再加载用户自定义模板（会覆盖同名内置模板）
+    if os.path.exists(USER_TEMPLATES_DIR):
+        for f in os.listdir(USER_TEMPLATES_DIR):
+            if f.endswith('.Dockerfile'):
+                name = f.replace('.Dockerfile', '')
+                templates[name] = {
+                    'name': name,
+                    'path': os.path.join(USER_TEMPLATES_DIR, f),
+                    'type': 'user'
+                }
+    
+    return templates
+
+def get_template_path(template_name):
+    """获取指定模板的文件路径，优先返回用户自定义模板"""
+    filename = f"{template_name}.Dockerfile"
+    
+    # 优先查找用户自定义模板
+    user_path = os.path.join(USER_TEMPLATES_DIR, filename)
+    if os.path.exists(user_path):
+        return user_path
+    
+    # 否则查找内置模板
+    builtin_path = os.path.join(BUILTIN_TEMPLATES_DIR, filename)
+    if os.path.exists(builtin_path):
+        return builtin_path
+    
+    return None
+
+def get_user_template_path(template_name):
+    """获取用户模板的保存路径（用于新建/编辑）"""
+    return os.path.join(USER_TEMPLATES_DIR, f"{template_name}.Dockerfile")
 
 class Jar2DockerHandler(BaseHTTPRequestHandler):
     server_version = "Jar2Docker/1.0"
@@ -184,6 +238,20 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
                 # 根据文件扩展名确定 MIME 类型
                 content_type = self._get_content_type(filepath)
                 self._send_file(filepath, content_type)
+            else:
+                self.send_error(404)
+        elif path.startswith('/favicon'):
+            # 处理 favicon 请求
+            filepath = path.lstrip('/')
+            if os.path.exists(filepath):
+                content_type = self._get_content_type(filepath)
+                self._send_file(filepath, content_type)
+            else:
+                self.send_error(404)
+        elif path == '/generate_favicon.html':
+            # Favicon 生成工具页面
+            if os.path.exists('generate_favicon.html'):
+                self._send_file('generate_favicon.html', 'text/html')
             else:
                 self.send_error(404)
         else:
@@ -384,24 +452,24 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
             boundary = self.headers['Content-Type'].split("boundary=")[1].encode()
             parts = body.split(b'--' + boundary)
 
-            jar_filename = None
+            app_filename = None
             for part in parts[1:-1]:
                 if b'\r\n\r\n' in part and b'name="jar_file"' in part and b'filename="' in part:
                     headers = part[:part.find(b'\r\n\r\n')].decode('utf-8', errors='ignore')
                     match = re.search(r'filename="(.+?)"', headers)
                     if match:
-                        jar_filename = match.group(1)
+                        app_filename = match.group(1)
                         break
 
-            if not jar_filename:
-                self._send_json(400, {"error": "未找到 JAR 文件"})
+            if not app_filename:
+                self._send_json(400, {"error": "未找到文件"})
                 return
 
             config = load_config()
             docker_config = config.get('docker', {})
             # 获取属性registry_prefix
             base_name = docker_config.get('registry_prefix', '')
-            suggested_name = generate_image_name(base_name,jar_filename)
+            suggested_name = generate_image_name(base_name, app_filename)
             self._send_json(200, {"suggested_imagename": suggested_name})
 
         except Exception as e:
@@ -461,24 +529,24 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": f"保存配置失败: {clean_error_msg}"})
 
     def _collect_template_details(self):
+        """收集所有模板详情（内置 + 用户自定义）"""
         details = []
-        if not os.path.exists(TEMPLATES_DIR):
-            return details
-        for filename in os.listdir(TEMPLATES_DIR):
-            if not filename.endswith('.Dockerfile'):
-                continue
-            filepath = os.path.join(TEMPLATES_DIR, filename)
+        templates = get_all_templates()
+        
+        for name, info in templates.items():
             try:
-                stat = os.stat(filepath)
-                name = filename[:-len('.Dockerfile')]
+                stat = os.stat(info['path'])
                 details.append({
                     "name": name,
-                    "filename": filename,
+                    "filename": os.path.basename(info['path']),
                     "size": stat.st_size,
-                    "updated_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                    "updated_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "type": info['type'],  # 'builtin' 或 'user'
+                    "editable": info['type'] == 'user'  # 只有用户模板可编辑
                 })
             except OSError:
                 continue
+        
         details.sort(key=lambda item: natural_sort_key(item['name']))
         return details
 
@@ -517,12 +585,29 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
             return name or "", tag
         return reference, 'latest'
 
-    def _resolve_template_path(self, template_name):
+    def _resolve_template_path(self, template_name, for_write=False):
+        """解析模板路径
+        Args:
+            template_name: 模板名称
+            for_write: 是否用于写入操作（新建/编辑/删除）
+        Returns:
+            (filepath, clean_name, filename)
+        """
         clean_name = get_safe_filename(template_name).replace('.Dockerfile', '').strip('_-. ')
         if not clean_name:
             raise ValueError("模板名称无效")
         filename = f"{clean_name}.Dockerfile"
-        filepath = os.path.join(TEMPLATES_DIR, filename)
+        
+        # 写入操作：只能操作用户模板目录
+        if for_write:
+            filepath = os.path.join(USER_TEMPLATES_DIR, filename)
+        else:
+            # 读取操作：优先使用用户模板，否则使用内置模板
+            filepath = get_template_path(clean_name)
+            if not filepath:
+                # 模板不存在，返回用户模板路径（用于后续判断）
+                filepath = os.path.join(USER_TEMPLATES_DIR, filename)
+        
         return filepath, clean_name, filename
 
     def _read_json_body(self):
@@ -580,15 +665,19 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
             if not content:
                 self._send_json(400, {"error": "模板内容不能为空"})
                 return
-            filepath, clean_name, filename = self._resolve_template_path(name)
+            
+            # 检查用户模板目录中是否已存在
+            filepath, clean_name, filename = self._resolve_template_path(name, for_write=True)
             if os.path.exists(filepath):
-                self._send_json(400, {"error": "同名模板已存在"})
+                self._send_json(400, {"error": "用户模板中已存在同名模板"})
                 return
-            os.makedirs(TEMPLATES_DIR, exist_ok=True)
+            
+            # 确保用户模板目录存在
+            os.makedirs(USER_TEMPLATES_DIR, exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
             self._send_json(201, {
-                "message": "模板创建成功",
+                "message": "模板创建成功（保存到用户模板目录）",
                 "template": {
                     "name": clean_name,
                     "filename": filename
@@ -612,24 +701,48 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
             if content is None:
                 self._send_json(400, {"error": "模板内容不能为空"})
                 return
-            src_path, src_clean, src_filename = self._resolve_template_path(original_name)
-            if not os.path.exists(src_path):
+            
+            # 检查原模板是否存在
+            templates = get_all_templates()
+            if original_name not in templates:
                 self._send_json(404, {"error": "原模板不存在"})
                 return
+            
+            # 检查是否为内置模板
+            is_builtin = templates[original_name]['type'] == 'builtin'
+            
             target_name = new_name or original_name
-            dst_path, dst_clean, dst_filename = self._resolve_template_path(target_name)
-            if dst_path != src_path and os.path.exists(dst_path):
-                self._send_json(400, {"error": "目标模板名称已存在"})
-                return
-            os.makedirs(TEMPLATES_DIR, exist_ok=True)
+            
+            # 如果是内置模板，只能在用户目录创建同名覆盖
+            if is_builtin:
+                if new_name and new_name != original_name:
+                    self._send_json(403, {"error": "内置模板不能重命名，只能在用户模板中创建同名模板进行覆盖"})
+                    return
+                dst_path, dst_clean, dst_filename = self._resolve_template_path(target_name, for_write=True)
+            else:
+                # 用户模板可以编辑和重命名
+                src_path = templates[original_name]['path']
+                dst_path, dst_clean, dst_filename = self._resolve_template_path(target_name, for_write=True)
+                if dst_path != src_path and os.path.exists(dst_path):
+                    self._send_json(400, {"error": "目标模板名称已存在"})
+                    return
+            
+            # 确保用户模板目录存在
+            os.makedirs(USER_TEMPLATES_DIR, exist_ok=True)
+            
+            # 写入新内容
             tmp_path = dst_path + ".tmp"
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             os.replace(tmp_path, dst_path)
-            if dst_path != src_path:
-                os.remove(src_path)
+            
+            # 如果是用户模板的重命名，删除原文件
+            if not is_builtin and dst_path != templates[original_name]['path']:
+                os.remove(templates[original_name]['path'])
+            
+            message = "模板已保存到用户目录" if is_builtin else "模板更新成功"
             self._send_json(200, {
-                "message": "模板更新成功",
+                "message": message,
                 "template": {
                     "name": dst_clean,
                     "filename": dst_filename
@@ -648,7 +761,14 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
             if not name:
                 self._send_json(400, {"error": "模板名称不能为空"})
                 return
-            filepath, clean_name, filename = self._resolve_template_path(name)
+            
+            # 检查是否为内置模板
+            templates = get_all_templates()
+            if name in templates and templates[name]['type'] == 'builtin':
+                self._send_json(403, {"error": "内置模板不可删除，请在用户模板中创建同名模板进行覆盖"})
+                return
+            
+            filepath, clean_name, filename = self._resolve_template_path(name, for_write=True)
             if not os.path.exists(filepath):
                 self._send_json(404, {"error": "模板不存在"})
                 return
@@ -668,7 +788,8 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
             boundary = self.headers['Content-Type'].split("boundary=")[1].encode()
             parts = body.split(b'--' + boundary)
             form_data = {}
-            jar_data = None
+            file_data = None
+            file_name = None
 
             for part in parts[1:-1]:
                 if b'\r\n\r\n' not in part:
@@ -680,8 +801,10 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
                 if 'filename=' in headers:
                     try:
                         filename = headers.split('filename=')[1].split('"')[1]
-                        if filename.endswith('.jar'):
-                            jar_data = data
+                        # 支持多种文件类型：jar, zip, tar, tar.gz
+                        if filename.endswith(('.jar', '.zip', '.tar', '.tar.gz', '.tgz')):
+                            file_data = data
+                            file_name = filename
                             form_data['original_filename'] = filename
                     except Exception as e:
                         print(f"⚠️ 解析文件名失败: {e}")
@@ -694,25 +817,35 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
                         print(f"⚠️ 解析字段失败: {e}")
                         continue
 
-            if not jar_data:
-                self._send_json(400, {"error": "未上传 JAR 文件"})
+            if not file_data:
+                self._send_json(400, {"error": "未上传文件"})
                 return
 
-            jar_basename = form_data.get('original_filename', 'app.jar').replace('.jar', '')
-            image_name = form_data.get('imagename') or f"myapp/{jar_basename}"
+            # 获取项目类型
+            project_type = form_data.get('project_type', 'jar')  # jar 或 nodejs
+            
+            # 生成基础名称
+            base_name = file_name
+            for ext in ['.jar', '.zip', '.tar.gz', '.tgz', '.tar']:
+                if base_name.endswith(ext):
+                    base_name = base_name[:-len(ext)]
+                    break
+
+            image_name = form_data.get('imagename') or f"myapp/{base_name}"
             tag = form_data.get('tag') or 'latest'
             should_push = form_data.get('push') == 'on'
-            selected_template = form_data.get('template') or 'simple'
+            selected_template = form_data.get('template') or ('node20' if project_type == 'nodejs' else 'dragonwell17')
 
             # 👇 启动后台构建，立即返回 build_id
             build_manager = BuildManager()
             build_id = build_manager.start_build(
-                jar_data=jar_data,
+                file_data=file_data,
                 image_name=image_name,
                 tag=tag,
                 should_push=should_push,
                 selected_template=selected_template,
-                original_filename=form_data.get('original_filename', 'app.jar')
+                original_filename=file_name,
+                project_type=project_type
             )
 
             self._send_json(200, {
@@ -748,12 +881,12 @@ class BuildManager:
             self.lock = threading.Lock()
             self.tasks = {}  # build_id -> Thread
 
-        def start_build(self, jar_data: bytes, image_name: str, tag: str, should_push: bool, selected_template: str,
-                        original_filename: str):
+        def start_build(self, file_data: bytes, image_name: str, tag: str, should_push: bool, selected_template: str,
+                        original_filename: str, project_type: str = 'jar'):
             build_id = str(uuid.uuid4())
             thread = threading.Thread(
                 target=self._build_task,
-                args=(build_id, jar_data, image_name, tag, should_push, selected_template, original_filename),
+                args=(build_id, file_data, image_name, tag, should_push, selected_template, original_filename, project_type),
                 daemon=True
             )
             thread.start()
@@ -761,36 +894,70 @@ class BuildManager:
                 self.tasks[build_id] = thread
             return build_id
 
-        def _build_task(self, build_id: str, jar_data: bytes, image_name: str, tag: str, should_push: bool,
-                        selected_template: str, original_filename: str):
+        def _build_task(self, build_id: str, file_data: bytes, image_name: str, tag: str, should_push: bool,
+                        selected_template: str, original_filename: str, project_type: str = 'jar'):
             full_tag = f"{image_name}:{tag}"
-            jar_basename = original_filename.replace('.jar', '') if original_filename else 'app'
             build_context = os.path.join(BUILD_DIR, image_name.replace('/', '_'))
 
             def log(msg: str):
                 with self.lock:
                     self.logs[build_id].append(msg)
 
+            def extract_archive(file_path: str, extract_to: str):
+                """解压压缩文件"""
+                try:
+                    if file_path.endswith('.zip'):
+                        log("📦 解压 ZIP 文件...\n")
+                        with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                            zip_ref.extractall(extract_to)
+                    elif file_path.endswith(('.tar.gz', '.tgz')):
+                        log("📦 解压 TAR.GZ 文件...\n")
+                        with tarfile.open(file_path, 'r:gz') as tar_ref:
+                            tar_ref.extractall(extract_to)
+                    elif file_path.endswith('.tar'):
+                        log("📦 解压 TAR 文件...\n")
+                        with tarfile.open(file_path, 'r') as tar_ref:
+                            tar_ref.extractall(extract_to)
+                    else:
+                        return False
+                    log("✅ 解压完成\n")
+                    return True
+                except Exception as e:
+                    log(f"❌ 解压失败: {str(e)}\n")
+                    return False
+
             try:
                 log(f"📦 开始处理上传: {original_filename}")
                 log(f"🏷️ 镜像名: {full_tag}")
                 log(f"🧱 模板: {selected_template}")
+                log(f"📂 项目类型: {project_type}")
 
                 # === 模拟模式 ===
                 if not DOCKER_AVAILABLE:
-
                     config = load_config()
                     os.makedirs(build_context, exist_ok=True)
-                    with open(os.path.join(build_context, 'app.jar'), 'wb') as f:
-                        f.write(jar_data)
-                    log("🧪 模拟模式：已保存 JAR")
+                    
+                    # 保存文件
+                    if project_type == 'jar' and original_filename.endswith('.jar'):
+                        with open(os.path.join(build_context, 'app.jar'), 'wb') as f:
+                            f.write(file_data)
+                        log("🧪 模拟模式：已保存 JAR")
+                    else:
+                        # 保存并解压
+                        temp_file = os.path.join(build_context, original_filename)
+                        with open(temp_file, 'wb') as f:
+                            f.write(file_data)
+                        if not extract_archive(temp_file, build_context):
+                            log("⚠️ 模拟模式：文件未解压（可能是 JAR 或不支持的格式）")
+                        else:
+                            os.remove(temp_file)
 
                     for line in [
                         "🧪 模拟模式：Docker 服务不可用\n",
-                        "Step 1/4 : FROM openjdk:17-jre-slim (模拟)\n",
-                        "Step 2/4 : COPY app.jar /app.jar (模拟)\n",
+                        f"Step 1/4 : FROM {'node:20-alpine' if project_type == 'nodejs' else 'openjdk:17-jre-slim'} (模拟)\n",
+                        "Step 2/4 : COPY . . (模拟)\n",
                         "Step 3/4 : WORKDIR /app (模拟)\n",
-                        "Step 4/4 : ENTRYPOINT [\"java\", \"-jar\", \"app.jar\"] (模拟)\n",
+                        f"Step 4/4 : CMD (模拟)\n",
                         f"✅ 模拟构建成功: {full_tag}\n",
                     ]:
                         log(line)
@@ -810,13 +977,39 @@ class BuildManager:
 
                 # === 真实构建 ===
                 os.makedirs(build_context, exist_ok=True)
-                jar_path = os.path.join(build_context, 'app.jar')
-                with open(jar_path, 'wb') as f:
-                    f.write(jar_data)
+                
+                # 根据项目类型处理文件
+                if project_type == 'jar' and original_filename.endswith('.jar'):
+                    # JAR 文件直接保存
+                    jar_path = os.path.join(build_context, 'app.jar')
+                    with open(jar_path, 'wb') as f:
+                        f.write(file_data)
+                    log("✅ JAR 文件已保存\n")
+                else:
+                    # 压缩包需要解压
+                    temp_file = os.path.join(build_context, original_filename)
+                    with open(temp_file, 'wb') as f:
+                        f.write(file_data)
+                    
+                    if not extract_archive(temp_file, build_context):
+                        # 如果不是压缩包，可能是 JAR 文件
+                        if original_filename.endswith('.jar'):
+                            os.rename(temp_file, os.path.join(build_context, 'app.jar'))
+                            log("✅ JAR 文件已保存\n")
+                        else:
+                            log(f"❌ 不支持的文件格式: {original_filename}\n")
+                            return
+                    else:
+                        # 解压成功，删除临时文件
+                        try:
+                            os.remove(temp_file)
+                        except:
+                            pass
 
-                template_file = os.path.join(TEMPLATES_DIR, f"{selected_template}.Dockerfile")
-                if not os.path.exists(template_file):
-                    log(f"❌ 模板文件不存在: {template_file}\n")
+                # 获取模板路径（优先用户模板，否则使用内置模板）
+                template_file = get_template_path(selected_template)
+                if not template_file:
+                    log(f"❌ 模板不存在: {selected_template}\n")
                     return
 
                 with open(template_file, 'r', encoding='utf-8') as f:
