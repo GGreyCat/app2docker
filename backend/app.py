@@ -39,8 +39,8 @@ app.add_middleware(
 app.include_router(router, prefix="/api")
 
 # 静态文件服务（前端构建产物）
-if os.path.exists("dist"):
-    app.mount("/static", StaticFiles(directory="dist/static"), name="static")
+if os.path.exists("dist/assets"):
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
 
 
 # 前端页面路由
