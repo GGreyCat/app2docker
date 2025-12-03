@@ -2,7 +2,28 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: 后端服务器",
+      "name": "Python: FastAPI (Uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "backend.app:app",
+        "--reload",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
+      "jinja": true,
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Python: 后端服务器 (直接运行)",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/backend/app.py",
@@ -39,9 +60,9 @@
   ],
   "compounds": [
     {
-      "name": "全栈调试 (前端+后端)",
+      "name": "全栈调试 (FastAPI + 前端)",
       "configurations": [
-        "Python: 后端服务器",
+        "Python: FastAPI (Uvicorn)",
         "前端: Vite Dev Server"
       ],
       "presentation": {

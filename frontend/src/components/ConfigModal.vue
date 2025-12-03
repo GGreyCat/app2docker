@@ -76,8 +76,8 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = defineProps({
   modelValue: Boolean
@@ -98,7 +98,10 @@ const saving = ref(false)
 
 async function loadConfig() {
   try {
+    console.log('📥 正在加载配置...')
     const res = await axios.get('/api/get-config')
+    console.log('📋 配置响应:', res.data)
+    
     const docker = res.data.docker || {}
     config.value = {
       registry: docker.registry || 'docker.io',
@@ -108,8 +111,11 @@ async function loadConfig() {
       expose_port: docker.expose_port || 8080,
       default_push: docker.default_push || false
     }
+    console.log('✅ 配置已加载:', config.value)
   } catch (error) {
-    console.error('加载配置失败:', error)
+    console.error('❌ 加载配置失败:', error)
+    const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message
+    alert(`加载配置失败: ${errorMsg}`)
   }
 }
 
@@ -118,14 +124,25 @@ async function save() {
   try {
     const formData = new FormData()
     Object.keys(config.value).forEach(key => {
-      formData.append(key, config.value[key])
+      // 确保布尔值正确转换
+      const value = config.value[key]
+      formData.append(key, value === true || value === false ? String(value) : value)
     })
     
+    console.log('📤 发送配置:', Object.fromEntries(formData))
+    
     const res = await axios.post('/api/save-config', formData)
+    console.log('✅ 保存响应:', res.data)
+    
+    // 保存成功后重新加载配置以验证
+    await loadConfig()
+    
     alert(res.data.message || '配置保存成功')
     close()
   } catch (error) {
-    alert(error.response?.data?.error || '保存配置失败')
+    console.error('❌ 保存配置失败:', error)
+    const errorMsg = error.response?.data?.detail || error.response?.data?.error || '保存配置失败'
+    alert(errorMsg)
   } finally {
     saving.value = false
   }

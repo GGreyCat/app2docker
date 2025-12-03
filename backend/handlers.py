@@ -820,9 +820,9 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "模板内容不能为空"})
                 return
 
-            # 验证项目类型
-            if project_type not in ["jar", "nodejs"]:
-                self._send_json(400, {"error": "项目类型必须是 jar 或 nodejs"})
+            # 验证项目类型格式：只允许小写字母、数字、下划线和连字符
+            if not re.match(r'^[a-z0-9_-]+$', project_type):
+                self._send_json(400, {"error": "项目类型只能包含小写字母、数字、下划线和连字符"})
                 return
 
             # 使用项目类型子目录保存
@@ -883,8 +883,11 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
 
             # 使用提供的项目类型，如果没有则使用原模板的项目类型
             target_project_type = project_type or original_project_type
-            if target_project_type not in ["jar", "nodejs"]:
-                target_project_type = original_project_type
+            
+            # 验证项目类型格式
+            if target_project_type and not re.match(r'^[a-z0-9_-]+$', target_project_type):
+                self._send_json(400, {"error": "项目类型只能包含小写字母、数字、下划线和连字符"})
+                return
 
             target_name = new_name or original_name
 
@@ -895,6 +898,15 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
                         403,
                         {
                             "error": "内置模板不能重命名，只能在用户模板中创建同名模板进行覆盖"
+                        },
+                    )
+                    return
+                # 内置模板不允许修改项目类型
+                if target_project_type != original_project_type:
+                    self._send_json(
+                        403,
+                        {
+                            "error": "内置模板的项目类型不可修改"
                         },
                     )
                     return
@@ -916,19 +928,30 @@ class Jar2DockerHandler(BaseHTTPRequestHandler):
                 f.write(content)
             os.replace(tmp_path, dst_path)
 
-            # 如果是用户模板的重命名或移动，删除原文件
+            # 如果是用户模板的重命名或项目类型修改，删除原文件
             if not is_builtin and dst_path != original_template["path"]:
                 try:
                     os.remove(original_template["path"])
                 except OSError:
                     pass  # 如果删除失败也不影响
 
-            message = "模板已保存到用户目录" if is_builtin else "模板更新成功"
+            # 构建成功消息
+            if is_builtin:
+                message = "模板已保存到用户目录"
+            elif target_project_type != original_project_type:
+                message = f"模板已更新并移动到 {target_project_type} 目录"
+            else:
+                message = "模板更新成功"
+            
             self._send_json(
                 200,
                 {
                     "message": message,
-                    "template": {"name": dst_clean, "filename": dst_filename},
+                    "template": {
+                        "name": target_name,
+                        "project_type": target_project_type,
+                        "filename": os.path.basename(dst_path)
+                    },
                 },
             )
         except ValueError as ve:

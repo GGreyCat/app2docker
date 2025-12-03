@@ -1,6 +1,6 @@
-# Node.js 20 前端应用 Dockerfile (多阶段构建)
-# 第一阶段：使用 Node.js 20 构建应用
-FROM node:20-alpine as builder
+# Node.js 18 前端应用 Dockerfile (多阶段构建)
+# 第一阶段：使用 Node.js 18 构建应用
+FROM node:18-alpine as builder
 
 # 设置工作目录
 WORKDIR /app
@@ -31,3 +31,4 @@ EXPOSE {{EXPOSE_PORT}}
 
 # 启动 Nginx
 CMD ["nginx", "-g", "daemon off;"]
+

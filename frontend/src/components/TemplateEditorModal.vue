@@ -36,16 +36,28 @@
             </div>
             <div class="col-md-6">
               <label class="form-label">项目类型 <span class="text-danger">*</span></label>
-              <select 
+              <input 
                 v-model="form.projectType" 
-                class="form-select"
-                :disabled="isBuiltin"
-              >
+                list="project-types-editor"
+                class="form-control"
+                placeholder="选择或输入项目类型"
+                :disabled="!canChangeProjectType"
+                @input="validateProjectType"
+              />
+              <datalist id="project-types-editor">
                 <option value="jar">Java 应用（JAR）</option>
                 <option value="nodejs">Node.js 应用</option>
-              </select>
-              <div class="form-text">
-                模板将保存到 data/templates/{{ form.projectType }}/ 目录
+                <option value="python">Python 应用</option>
+                <option value="go">Go 应用</option>
+              </datalist>
+              <div v-if="!canChangeProjectType" class="form-text text-warning">
+                <i class="fas fa-lock"></i> 内置模板的项目类型不可修改
+              </div>
+              <div v-else-if="!isNew && projectTypeChanged" class="form-text text-info">
+                <i class="fas fa-info-circle"></i> 修改项目类型后，模板将移动到新目录
+              </div>
+              <div v-else class="form-text">
+                <i class="fas fa-lightbulb"></i> 可选择预设类型或自定义输入（如 python、go 等）
               </div>
             </div>
           </div>
@@ -137,6 +149,17 @@ const isBuiltin = computed(() => {
   return props.template?.type === 'builtin'
 })
 
+// 是否可以修改项目类型：新增模板或编辑用户自定义模板时可以
+const canChangeProjectType = computed(() => {
+  return props.isNew || !isBuiltin.value
+})
+
+// 项目类型是否已修改
+const projectTypeChanged = computed(() => {
+  if (props.isNew || !props.template) return false
+  return form.value.projectType !== props.template.project_type
+})
+
 // ESC键关闭
 function handleEscape(e) {
   if (e.key === 'Escape' && props.modelValue) {
@@ -180,6 +203,13 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
 })
 
+function validateProjectType() {
+  // 清理项目类型输入：只保留字母、数字、下划线、连字符
+  form.value.projectType = form.value.projectType
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+}
+
 function handleFileUpload(e) {
   const file = e.target.files[0]
   if (file) {
@@ -208,6 +238,27 @@ async function save() {
     alert('模板内容不能为空')
     return
   }
+  if (!form.value.projectType.trim()) {
+    alert('项目类型不能为空')
+    return
+  }
+  
+  // 验证项目类型格式
+  const projectTypePattern = /^[a-z0-9_-]+$/
+  if (!projectTypePattern.test(form.value.projectType)) {
+    alert('项目类型只能包含小写字母、数字、下划线和连字符')
+    return
+  }
+  
+  // 如果修改了项目类型，需要确认
+  if (projectTypeChanged.value) {
+    const confirmMsg = `您正在将模板的项目类型从 "${props.template.project_type}" 修改为 "${form.value.projectType}"。\n\n` +
+                       `模板将从 data/templates/${props.template.project_type}/ 移动到 data/templates/${form.value.projectType}/\n\n` +
+                       `确认要继续吗？`
+    if (!confirm(confirmMsg)) {
+      return
+    }
+  }
   
   saving.value = true
   try {
@@ -219,12 +270,19 @@ async function save() {
     
     if (!props.isNew) {
       payload.original_name = originalName.value
+      // 如果修改了项目类型，需要传递旧的项目类型以便后端正确删除旧文件
+      if (projectTypeChanged.value) {
+        payload.old_project_type = props.template.project_type
+      }
     }
     
     const method = props.isNew ? 'post' : 'put'
     const res = await axios[method]('/api/templates', payload)
     
-    alert(res.data.message || '模板保存成功')
+    const successMsg = projectTypeChanged.value 
+      ? `模板已保存并移动到新的项目类型目录`
+      : res.data.message || '模板保存成功'
+    alert(successMsg)
     emit('saved')
     close()
   } catch (error) {

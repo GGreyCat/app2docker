@@ -16,9 +16,9 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',  // 使用 127.0.0.1 而不是 localhost
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        // 不需要 rewrite，直接转发 /api 路径
       }
     }
   },

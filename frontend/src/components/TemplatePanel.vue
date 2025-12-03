@@ -42,9 +42,9 @@
             <td>
               <span 
                 class="badge" 
-                :class="tpl.project_type === 'jar' ? 'bg-primary' : 'bg-success'"
+                :class="getProjectTypeBadgeClass(tpl.project_type)"
               >
-                {{ tpl.project_type === 'jar' ? 'JAR' : 'Node.js' }}
+                {{ getProjectTypeLabel(tpl.project_type) }}
               </span>
             </td>
             <td>{{ formatBytes(tpl.size) }}</td>
@@ -174,6 +174,28 @@ function formatTime(timeStr) {
   } catch {
     return timeStr
   }
+}
+
+function getProjectTypeBadgeClass(type) {
+  const colorMap = {
+    'jar': 'bg-primary',
+    'nodejs': 'bg-success',
+    'python': 'bg-info',
+    'go': 'bg-warning',
+    'rust': 'bg-danger'
+  }
+  return colorMap[type] || 'bg-secondary'
+}
+
+function getProjectTypeLabel(type) {
+  const labelMap = {
+    'jar': 'JAR',
+    'nodejs': 'Node.js',
+    'python': 'Python',
+    'go': 'Go',
+    'rust': 'Rust'
+  }
+  return labelMap[type] || type.toUpperCase()
 }
 
 onMounted(() => {

@@ -42,12 +42,10 @@ COPY --from=frontend-builder /frontend/dist ./dist
 # 复制内置模板
 COPY templates/ ./templates/
 
-# 复制 favicon 等静态资源
-COPY favicon*.png favicon.ico favicon.svg ./
-
 # 说明：
 # - templates/ 目录包含内置模板（按项目类型分类）
 # - data/ 目录在运行时通过卷映射提供
+# - favicon.ico 已包含在前端构建产物（dist/）中
 # 
 # 运行容器：
 # docker run -d \

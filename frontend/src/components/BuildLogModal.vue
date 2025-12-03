@@ -1,20 +1,20 @@
 <template>
-  <div 
-    v-if="modelValue"
-    class="modal fade" 
-    :class="{ show: modelValue, 'd-block': modelValue }"
-    tabindex="-1"
-    @click.self="close"
-  >
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header bg-dark text-white">
+  <div>
+    <div 
+      v-if="modelValue"
+      class="modal fade show d-block" 
+      tabindex="-1"
+      @click.self="close"
+    >
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-dark text-white">
           <h5 class="modal-title">
             <i class="fas fa-terminal"></i> 构建日志
           </h5>
           <button type="button" class="btn-close btn-close-white" @click="close"></button>
-        </div>
-        <div class="modal-body p-0" style="height: 600px;">
+          </div>
+          <div class="modal-body p-0" style="height: 600px;">
           <!-- 工具栏 -->
           <div class="log-toolbar">
             <input 
@@ -86,12 +86,13 @@
               <span class="log-content" v-html="highlightSearch(log.text)"></span>
             </div>
           </div>
+          </div>
         </div>
       </div>
     </div>
+    
+    <div v-if="modelValue" class="modal-backdrop fade show"></div>
   </div>
-  
-  <div v-if="modelValue" class="modal-backdrop fade show"></div>
 </template>
 
 <script setup>

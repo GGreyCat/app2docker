@@ -45,10 +45,19 @@ class DevServer:
         if self.process:
             self.stop_server()
 
-        # 启动后端服务器
-        app_path = os.path.join(self.backend_dir, "app.py")
+        # 使用 uvicorn 启动 FastAPI 服务器
         self.process = subprocess.Popen(
-            [sys.executable, app_path],
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "backend.app:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--reload",
+            ],
             cwd=project_root,
             env={**os.environ, "PYTHONPATH": project_root},
         )

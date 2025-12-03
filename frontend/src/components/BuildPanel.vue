@@ -112,14 +112,33 @@ const projectTypes = computed(() => {
   const types = new Set()
   templates.value.forEach(t => types.add(t.project_type))
   
-  const result = []
-  if (types.has('jar')) result.push({ value: 'jar', label: 'Java 应用（JAR）' })
-  if (types.has('nodejs')) result.push({ value: 'nodejs', label: 'Node.js 应用' })
+  const labelMap = {
+    'jar': 'Java 应用（JAR）',
+    'nodejs': 'Node.js 应用',
+    'python': 'Python 应用',
+    'go': 'Go 应用',
+    'rust': 'Rust 应用'
+  }
   
-  return result.length > 0 ? result : [
-    { value: 'jar', label: 'Java 应用（JAR）' },
-    { value: 'nodejs', label: 'Node.js 应用' }
-  ]
+  const result = []
+  types.forEach(type => {
+    result.push({
+      value: type,
+      label: labelMap[type] || `${type.charAt(0).toUpperCase()}${type.slice(1)} 应用`
+    })
+  })
+  
+  // 如果没有模板，返回默认选项
+  if (result.length === 0) {
+    return [
+      { value: 'jar', label: 'Java 应用（JAR）' },
+      { value: 'nodejs', label: 'Node.js 应用' },
+      { value: 'python', label: 'Python 应用' },
+      { value: 'go', label: 'Go 应用' }
+    ]
+  }
+  
+  return result
 })
 
 const filteredTemplates = computed(() => {
@@ -247,7 +266,7 @@ async function pollBuildLogs(buildId) {
   
   const poll = async () => {
     try {
-      const res = await axios.get('/get-logs', {
+      const res = await axios.get('/api/get-logs', {
         params: { build_id: buildId },
         responseType: 'text' // 确保以文本方式接收
       })
