@@ -3,6 +3,10 @@
 # ============ 阶段 1: 构建前端 ============
 # 使用阿里云 Node.js 镜像加速下载
 FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/node:20.16 AS frontend-builder
+
+# 切换到 root 用户以安装系统包
+USER root
+
 # 设置时区为上海
 ENV TZ=Asia/Shanghai
 RUN yum install -y tzdata && \
@@ -27,6 +31,9 @@ RUN npm run build
 # ============ 阶段 2: Python 后端 ============
 # 使用阿里云 Python 镜像加速下载
 FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/python:3.11.1
+
+# 切换到 root 用户以安装系统包
+USER root
 
 # 设置时区为上海
 ENV TZ=Asia/Shanghai
