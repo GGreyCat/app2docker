@@ -252,6 +252,7 @@ async def upload_file(
     push: str = Form("off"),
     template_params: Optional[str] = Form(None),  # JSON 字符串格式的模板参数
     build_registry: Optional[str] = Form(None),  # 构建时使用的仓库名称
+    extract_archive: str = Form("on"),  # 是否解压压缩包（默认解压）
 ):
     """上传文件并开始构建"""
     try:
@@ -281,6 +282,7 @@ async def upload_file(
             project_type=project_type,
             template_params=params_dict,  # 传递模板参数
             build_registry=build_registry,  # 传递构建时使用的仓库
+            extract_archive=(extract_archive == "on"),  # 传递解压选项
         )
 
         return JSONResponse(

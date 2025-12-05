@@ -69,6 +69,7 @@ def _get_var_description(var_name: str) -> str:
         "CACHE_DURATION": "缓存时长",
         "JAR_FILE": "JAR 文件名",
         "APP_FILE": "应用文件名",
+        "UPLOADED_FILENAME": "用户上传的原始文件名（仅用于模板判断，实际文件已重命名）",
     }
     return descriptions.get(var_name, var_name.replace("_", " ").title())
 

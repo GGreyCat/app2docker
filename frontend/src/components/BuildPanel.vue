@@ -67,9 +67,57 @@
         />
         <div v-if="form.file" class="alert alert-success mt-2 py-2 px-3 small">
           <i class="fas fa-check-circle"></i> 已选择: <strong>{{ form.file.name }}</strong> ({{ formatFileSize(form.file.size) }})
+          <div class="mt-2 text-muted" style="font-size: 0.85em;">
+            <i class="fas fa-info-circle"></i> 
+            <strong>文件处理说明：</strong>
+            <ul class="mb-0 mt-1" style="padding-left: 1.2em;">
+              <li v-if="form.file.name.endsWith('.jar')">
+                <strong>JAR 文件：</strong>将保存为固定名称 <code>app.jar</code>（原始文件名: <code>{{ form.file.name }}</code>）
+              </li>
+              <li v-else-if="isArchiveFile(form.file.name)">
+                <strong>压缩包：</strong>
+                <span v-if="form.extractArchive">
+                  将自动解压到构建上下文根目录
+                </span>
+                <span v-else>
+                  将保持压缩包原样（不解压）
+                </span>
+                （原始文件名: <code>{{ form.file.name }}</code>）
+              </li>
+              <li v-else>
+                <strong>其他文件：</strong>将按原样保存到构建上下文（文件名: <code>{{ form.file.name }}</code>）
+              </li>
+            </ul>
+            <div class="mt-2 p-2 bg-light rounded">
+              <strong>💡 模板使用提示：</strong><br>
+              在 Dockerfile 模板中可通过 <code>{{ '{{UPLOADED_FILENAME}}' }}</code> 变量获取上传的原始文件名: <code>{{ form.file.name }}</code><br>
+              <small class="text-muted">
+                这样您可以在模板中根据文件名判断文件类型，决定是否需要特殊处理。
+              </small>
+            </div>
+          </div>
         </div>
         <div v-else class="form-text small">
           <i class="fas fa-info-circle"></i> {{ fileHint }}
+        </div>
+        
+        <!-- 压缩包解压选项 -->
+        <div v-if="form.file && isArchiveFile(form.file.name)" class="mt-2">
+          <div class="form-check">
+            <input 
+              v-model="form.extractArchive" 
+              type="checkbox" 
+              class="form-check-input" 
+              id="extractArchive"
+            />
+            <label class="form-check-label" for="extractArchive">
+              <i class="fas fa-file-archive"></i> 自动解压压缩包
+            </label>
+          </div>
+          <div class="form-text small text-muted">
+            <i class="fas fa-info-circle"></i> 
+            勾选后将自动解压压缩包到构建上下文根目录；不勾选则保持压缩包原样，可在模板中手动处理
+          </div>
         </div>
       </div>
 
@@ -144,6 +192,7 @@ const form = ref({
   imageName: 'myapp/demo',
   tag: 'latest',
   push: false,
+  extractArchive: true,  // 是否解压压缩包（默认解压）
   templateParams: {},  // 模板参数
   buildRegistry: ''  // 构建时使用的仓库（空表示使用激活的仓库）
 })
@@ -273,6 +322,10 @@ function handleFileChange(e) {
   form.value.file = e.target.files[0]
   if (form.value.file) {
     console.log('✅ 文件已选择:', form.value.file.name)
+    // 如果是压缩包，默认勾选解压选项
+    if (isArchiveFile(form.value.file.name)) {
+      form.value.extractArchive = true
+    }
     // 自动建议镜像名
     suggestImageName(form.value.file)
   } else {
@@ -301,6 +354,13 @@ function formatFileSize(bytes) {
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
 }
 
+function isArchiveFile(filename) {
+  return filename.endsWith('.zip') || 
+         filename.endsWith('.tar') || 
+         filename.endsWith('.tar.gz') || 
+         filename.endsWith('.tgz')
+}
+
 async function handleBuild() {
   if (!form.value.file) {
     alert('请选择文件')
@@ -326,6 +386,11 @@ async function handleBuild() {
   // 添加构建仓库
   if (form.value.buildRegistry) {
     formData.append('build_registry', form.value.buildRegistry)
+  }
+  
+  // 添加解压选项（仅压缩包时有效）
+  if (form.value.file && isArchiveFile(form.value.file.name)) {
+    formData.append('extract_archive', form.value.extractArchive ? 'on' : 'off')
   }
   
   try {

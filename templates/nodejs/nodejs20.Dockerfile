@@ -1,12 +1,11 @@
 # Node.js 20 前端应用 Dockerfile (多阶段构建)
 # 第一阶段：使用 Node.js 20 构建应用
 # 使用阿里云镜像源加速下载
-FROM registry.cn-hangzhou.aliyuncs.com/library/node:20-alpine as builder
+FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/node1:20 AS frontend-builder
 
 # 设置时区为上海
 ENV TZ=Asia/Shanghai
-RUN apk add --no-cache tzdata && \
-    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 
 # 设置工作目录
@@ -35,13 +34,13 @@ RUN apk add --no-cache tzdata && \
     echo $TZ > /etc/timezone
 
 # 从构建阶段复制构建产物到 Nginx 目录
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 
 # 复制自定义 Nginx 配置（如果存在）
 # COPY nginx.conf /etc/nginx/nginx.conf
 
 # 暴露端口
-EXPOSE {{{EXPOSE_PORT:80}}
+EXPOSE {{EXPOSE_PORT:80}}
 
 # 启动 Nginx
 CMD ["nginx", "-g", "daemon off;"]

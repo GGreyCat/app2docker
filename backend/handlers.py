@@ -1095,6 +1095,7 @@ class BuildManager:
         project_type: str = "jar",
         template_params: dict = None,
         build_registry: str = None,  # 构建时使用的仓库名称
+        extract_archive: bool = True,  # 是否解压压缩包（默认解压）
     ):
         build_id = str(uuid.uuid4())
         thread = threading.Thread(
@@ -1110,6 +1111,7 @@ class BuildManager:
                 project_type,
                 template_params or {},
                 build_registry,
+                extract_archive,
             ),
             daemon=True,
         )
@@ -1130,6 +1132,7 @@ class BuildManager:
         project_type: str = "jar",
         template_params: dict = None,
         build_registry: str = None,  # 构建时使用的仓库名称
+        extract_archive: bool = True,  # 是否解压压缩包（默认解压）
     ):
         full_tag = f"{image_name}:{tag}"
         build_context = os.path.join(BUILD_DIR, image_name.replace("/", "_"))
@@ -1142,7 +1145,7 @@ class BuildManager:
                     msg = msg + "\n"
                 self.logs[build_id].append(msg)
 
-        def extract_archive(file_path: str, extract_to: str):
+        def do_extract_archive(file_path: str, extract_to: str):
             """解压压缩文件"""
             try:
                 if file_path.endswith(".zip"):
@@ -1167,6 +1170,7 @@ class BuildManager:
 
         try:
             log(f"📦 开始处理上传: {original_filename}\n")
+            log(f"📝 上传的文件名: {original_filename}（在构建上下文中已统一处理）\n")
             log(f"🏷️ 镜像名: {full_tag}\n")
             log(f"🧱 模板: {selected_template}\n")
             log(f"📂 项目类型: {project_type}\n")
@@ -1176,20 +1180,54 @@ class BuildManager:
                 config = load_config()
                 os.makedirs(build_context, exist_ok=True)
 
-                # 保存文件
-                if project_type == "jar" and original_filename.endswith(".jar"):
+                # 判断文件类型并处理（模拟模式）
+                is_jar = original_filename.lower().endswith(".jar")
+                is_archive = any(
+                    original_filename.lower().endswith(ext)
+                    for ext in [".zip", ".tar", ".tar.gz", ".tgz"]
+                )
+
+                if is_archive:
+                    # 压缩包：根据用户选择决定是否解压
+                    file_path = os.path.join(build_context, original_filename)
+                    with open(file_path, "wb") as f:
+                        f.write(file_data)
+
+                    if extract_archive:
+                        # 用户选择解压
+                        log(
+                            f"🧪 模拟模式：检测到压缩包: {original_filename}，开始解压...\n"
+                        )
+                        if do_extract_archive(file_path, build_context):
+                            log(
+                                f"🧪 模拟模式：压缩包已解压到构建上下文根目录（原始文件名: {original_filename}）\n"
+                            )
+                            try:
+                                os.remove(file_path)
+                            except:
+                                pass
+                        else:
+                            log("⚠️ 模拟模式：解压失败（不支持的格式）\n")
+                    else:
+                        # 用户选择不解压，保持压缩包原样
+                        log(
+                            f"🧪 模拟模式：压缩包已保存: {original_filename}（未解压，保持原样）\n"
+                        )
+                elif is_jar:
+                    # JAR 文件：保存为固定名称 app.jar
                     with open(os.path.join(build_context, "app.jar"), "wb") as f:
                         f.write(file_data)
-                    log("🧪 模拟模式：已保存 JAR\n")
+                    log(
+                        f"🧪 模拟模式：JAR 文件已保存为: app.jar（原始文件名: {original_filename}）\n"
+                    )
                 else:
-                    # 保存并解压
-                    temp_file = os.path.join(build_context, original_filename)
-                    with open(temp_file, "wb") as f:
+                    # 其他文件：保持原文件名
+                    file_path = os.path.join(build_context, original_filename)
+                    with open(file_path, "wb") as f:
                         f.write(file_data)
-                    if not extract_archive(temp_file, build_context):
-                        log("⚠️ 模拟模式：文件未解压（可能是 JAR 或不支持的格式）\n")
-                    else:
-                        os.remove(temp_file)
+                    log(
+                        f"🧪 模拟模式：文件已保存: {original_filename}（保持原文件名）\n"
+                    )
 
                 for line in [
                     "🧪 模拟模式：Docker 服务不可用\n",
@@ -1225,33 +1263,51 @@ class BuildManager:
             # === 真实构建 ===
             os.makedirs(build_context, exist_ok=True)
 
-            # 根据项目类型处理文件
-            if project_type == "jar" and original_filename.endswith(".jar"):
-                # JAR 文件直接保存
+            # 判断文件类型并处理
+            is_jar = original_filename.lower().endswith(".jar")
+            is_archive = any(
+                original_filename.lower().endswith(ext)
+                for ext in [".zip", ".tar", ".tar.gz", ".tgz"]
+            )
+
+            if is_archive:
+                # 压缩包：根据用户选择决定是否解压
+                file_path = os.path.join(build_context, original_filename)
+                with open(file_path, "wb") as f:
+                    f.write(file_data)
+
+                if extract_archive:
+                    # 用户选择解压
+                    log(f"📦 检测到压缩包: {original_filename}，开始解压...\n")
+                    if do_extract_archive(file_path, build_context):
+                        # 解压成功，删除临时文件
+                        log(
+                            f"✅ 压缩包已解压到构建上下文根目录（原始文件名: {original_filename}）\n"
+                        )
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                    else:
+                        log(f"❌ 解压失败: {original_filename}\n")
+                        return
+                else:
+                    # 用户选择不解压，保持压缩包原样
+                    log(f"📦 压缩包已保存: {original_filename}（未解压，保持原样）\n")
+            elif is_jar:
+                # JAR 文件：保存为固定名称 app.jar
                 jar_path = os.path.join(build_context, "app.jar")
                 with open(jar_path, "wb") as f:
                     f.write(file_data)
-                log("✅ JAR 文件已保存\n")
+                log(
+                    f"✅ JAR 文件已保存为: app.jar（原始文件名: {original_filename}）\n"
+                )
             else:
-                # 压缩包需要解压
-                temp_file = os.path.join(build_context, original_filename)
-                with open(temp_file, "wb") as f:
+                # 其他文件：保持原文件名
+                file_path = os.path.join(build_context, original_filename)
+                with open(file_path, "wb") as f:
                     f.write(file_data)
-
-                if not extract_archive(temp_file, build_context):
-                    # 如果不是压缩包，可能是 JAR 文件
-                    if original_filename.endswith(".jar"):
-                        os.rename(temp_file, os.path.join(build_context, "app.jar"))
-                        log("✅ JAR 文件已保存\n")
-                    else:
-                        log(f"❌ 不支持的文件格式: {original_filename}\n")
-                        return
-                else:
-                    # 解压成功，删除临时文件
-                    try:
-                        os.remove(temp_file)
-                    except:
-                        pass
+                log(f"✅ 文件已保存: {original_filename}（保持原文件名）\n")
 
             # 获取模板路径（优先用户模板，否则使用内置模板）
             template_file = get_template_path(selected_template, project_type)
@@ -1267,6 +1323,9 @@ class BuildManager:
 
             # 准备变量替换字典
             template_vars = template_params or {}
+
+            # 自动添加上传的文件名变量（供模板判断使用）
+            template_vars["UPLOADED_FILENAME"] = original_filename
 
             # 如果没有传入 EXPOSE_PORT，使用配置中的默认值
             if "EXPOSE_PORT" not in template_vars:
