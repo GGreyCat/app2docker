@@ -67,17 +67,6 @@
             <i class="fas fa-exclamation-triangle"></i>
             {{ error }}
           </div>
-
-          <!-- 默认账号提示 -->
-          <div class="mt-3 p-3 bg-light rounded small">
-            <p class="mb-1 text-muted">
-              <i class="fas fa-info-circle"></i> 默认账号
-            </p>
-            <div class="font-monospace">
-              <div>用户名: <code>admin</code></div>
-              <div>密码: <code>admin</code></div>
-            </div>
-          </div>
         </div>
 
         <!-- 版本信息 -->
@@ -86,33 +75,65 @@
         </div>
       </div>
     </div>
+    
+    <!-- 修改密码模态框（使用用户中心组件） -->
+    <UserCenterModal 
+      v-if="showChangePassword"
+      v-model:show="showChangePassword" 
+      :username="loginUsername || ''"
+      :require-password-change="true"
+      @password-changed="handlePasswordChangeSuccess"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
 import axios from 'axios'
+import { ref } from 'vue'
+import UserCenterModal from './UserCenterModal.vue'
 
 const emit = defineEmits(['login-success'])
 
-const username = ref('admin')
+const username = ref('')
 const password = ref('')
 const rememberMe = ref(true)
 const loading = ref(false)
 const error = ref('')
+const showChangePassword = ref(false)
+const loginToken = ref(null)
+const loginUsername = ref(null)
 
 async function handleLogin() {
+  // 如果正在加载，直接返回，避免重复提交
+  if (loading.value) {
+    return
+  }
+  
   error.value = ''
   loading.value = true
   
   try {
     const res = await axios.post('/api/login', {
-      username: username.value,
+      username: username.value.trim(),
       password: password.value
     })
     
     if (res.data.success) {
-      // 保存 token
+      // 检查是否需要修改密码
+      if (res.data.require_password_change) {
+        // 保存token和用户名，但先不触发登录成功事件
+        loginToken.value = res.data.token
+        loginUsername.value = res.data.username
+        
+        // 设置 axios 默认 header（修改密码时需要）
+        axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`
+        
+        showChangePassword.value = true
+        loading.value = false
+        return
+      }
+      
+      // 正常登录流程
       const storage = rememberMe.value ? localStorage : sessionStorage
       storage.setItem('auth_token', res.data.token)
       storage.setItem('username', res.data.username)
@@ -125,13 +146,46 @@ async function handleLogin() {
         token: res.data.token
       })
     } else {
+      // 登录失败，显示错误信息，不闪退
       error.value = res.data.error || '登录失败'
+      loading.value = false
     }
   } catch (err) {
-    error.value = err.response?.data?.error || '登录失败，请检查网络连接'
-  } finally {
+    // 捕获所有错误，确保不会闪退
+    console.error('登录错误:', err)
+    if (err.response) {
+      // 服务器返回了错误响应
+      const status = err.response.status
+      if (status === 401) {
+        error.value = '用户名或密码错误'
+      } else {
+        error.value = err.response.data?.error || err.response.data?.detail || '登录失败，请检查用户名和密码'
+      }
+    } else if (err.request) {
+      // 请求已发出但没有收到响应
+      error.value = '网络连接失败，请检查网络设置'
+    } else {
+      // 其他错误
+      error.value = '登录失败，请稍后重试'
+    }
     loading.value = false
   }
+}
+
+function handlePasswordChangeSuccess() {
+  // 密码修改成功后，完成登录流程
+  const storage = rememberMe.value ? localStorage : sessionStorage
+  storage.setItem('auth_token', loginToken.value)
+  storage.setItem('username', loginUsername.value)
+  
+  axios.defaults.headers.common['Authorization'] = `Bearer ${loginToken.value}`
+  
+  emit('login-success', {
+    username: loginUsername.value,
+    token: loginToken.value
+  })
+  
+  showChangePassword.value = false
 }
 </script>
 

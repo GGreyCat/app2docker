@@ -23,6 +23,7 @@ from backend.auth import authenticate, verify_token, require_auth
 UPLOAD_DIR = "data/uploads"
 BUILD_DIR = "data/docker_build"
 EXPORT_DIR = "data/exports"
+LOGS_DIR = "data/logs"  # 操作日志目录
 # 模板目录：内置模板（只读）+ 用户自定义模板（可读写）
 BUILTIN_TEMPLATES_DIR = "templates"  # 内置模板，打包到Docker镜像中
 USER_TEMPLATES_DIR = "data/templates"  # 用户自定义模板，通过Docker映射持久化
@@ -1163,7 +1164,7 @@ class BuildManager:
                 else:
                     return False
                 log("✅ 解压完成\n")
-                
+
                 # 列出解压后的目录概况和文件
                 try:
                     log("📂 解压后目录概况：\n")
@@ -1174,14 +1175,14 @@ class BuildManager:
                         files = []
                         total_size = 0
                         total_files = 0
-                        
+
                         for item in root_items:
                             item_path = os.path.join(extract_to, item)
                             if os.path.isdir(item_path):
                                 dirs.append(item)
                             elif os.path.isfile(item_path):
                                 files.append(item)
-                        
+
                         # 递归统计所有文件大小和数量
                         for root, dirs_list, files_list in os.walk(extract_to):
                             for f in files_list:
@@ -1189,7 +1190,7 @@ class BuildManager:
                                 if os.path.isfile(file_path_full):
                                     total_size += os.path.getsize(file_path_full)
                                     total_files += 1
-                        
+
                         # 格式化大小
                         if total_size < 1024:
                             size_str = f"{total_size} B"
@@ -1197,19 +1198,19 @@ class BuildManager:
                             size_str = f"{total_size / 1024:.2f} KB"
                         else:
                             size_str = f"{total_size / (1024 * 1024):.2f} MB"
-                        
+
                         log(f"  📁 根目录下目录数: {len(dirs)}\n")
                         log(f"  📄 根目录下文件数: {len(files)}\n")
                         log(f"  📊 总文件数: {total_files}\n")
                         log(f"  💾 总大小: {size_str}\n")
-                        
+
                         if dirs:
                             log("  📁 根目录列表：\n")
                             for d in sorted(dirs)[:20]:  # 最多显示20个
                                 log(f"    - {d}/\n")
                             if len(dirs) > 20:
                                 log(f"    ... 还有 {len(dirs) - 20} 个目录\n")
-                        
+
                         if files:
                             log("  📄 根目录文件列表：\n")
                             for f in sorted(files)[:30]:  # 最多显示30个
@@ -1227,7 +1228,7 @@ class BuildManager:
                                 log(f"    ... 还有 {len(files) - 30} 个文件\n")
                 except Exception as e:
                     log(f"⚠️  无法列出目录内容: {str(e)}\n")
-                
+
                 return True
             except Exception as e:
                 log(f"❌ 解压失败: {str(e)}\n")
@@ -1313,14 +1314,18 @@ class BuildManager:
                     if push_registry:
                         push_registry_config = get_registry_by_name(push_registry)
                         if not push_registry_config:
-                            log(f"⚠️  指定的推送仓库 '{push_registry}' 不存在，使用激活仓库\n")
-                    
+                            log(
+                                f"⚠️  指定的推送仓库 '{push_registry}' 不存在，使用激活仓库\n"
+                            )
+
                     # 如果没有指定或指定失败，使用激活的仓库
                     if not push_registry_config:
                         push_registry_config = get_active_registry()
 
                     log("🚀 开始模拟推送...\n")
-                    log(f"🎯 使用推送仓库: {push_registry_config.get('name', 'Unknown')}\n")
+                    log(
+                        f"🎯 使用推送仓库: {push_registry_config.get('name', 'Unknown')}\n"
+                    )
                     username = push_registry_config.get("username", None)
                     log(f"🚀 账号: {username}\n")
                     for i in range(1, 4):
@@ -1465,13 +1470,17 @@ class BuildManager:
                         log(f"\n📤 开始推送镜像: {full_tag}\n")
                         log(f"🎯 使用指定推送仓库: {push_registry}\n")
                     else:
-                        log(f"⚠️  指定的推送仓库 '{push_registry}' 不存在，使用激活仓库\n")
-                
+                        log(
+                            f"⚠️  指定的推送仓库 '{push_registry}' 不存在，使用激活仓库\n"
+                        )
+
                 # 如果没有指定或指定失败，使用激活的仓库
                 if not push_registry_config:
                     push_registry_config = get_active_registry()
                     log(f"\n📤 开始推送镜像: {full_tag}\n")
-                    log(f"🎯 使用激活仓库: {push_registry_config.get('name', 'Unknown')}\n")
+                    log(
+                        f"🎯 使用激活仓库: {push_registry_config.get('name', 'Unknown')}\n"
+                    )
 
                 push_username = push_registry_config.get("username")
                 push_password = push_registry_config.get("password")
@@ -1524,6 +1533,7 @@ class BuildManager:
 # ============ 导出任务管理器 ============
 class ExportTaskManager:
     """导出任务管理器 - 管理镜像导出任务，支持异步导出和文件存储"""
+
     _instance_lock = threading.Lock()
     _instance = None
 
@@ -1541,10 +1551,10 @@ class ExportTaskManager:
         self.tasks_dir = os.path.join(EXPORT_DIR, "tasks")
         os.makedirs(self.tasks_dir, exist_ok=True)
         self.tasks_file = os.path.join(self.tasks_dir, "tasks.json")
-        
+
         # 从文件加载任务
         self._load_tasks()
-        
+
         # 启动自动清理任务
         self._start_cleanup_task()
 
@@ -1552,11 +1562,11 @@ class ExportTaskManager:
         """从文件加载任务列表"""
         if not os.path.exists(self.tasks_file):
             return
-        
+
         try:
-            with open(self.tasks_file, 'r', encoding='utf-8') as f:
+            with open(self.tasks_file, "r", encoding="utf-8") as f:
                 tasks_data = json.load(f)
-            
+
             need_save = False
             with self.lock:
                 self.tasks = {}
@@ -1577,11 +1587,11 @@ class ExportTaskManager:
                             task["completed_at"] = datetime.now().isoformat()
                             need_save = True
                     self.tasks[task_id] = task
-            
+
             # 如果有任务被标记为失败，保存更新（在锁外调用，避免死锁）
             if need_save:
                 self._save_tasks()
-            
+
             print(f"✅ 已加载 {len(self.tasks)} 个导出任务")
         except Exception as e:
             print(f"⚠️ 加载任务列表失败: {e}")
@@ -1593,12 +1603,12 @@ class ExportTaskManager:
             # 先复制数据，避免长时间持有锁
             with self.lock:
                 tasks_list = [task.copy() for task in self.tasks.values()]
-            
+
             # 使用临时文件，然后原子性替换
             temp_file = f"{self.tasks_file}.tmp"
-            with open(temp_file, 'w', encoding='utf-8') as f:
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(tasks_list, f, ensure_ascii=False, indent=2)
-            
+
             # 原子性替换
             if os.path.exists(self.tasks_file):
                 os.replace(temp_file, self.tasks_file)
@@ -1616,8 +1626,10 @@ class ExportTaskManager:
 
     def _start_cleanup_task(self):
         """启动自动清理过期任务的后台线程"""
+
         def cleanup_loop():
             import time
+
             while True:
                 try:
                     time.sleep(3600)  # 每小时检查一次
@@ -1638,7 +1650,7 @@ class ExportTaskManager:
         """创建导出任务"""
         task_id = str(uuid.uuid4())
         created_at = datetime.now()
-        
+
         task_info = {
             "task_id": task_id,
             "image": image,
@@ -1652,13 +1664,13 @@ class ExportTaskManager:
             "file_size": None,
             "error": None,
         }
-        
+
         with self.lock:
             self.tasks[task_id] = task_info
-        
+
         # 保存到文件
         self._save_tasks()
-        
+
         # 启动导出任务
         thread = threading.Thread(
             target=self._export_task,
@@ -1666,7 +1678,7 @@ class ExportTaskManager:
             daemon=True,
         )
         thread.start()
-        
+
         return task_id
 
     def _export_task(self, task_id: str):
@@ -1676,28 +1688,32 @@ class ExportTaskManager:
                 return
             task_info = self.tasks[task_id]
             task_info["status"] = "running"
-        
+
         # 保存状态更新
         self._save_tasks()
-        
+
         try:
             image = task_info["image"]
             tag = task_info["tag"]
             compress = task_info["compress"]
             registry = task_info["registry"]
-            
+
             if not DOCKER_AVAILABLE:
                 raise RuntimeError("Docker 服务不可用，无法导出镜像")
-            
+
             # 获取认证信息
-            from backend.config import get_all_registries, get_active_registry, get_registry_by_name
-            
+            from backend.config import (
+                get_all_registries,
+                get_active_registry,
+                get_registry_by_name,
+            )
+
             registry_config = None
             if registry:
                 registry_config = get_registry_by_name(registry)
                 if not registry_config:
                     raise RuntimeError(f"指定的仓库 '{registry}' 不存在")
-            
+
             if not registry_config:
                 # 尝试智能匹配仓库
                 def find_matching_registry_for_export(image_name):
@@ -1714,45 +1730,45 @@ class ExportTaskManager:
                             ):
                                 return reg
                     return None
-                
+
                 registry_config = find_matching_registry_for_export(image)
                 if not registry_config:
                     registry_config = get_active_registry()
-            
+
             username = registry_config.get("username")
             password = registry_config.get("password")
             auth_config = None
             if username and password:
                 auth_config = {"username": username, "password": password}
-            
+
             # 拉取镜像
             pull_stream = docker_builder.pull_image(image, tag, auth_config)
             for chunk in pull_stream:
                 if "error" in chunk:
                     raise RuntimeError(chunk["error"])
-            
+
             full_tag = f"{image}:{tag}"
             docker_builder.get_image(full_tag)
-            
+
             # 创建任务文件目录
             task_dir = os.path.join(self.tasks_dir, task_id)
             os.makedirs(task_dir, exist_ok=True)
-            
+
             # 生成文件名
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             safe_base = get_safe_filename(image.replace("/", "_") or "image")
             tar_filename = f"{safe_base}-{tag}-{timestamp}.tar"
             tar_path = os.path.join(task_dir, tar_filename)
-            
+
             # 导出镜像
             image_stream = docker_builder.export_image(full_tag)
             with open(tar_path, "wb") as f:
                 for chunk in image_stream:
                     f.write(chunk)
-            
+
             final_path = tar_path
             file_size = os.path.getsize(tar_path)
-            
+
             # 如果需要压缩
             if compress.lower() in ("gzip", "gz", "tgz", "1", "true", "yes"):
                 final_path = f"{tar_path}.gz"
@@ -1760,7 +1776,7 @@ class ExportTaskManager:
                     shutil.copyfileobj(src, dst)
                 os.remove(tar_path)
                 file_size = os.path.getsize(final_path)
-            
+
             # 更新任务状态
             with self.lock:
                 if task_id in self.tasks:
@@ -1768,12 +1784,13 @@ class ExportTaskManager:
                     self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
                     self.tasks[task_id]["file_path"] = final_path
                     self.tasks[task_id]["file_size"] = file_size
-            
+
             # 保存到文件
             self._save_tasks()
-                    
+
         except Exception as e:
             import traceback
+
             error_msg = str(e)
             traceback.print_exc()
             with self.lock:
@@ -1781,7 +1798,7 @@ class ExportTaskManager:
                     self.tasks[task_id]["status"] = "failed"
                     self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
                     self.tasks[task_id]["error"] = error_msg
-            
+
             # 保存到文件
             self._save_tasks()
 
@@ -1821,24 +1838,24 @@ class ExportTaskManager:
             task = self.tasks[task_id]
             file_path = task.get("file_path")
             task_dir = os.path.join(self.tasks_dir, task_id)
-            
+
             # 删除文件
             if file_path and os.path.exists(file_path):
                 try:
                     os.remove(file_path)
                 except Exception as e:
                     print(f"⚠️ 删除文件失败: {e}")
-            
+
             # 删除任务目录
             if os.path.exists(task_dir):
                 try:
                     shutil.rmtree(task_dir, ignore_errors=True)
                 except Exception as e:
                     print(f"⚠️ 删除目录失败: {e}")
-            
+
             # 删除任务记录
             del self.tasks[task_id]
-        
+
         # 保存到文件
         self._save_tasks()
         return True
@@ -1846,18 +1863,88 @@ class ExportTaskManager:
     def cleanup_expired_tasks(self, days: int = 1):
         """清理过期任务（默认保留1天）"""
         from datetime import timedelta
+
         cutoff_time = datetime.now() - timedelta(days=days)
-        
+
         expired_task_ids = []
         with self.lock:
             for task_id, task in self.tasks.items():
                 created_at = datetime.fromisoformat(task["created_at"])
                 if created_at < cutoff_time:
                     expired_task_ids.append(task_id)
-        
+
         for task_id in expired_task_ids:
             try:
                 self.delete_task(task_id)
                 print(f"🗑️ 已清理过期任务: {task_id}")
             except Exception as e:
                 print(f"⚠️ 清理任务失败 {task_id}: {e}")
+
+
+# ============ 操作日志管理器 ============
+class OperationLogger:
+    """操作日志管理器 - 记录用户操作"""
+
+    _instance_lock = threading.Lock()
+    _instance = None
+    _logs_file = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._init()
+        return cls._instance
+
+    def _init(self):
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        self._logs_file = os.path.join(LOGS_DIR, "operations.jsonl")
+        self.lock = threading.Lock()
+
+    @classmethod
+    def log(cls, username: str, operation: str, details: dict = None):
+        """记录操作日志"""
+        instance = cls()
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "username": username,
+            "operation": operation,
+            "details": details or {},
+        }
+
+        try:
+            with instance.lock:
+                with open(instance._logs_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+        except Exception as e:
+            print(f"⚠️ 记录操作日志失败: {e}")
+
+    def get_logs(self, limit: int = 100, username: str = None, operation: str = None):
+        """获取操作日志"""
+        if not os.path.exists(self._logs_file):
+            return []
+
+        logs = []
+        try:
+            with open(self._logs_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        log_entry = json.loads(line)
+                        # 过滤
+                        if username and log_entry.get("username") != username:
+                            continue
+                        if operation and log_entry.get("operation") != operation:
+                            continue
+                        logs.append(log_entry)
+                    except json.JSONDecodeError:
+                        continue
+
+            # 按时间倒序排列
+            logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            return logs[:limit]
+        except Exception as e:
+            print(f"⚠️ 读取操作日志失败: {e}")
+            return []

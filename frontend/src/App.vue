@@ -22,10 +22,9 @@
                 <i class="fas fa-tools"></i> 操作面板
               </h5>
               <div class="d-flex gap-2 align-items-center">
-                <!-- 用户信息 -->
-                <span class="text-muted small me-2">
-                  <i class="fas fa-user-circle"></i> {{ username }}
-                </span>
+                <button class="btn btn-outline-primary btn-sm" @click="showUserCenter = true">
+                  <i class="fas fa-user-circle"></i> 用户中心
+                </button>
                 <button class="btn btn-outline-secondary btn-sm" @click="showBuildLog = true">
                   <i class="fas fa-terminal"></i> 查看日志
                 </button>
@@ -90,6 +89,16 @@
                   <i class="fas fa-layer-group"></i> 模板管理
                 </button>
               </li>
+              <li class="nav-item">
+                <button 
+                  type="button"
+                  class="nav-link" 
+                  :class="{ active: activeTab === 'logs' }"
+                  @click="activeTab = 'logs'"
+                >
+                  <i class="fas fa-history"></i> 操作日志
+                </button>
+              </li>
             </ul>
 
             <!-- 标签页内容 -->
@@ -99,6 +108,7 @@
               <ExportTaskList v-if="activeTab === 'export-tasks'" />
               <ComposePanel v-if="activeTab === 'compose'" />
               <TemplatePanel v-if="activeTab === 'template'" />
+              <OperationLogs v-if="activeTab === 'logs'" />
             </div>
           </div>
         </div>
@@ -109,6 +119,9 @@
       
       <!-- 配置模态框 -->
       <ConfigModal v-if="showConfig" v-model="showConfig" />
+      
+      <!-- 用户中心模态框 -->
+      <UserCenterModal v-if="showUserCenter" v-model:show="showUserCenter" :username="username" />
     </div>
   </div>
 </template>
@@ -125,14 +138,17 @@ import ExportPanel from './components/ExportPanel.vue'
 import ExportTaskList from './components/ExportTaskList.vue'
 import ComposePanel from './components/ComposePanel.vue'
 import TemplatePanel from './components/TemplatePanel.vue'
+import OperationLogs from './components/OperationLogs.vue'
 import BuildLogModal from './components/BuildLogModal.vue'
 import ConfigModal from './components/ConfigModal.vue'
+import UserCenterModal from './components/UserCenterModal.vue'
 
 const authenticated = ref(false)
 const username = ref('')
 const activeTab = ref('build')
 const showBuildLog = ref(false)
 const showConfig = ref(false)
+const showUserCenter = ref(false)
 
 function handleLoginSuccess(data) {
   authenticated.value = true

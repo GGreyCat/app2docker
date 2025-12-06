@@ -59,12 +59,17 @@ def authenticate(username: str, password: str) -> dict:
     if not verify_password(password, users[username]):
         return {'success': False, 'error': '用户名或密码错误'}
     
+    # 检查是否使用默认密码
+    default_password_hash = hash_password("admin")
+    is_default_password = verify_password("admin", users[username])
+    
     token = create_token(username)
     return {
         'success': True,
         'token': token,
         'username': username,
-        'expires_in': TOKEN_EXPIRE_HOURS * 3600
+        'expires_in': TOKEN_EXPIRE_HOURS * 3600,
+        'require_password_change': is_default_password  # 需要修改密码
     }
 
 

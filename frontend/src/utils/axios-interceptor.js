@@ -29,9 +29,13 @@ export function setupAxiosInterceptors() {
     },
     (error) => {
       if (error.response?.status === 401) {
-        // Token 过期或无效，清除认证信息并重新加载页面
-        clearAuth()
-        window.location.reload()
+        // 如果是登录接口，不重新加载页面（让登录页面自己处理错误）
+        const isLoginRequest = error.config?.url?.includes('/api/login')
+        if (!isLoginRequest) {
+          // Token 过期或无效，清除认证信息并重新加载页面
+          clearAuth()
+          window.location.reload()
+        }
       }
       return Promise.reject(error)
     }
