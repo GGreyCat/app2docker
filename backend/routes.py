@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from backend.handlers import (
     BuildManager,
+    BuildTaskManager,
     ExportTaskManager,
     OperationLogger,
     generate_image_name,
@@ -491,7 +492,7 @@ async def upload_file(
 
         # 调用构建管理器
         manager = BuildManager()
-        build_id = manager.start_build(
+        task_id = manager.start_build(
             file_data=file_data,
             image_name=imagename,
             tag=tag,
@@ -506,7 +507,7 @@ async def upload_file(
 
         # 记录操作日志
         OperationLogger.log(username, "build", {
-            "build_id": build_id,
+            "task_id": task_id,
             "image": f"{imagename}:{tag}",
             "template": template,
             "project_type": project_type,
@@ -516,8 +517,8 @@ async def upload_file(
 
         return JSONResponse(
             {
-                "build_id": build_id,
-                "message": "构建任务已启动，请通过日志查看进度",
+                "task_id": task_id,
+                "message": "构建任务已启动，请查看任务管理",
             }
         )
     except HTTPException:
@@ -558,7 +559,7 @@ async def build_from_source(
 
         # 调用构建管理器
         manager = BuildManager()
-        build_id = manager.start_build_from_source(
+        task_id = manager.start_build_from_source(
             git_url=git_url,
             image_name=imagename,
             tag=tag,
@@ -574,7 +575,7 @@ async def build_from_source(
 
         # 记录操作日志
         OperationLogger.log(username, "build_from_source", {
-            "build_id": build_id,
+            "task_id": task_id,
             "image": f"{imagename}:{tag}",
             "template": template,
             "project_type": project_type,
@@ -584,8 +585,8 @@ async def build_from_source(
         })
 
         return JSONResponse({
-            "build_id": build_id,
-            "message": "构建任务已启动，请通过日志查看进度",
+            "task_id": task_id,
+            "message": "构建任务已启动，请查看任务管理",
         })
     except HTTPException:
         raise
@@ -595,10 +596,104 @@ async def build_from_source(
         raise HTTPException(status_code=500, detail=f"构建失败: {str(e)}")
 
 
+@router.get("/build-tasks")
+async def get_build_tasks(
+    status: Optional[str] = Query(None, description="任务状态过滤"),
+    task_type: Optional[str] = Query(None, description="任务类型过滤"),
+):
+    """获取构建任务列表"""
+    try:
+        manager = BuildTaskManager()
+        tasks = manager.list_tasks(status=status, task_type=task_type)
+        return JSONResponse({"tasks": tasks})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取构建任务列表失败: {str(e)}")
+
+
+@router.get("/tasks")
+async def get_all_tasks(
+    status: Optional[str] = Query(None, description="任务状态过滤"),
+    task_type: Optional[str] = Query(None, description="任务类型过滤: build, build_from_source, export"),
+):
+    """获取所有任务（构建任务 + 导出任务）"""
+    try:
+        all_tasks = []
+        
+        # 获取构建任务
+        build_manager = BuildTaskManager()
+        build_tasks = build_manager.list_tasks(status=status, task_type=task_type)
+        for task in build_tasks:
+            task["task_category"] = "build"  # 标记为构建任务
+            all_tasks.append(task)
+        
+        # 获取导出任务
+        export_manager = ExportTaskManager()
+        export_tasks = export_manager.list_tasks(status=status)
+        for task in export_tasks:
+            task["task_category"] = "export"  # 标记为导出任务
+            all_tasks.append(task)
+        
+        # 按创建时间倒序排列
+        all_tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        return JSONResponse({"tasks": all_tasks})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取任务列表失败: {str(e)}")
+
+
+@router.get("/build-tasks/{task_id}")
+async def get_build_task(task_id: str):
+    """获取构建任务详情"""
+    try:
+        manager = BuildTaskManager()
+        task = manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        return JSONResponse(task)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取任务详情失败: {str(e)}")
+
+
+@router.get("/build-tasks/{task_id}/logs")
+async def get_build_task_logs(task_id: str):
+    """获取构建任务日志"""
+    try:
+        manager = BuildTaskManager()
+        logs = manager.get_logs(task_id)
+        return PlainTextResponse(logs)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取任务日志失败: {str(e)}")
+
+
+@router.delete("/build-tasks/{task_id}")
+async def delete_build_task(task_id: str, request: Request):
+    """删除构建任务"""
+    try:
+        username = get_current_username(request)
+        manager = BuildTaskManager()
+        if manager.delete_task(task_id):
+            OperationLogger.log(username, "delete_build_task", {"task_id": task_id})
+            return JSONResponse({"success": True, "message": "任务已删除"})
+        else:
+            raise HTTPException(status_code=404, detail="任务不存在")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除任务失败: {str(e)}")
+
+
 @router.get("/get-logs")
 async def get_logs(build_id: str = Query(...)):
-    """获取构建日志"""
+    """获取构建日志（兼容旧接口）"""
     try:
+        # 尝试作为 task_id 获取
+        task_manager = BuildTaskManager()
+        logs = task_manager.get_logs(build_id)
+        if logs:
+            return PlainTextResponse(logs)
+        # 回退到旧的日志系统
         manager = BuildManager()
         logs = manager.get_logs(build_id)
         log_text = "".join(logs) if isinstance(logs, list) else str(logs)

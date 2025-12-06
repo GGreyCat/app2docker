@@ -25,9 +25,6 @@
                 <button class="btn btn-outline-primary btn-sm" @click="showUserCenter = true">
                   <i class="fas fa-user-circle"></i> 用户中心
                 </button>
-                <button class="btn btn-outline-secondary btn-sm" @click="showBuildLog = true">
-                  <i class="fas fa-terminal"></i> 查看日志
-                </button>
                 <button class="btn btn-outline-primary btn-sm" @click="showConfig = true">
                   <i class="fas fa-cog"></i> 配置
                 </button>
@@ -73,10 +70,10 @@
                 <button 
                   type="button"
                   class="nav-link" 
-                  :class="{ active: activeTab === 'export-tasks' }"
-                  @click="activeTab = 'export-tasks'"
+                  :class="{ active: activeTab === 'tasks' }"
+                  @click="activeTab = 'tasks'"
                 >
-                  <i class="fas fa-list-check"></i> 导出任务
+                  <i class="fas fa-list-check"></i> 任务管理
                 </button>
               </li>
               <li class="nav-item">
@@ -116,7 +113,7 @@
               <BuildPanel v-if="activeTab === 'build'" />
               <SourceBuildPanel v-if="activeTab === 'source-build'" />
               <ExportPanel v-if="activeTab === 'export'" />
-              <ExportTaskList v-if="activeTab === 'export-tasks'" />
+              <TaskManager v-if="activeTab === 'tasks'" />
               <ComposePanel v-if="activeTab === 'compose'" />
               <TemplatePanel v-if="activeTab === 'template'" />
               <OperationLogs v-if="activeTab === 'logs'" />
@@ -124,9 +121,6 @@
           </div>
         </div>
       </div>
-      
-      <!-- 构建日志模态框 - 始终挂载以便监听事件 -->
-      <BuildLogModal v-model="showBuildLog" ref="buildLogModal" />
       
       <!-- 配置模态框 -->
       <ConfigModal v-if="showConfig" v-model="showConfig" />
@@ -138,27 +132,25 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { isAuthenticated, getUsername, getToken, logout } from './utils/auth'
 import axios from 'axios'
+import { onMounted, ref } from 'vue'
+import { getToken, getUsername, isAuthenticated, logout } from './utils/auth'
 
 // 懒加载组件
-import LoginPage from './components/LoginPage.vue'
 import BuildPanel from './components/BuildPanel.vue'
-import SourceBuildPanel from './components/SourceBuildPanel.vue'
-import ExportPanel from './components/ExportPanel.vue'
-import ExportTaskList from './components/ExportTaskList.vue'
 import ComposePanel from './components/ComposePanel.vue'
-import TemplatePanel from './components/TemplatePanel.vue'
-import OperationLogs from './components/OperationLogs.vue'
-import BuildLogModal from './components/BuildLogModal.vue'
 import ConfigModal from './components/ConfigModal.vue'
+import ExportPanel from './components/ExportPanel.vue'
+import LoginPage from './components/LoginPage.vue'
+import OperationLogs from './components/OperationLogs.vue'
+import SourceBuildPanel from './components/SourceBuildPanel.vue'
+import TaskManager from './components/TaskManager.vue'
+import TemplatePanel from './components/TemplatePanel.vue'
 import UserCenterModal from './components/UserCenterModal.vue'
 
 const authenticated = ref(false)
 const username = ref('')
 const activeTab = ref('build')
-const showBuildLog = ref(false)
 const showConfig = ref(false)
 const showUserCenter = ref(false)
 

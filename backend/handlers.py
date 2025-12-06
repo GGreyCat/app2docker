@@ -16,7 +16,14 @@ from http.server import BaseHTTPRequestHandler
 from urllib import parse
 import yaml
 
-from backend.config import load_config, save_config, CONFIG_FILE, get_git_config
+from backend.config import (
+    load_config,
+    save_config,
+    CONFIG_FILE,
+    get_git_config,
+    get_registry_by_name,
+    get_active_registry,
+)
 from backend.utils import generate_image_name, get_safe_filename
 from backend.auth import authenticate, verify_token, require_auth
 
@@ -1082,9 +1089,10 @@ class BuildManager:
         return cls._instance
 
     def _init(self):
-        self.logs = defaultdict(deque)  # build_id -> deque[str]
+        self.logs = defaultdict(deque)  # build_id -> deque[str] (保留用于兼容)
         self.lock = threading.Lock()
-        self.tasks = {}  # build_id -> Thread
+        self.tasks = {}  # build_id -> Thread (保留用于兼容)
+        self.task_manager = BuildTaskManager()  # 使用任务管理器
 
     def start_build(
         self,
@@ -1099,11 +1107,24 @@ class BuildManager:
         push_registry: str = None,  # 推送时使用的仓库名称
         extract_archive: bool = True,  # 是否解压压缩包（默认解压）
     ):
-        build_id = str(uuid.uuid4())
+        # 创建任务
+        task_id = self.task_manager.create_task(
+            task_type="build",
+            image_name=image_name,
+            tag=tag,
+            should_push=should_push,
+            selected_template=selected_template,
+            original_filename=original_filename,
+            project_type=project_type,
+            template_params=template_params or {},
+            push_registry=push_registry,
+            extract_archive=extract_archive,
+        )
+
         thread = threading.Thread(
             target=self._build_task,
             args=(
-                build_id,
+                task_id,
                 file_data,
                 image_name,
                 tag,
@@ -1119,12 +1140,12 @@ class BuildManager:
         )
         thread.start()
         with self.lock:
-            self.tasks[build_id] = thread
-        return build_id
+            self.tasks[task_id] = thread
+        return task_id
 
     def _build_task(
         self,
-        build_id: str,
+        task_id: str,
         file_data: bytes,
         image_name: str,
         tag: str,
@@ -1137,15 +1158,23 @@ class BuildManager:
         extract_archive: bool = True,  # 是否解压压缩包（默认解压）
     ):
         full_tag = f"{image_name}:{tag}"
-        build_context = os.path.join(BUILD_DIR, image_name.replace("/", "_"))
+        # 使用 task_id 作为构建上下文目录名的一部分，避免冲突
+        build_context = os.path.join(
+            BUILD_DIR, f"{image_name.replace('/', '_')}_{task_id[:8]}"
+        )
 
         def log(msg: str):
             """添加日志，自动确保以换行符结尾"""
+            if not msg.endswith("\n"):
+                msg = msg + "\n"
+            # 使用任务管理器记录日志
+            self.task_manager.add_log(task_id, msg)
+            # 保留旧的日志系统用于兼容
             with self.lock:
-                # 确保消息以换行符结尾
-                if not msg.endswith("\n"):
-                    msg = msg + "\n"
-                self.logs[build_id].append(msg)
+                self.logs[task_id].append(msg)
+
+        # 更新任务状态为运行中
+        self.task_manager.update_task_status(task_id, "running")
 
         def do_extract_archive(file_path: str, extract_to: str):
             """解压压缩文件"""
@@ -1512,10 +1541,14 @@ class BuildManager:
                     log(f"\n❌ 推送异常: {e}\n")
 
             log("\n🎉🎉🎉 所有操作已完成！🎉🎉🎉\n")
+            # 更新任务状态为完成
+            self.task_manager.update_task_status(task_id, "completed")
 
         except Exception as e:
             clean_msg = re.sub(r"[\x00-\x1F\x7F]", " ", str(e)).strip()
             log(f"\n❌ 构建异常: {clean_msg}\n")
+            # 更新任务状态为失败
+            self.task_manager.update_task_status(task_id, "failed", error=clean_msg)
             import traceback
 
             traceback.print_exc()
@@ -1545,11 +1578,26 @@ class BuildManager:
         use_project_dockerfile: bool = True,  # 是否优先使用项目中的 Dockerfile
     ):
         """从 Git 源码开始构建"""
-        build_id = str(uuid.uuid4())
+        # 创建任务
+        task_id = self.task_manager.create_task(
+            task_type="build_from_source",
+            image_name=image_name,
+            tag=tag,
+            git_url=git_url,
+            should_push=should_push,
+            selected_template=selected_template,
+            project_type=project_type,
+            template_params=template_params or {},
+            push_registry=push_registry,
+            branch=branch,
+            sub_path=sub_path,
+            use_project_dockerfile=use_project_dockerfile,
+        )
+
         thread = threading.Thread(
             target=self._build_from_source_task,
             args=(
-                build_id,
+                task_id,
                 git_url,
                 image_name,
                 tag,
@@ -1566,12 +1614,12 @@ class BuildManager:
         )
         thread.start()
         with self.lock:
-            self.tasks[build_id] = thread
-        return build_id
+            self.tasks[task_id] = thread
+        return task_id
 
     def _build_from_source_task(
         self,
-        build_id: str,
+        task_id: str,
         git_url: str,
         image_name: str,
         tag: str,
@@ -1586,22 +1634,33 @@ class BuildManager:
     ):
         """从 Git 源码构建任务"""
         full_tag = f"{image_name}:{tag}"
-        build_context = os.path.join(BUILD_DIR, image_name.replace("/", "_"))
+        # 使用 task_id 作为构建上下文目录名的一部分，避免冲突
+        build_context = os.path.join(
+            BUILD_DIR, f"{image_name.replace('/', '_')}_{task_id[:8]}"
+        )
 
         def log(msg: str):
             """添加日志"""
+            if not msg.endswith("\n"):
+                msg = msg + "\n"
+            # 使用任务管理器记录日志
+            self.task_manager.add_log(task_id, msg)
+            # 保留旧的日志系统用于兼容
             with self.lock:
-                if not msg.endswith("\n"):
-                    msg = msg + "\n"
-                self.logs[build_id].append(msg)
+                self.logs[task_id].append(msg)
+
+        # 更新任务状态为运行中
+        self.task_manager.update_task_status(task_id, "running")
 
         try:
             log(f"🚀 开始从 Git 源码构建: {git_url}\n")
 
             # 清理旧的构建上下文
             if os.path.exists(build_context):
-                log(f"🧹 清理旧的构建上下文: {build_context}\n")
-                shutil.rmtree(build_context)
+                try:
+                    shutil.rmtree(build_context)
+                except Exception as e:
+                    log(f"⚠️ 清理旧构建上下文失败: {e}\n")
             os.makedirs(build_context, exist_ok=True)
 
             # 克隆 Git 仓库
@@ -1669,55 +1728,57 @@ class BuildManager:
                     log(f"📋 项目中没有 Dockerfile，使用模板生成\n")
 
                 # 使用模板生成 Dockerfile
-                from backend.template_parser import load_template, parse_template
-
                 template_path = get_template_path(selected_template, project_type)
                 if not template_path or not os.path.exists(template_path):
                     raise RuntimeError(f"模板不存在: {selected_template}")
 
-                template_content = load_template(template_path)
-                dockerfile_content = parse_template(
-                    template_content, template_params or {}, project_type
-                )
-
-                # 保存 Dockerfile
                 dockerfile_path = os.path.join(build_context, "Dockerfile")
-                with open(dockerfile_path, "w", encoding="utf-8") as f:
-                    f.write(dockerfile_content)
-                log(f"✅ Dockerfile 已从模板生成\n")
+                from backend.template_parser import parse_template
 
-            # 清理临时克隆目录
-            shutil.rmtree(temp_clone_dir, ignore_errors=True)
+                parse_template(
+                    template_path,
+                    dockerfile_path,
+                    {
+                        "PROJECT_TYPE": project_type,
+                        "UPLOADED_FILENAME": "app.jar",  # 源码构建不需要这个
+                        **template_params,
+                    },
+                )
+                log(f"✅ 已生成 Dockerfile\n")
 
             # 构建镜像
-            log(f"🔨 开始构建 Docker 镜像: {full_tag}\n")
-            if not DOCKER_AVAILABLE:
-                raise RuntimeError("Docker 服务不可用")
+            log(f"🔨 开始构建镜像: {full_tag}\n")
+            log(f"📂 构建上下文: {build_context}\n")
+            log(f"📄 Dockerfile 绝对路径: {dockerfile_path}\n")
+            # Docker API 需要相对于构建上下文的 Dockerfile 路径
+            dockerfile_relative = os.path.relpath(dockerfile_path, build_context)
+            log(f"📄 Dockerfile 相对路径: {dockerfile_relative}\n")
+            log(f"🐳 准备调用 Docker 构建器...\n")
+            try:
+                build_stream = docker_builder.build_image(
+                    path=build_context, tag=full_tag, dockerfile=dockerfile_relative
+                )
+                log(f"✅ Docker 构建流已启动\n")
+            except Exception as e:
+                log(f"❌ 启动 Docker 构建失败: {str(e)}\n")
+                raise
 
-            build_stream = docker_builder.build_image(
-                build_context, full_tag, dockerfile_path
-            )
             for chunk in build_stream:
                 if isinstance(chunk, dict):
                     if "stream" in chunk:
                         log(chunk["stream"])
                     elif "error" in chunk:
-                        raise RuntimeError(chunk["error"])
+                        error_msg = chunk["error"]
+                        log(f"❌ 构建错误: {error_msg}\n")
+                        raise RuntimeError(error_msg)
                 else:
                     log(str(chunk))
 
             log(f"✅ 镜像构建完成: {full_tag}\n")
 
-            # 推送镜像
+            # 如果需要推送
             if should_push:
-                log(f"📤 开始推送镜像到仓库...\n")
-                from backend.config import (
-                    get_all_registries,
-                    get_active_registry,
-                    get_registry_by_name,
-                )
-
-                registry_config = None
+                log(f"📡 开始推送镜像...\n")
                 if push_registry:
                     registry_config = get_registry_by_name(push_registry)
                     if not registry_config:
@@ -1744,13 +1805,27 @@ class BuildManager:
                 log(f"✅ 推送完成\n")
 
             log(f"✅ 所有操作已完成\n")
+            # 更新任务状态为完成
+            self.task_manager.update_task_status(task_id, "completed")
 
         except Exception as e:
             import traceback
 
             error_msg = str(e)
+            error_trace = traceback.format_exc()
             log(f"❌ 构建失败: {error_msg}\n")
+            log(f"📋 错误堆栈:\n{error_trace}\n")
+            # 更新任务状态为失败
+            self.task_manager.update_task_status(task_id, "failed", error=error_msg)
             traceback.print_exc()
+        finally:
+            # 清理构建上下文（可选，保留用于调试）
+            pass
+            # if os.path.exists(build_context):
+            #     try:
+            #         shutil.rmtree(build_context, ignore_errors=True)
+            #     except Exception as e:
+            #         print(f"⚠️ 清理失败: {e}")
 
     def _clone_git_repo(
         self,
@@ -1760,15 +1835,7 @@ class BuildManager:
         git_config: dict = None,
         log_func=None,
     ):
-        """克隆 Git 仓库
-
-        Args:
-            git_url: Git 仓库 URL
-            clone_dir: 目标目录（Git 会在此目录下创建仓库目录）
-            branch: 要检出的分支
-            git_config: Git 配置（用户名、密码、SSH key）
-            log_func: 日志函数
-        """
+        """克隆 Git 仓库"""
         try:
             git_config = git_config or {}
             log = log_func or (lambda x: None)
@@ -1840,9 +1907,13 @@ class BuildManager:
 
             if result.returncode != 0:
                 log(f"❌ Git 克隆失败: {result.stderr}\n")
+                # 清理环境变量
+                if "GIT_SSH_COMMAND" in os.environ:
+                    del os.environ["GIT_SSH_COMMAND"]
                 return False
 
             log(f"✅ Git 仓库克隆成功\n")
+            log(f"📂 仓库已克隆到: {abs_target_dir}\n")
 
             # 清理环境变量
             if "GIT_SSH_COMMAND" in os.environ:
@@ -1852,10 +1923,237 @@ class BuildManager:
 
         except subprocess.TimeoutExpired:
             log("❌ Git 克隆超时（超过5分钟）\n")
+            # 清理环境变量
+            if "GIT_SSH_COMMAND" in os.environ:
+                del os.environ["GIT_SSH_COMMAND"]
             return False
         except Exception as e:
             log(f"❌ Git 克隆异常: {str(e)}\n")
+            # 清理环境变量
+            if "GIT_SSH_COMMAND" in os.environ:
+                del os.environ["GIT_SSH_COMMAND"]
             return False
+
+
+# ============ 构建任务管理器 ============
+class BuildTaskManager:
+    """构建任务管理器 - 管理镜像构建任务，支持异步构建和日志存储"""
+
+    _instance_lock = threading.Lock()
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._init()
+        return cls._instance
+
+    def _init(self):
+        self.tasks = {}  # task_id -> task_info
+        self.lock = threading.Lock()
+        self.tasks_dir = os.path.join(BUILD_DIR, "tasks")
+        os.makedirs(self.tasks_dir, exist_ok=True)
+        self.tasks_file = os.path.join(self.tasks_dir, "tasks.json")
+
+        # 从文件加载任务
+        self._load_tasks()
+
+        # 启动自动清理任务
+        self._start_cleanup_task()
+
+    def _load_tasks(self):
+        """从文件加载任务列表"""
+        if not os.path.exists(self.tasks_file):
+            return
+
+        try:
+            with open(self.tasks_file, "r", encoding="utf-8") as f:
+                tasks_data = json.load(f)
+
+            need_save = False
+            with self.lock:
+                self.tasks = {}
+                for task in tasks_data:
+                    task_id = task["task_id"]
+                    # 如果任务状态是 running 或 pending，标记为失败（因为任务线程已丢失）
+                    if task.get("status") in ("running", "pending"):
+                        task["status"] = "failed"
+                        task["error"] = "服务重启，任务中断"
+                        task["completed_at"] = datetime.now().isoformat()
+                        need_save = True
+                    self.tasks[task_id] = task
+
+            # 如果有任务被标记为失败，保存更新
+            if need_save:
+                self._save_tasks()
+
+            print(f"✅ 已加载 {len(self.tasks)} 个构建任务")
+        except Exception as e:
+            print(f"⚠️ 加载构建任务列表失败: {e}")
+            self.tasks = {}
+
+    def _save_tasks(self):
+        """保存任务列表到文件"""
+        try:
+            with self.lock:
+                tasks_list = [task.copy() for task in self.tasks.values()]
+
+            temp_file = f"{self.tasks_file}.tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(tasks_list, f, ensure_ascii=False, indent=2)
+
+            if os.path.exists(self.tasks_file):
+                os.replace(temp_file, self.tasks_file)
+            else:
+                os.rename(temp_file, self.tasks_file)
+        except Exception as e:
+            print(f"⚠️ 保存构建任务列表失败: {e}")
+            temp_file = f"{self.tasks_file}.tmp"
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+
+    def _start_cleanup_task(self):
+        """启动自动清理过期任务的后台线程"""
+
+        def cleanup_loop():
+            import time
+
+            while True:
+                try:
+                    time.sleep(3600)  # 每小时检查一次
+                    self.cleanup_expired_tasks()
+                except Exception as e:
+                    print(f"⚠️ 清理构建任务出错: {e}")
+
+        cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
+        cleanup_thread.start()
+
+    def create_task(
+        self,
+        task_type: str,  # "build" 或 "build_from_source"
+        image_name: str,
+        tag: str = "latest",
+        **kwargs,  # 其他任务参数
+    ) -> str:
+        """创建构建任务"""
+        task_id = str(uuid.uuid4())
+        created_at = datetime.now()
+
+        task_info = {
+            "task_id": task_id,
+            "task_type": task_type,  # "build" 或 "build_from_source"
+            "image": image_name,
+            "tag": tag,
+            "status": "pending",  # pending, running, completed, failed
+            "created_at": created_at.isoformat(),
+            "completed_at": None,
+            "error": None,
+            "logs": [],  # 任务日志
+            **kwargs,  # 其他任务参数
+        }
+
+        with self.lock:
+            self.tasks[task_id] = task_info
+
+        self._save_tasks()
+        return task_id
+
+    def get_task(self, task_id: str) -> dict:
+        """获取任务信息"""
+        with self.lock:
+            return self.tasks.get(task_id, {}).copy()
+
+    def list_tasks(self, status: str = None, task_type: str = None) -> list:
+        """列出所有任务"""
+        with self.lock:
+            tasks = list(self.tasks.values())
+            if status:
+                tasks = [t for t in tasks if t["status"] == status]
+            if task_type:
+                tasks = [t for t in tasks if t.get("task_type") == task_type]
+            # 按创建时间倒序排列
+            tasks.sort(key=lambda x: x["created_at"], reverse=True)
+            return [t.copy() for t in tasks]
+
+    def update_task_status(self, task_id: str, status: str, error: str = None):
+        """更新任务状态"""
+        with self.lock:
+            if task_id in self.tasks:
+                self.tasks[task_id]["status"] = status
+                if error:
+                    self.tasks[task_id]["error"] = error
+                if status in ("completed", "failed"):
+                    self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
+        self._save_tasks()
+
+    def add_log(self, task_id: str, log_message: str):
+        """添加任务日志"""
+        with self.lock:
+            if task_id in self.tasks:
+                if "logs" not in self.tasks[task_id]:
+                    self.tasks[task_id]["logs"] = []
+                # 限制日志数量，避免内存过大
+                if len(self.tasks[task_id]["logs"]) > 10000:
+                    self.tasks[task_id]["logs"] = self.tasks[task_id]["logs"][-5000:]
+                self.tasks[task_id]["logs"].append(log_message)
+
+        # 每100条日志保存一次，或者如果是关键日志（错误、完成）则立即保存
+        should_save = False
+        with self.lock:
+            if task_id in self.tasks:
+                log_count = len(self.tasks[task_id].get("logs", []))
+                # 关键日志关键词
+                is_critical = any(
+                    keyword in log_message
+                    for keyword in ["❌", "✅", "ERROR", "FAIL", "完成", "失败"]
+                )
+                # 每100条或关键日志保存
+                should_save = (log_count % 100 == 0) or is_critical
+
+        if should_save:
+            self._save_tasks()
+
+    def get_logs(self, task_id: str) -> str:
+        """获取任务日志"""
+        with self.lock:
+            task = self.tasks.get(task_id)
+            if not task:
+                return ""
+            logs = task.get("logs", [])
+            return "".join(logs)
+
+    def delete_task(self, task_id: str) -> bool:
+        """删除任务"""
+        with self.lock:
+            if task_id not in self.tasks:
+                return False
+            del self.tasks[task_id]
+        self._save_tasks()
+        return True
+
+    def cleanup_expired_tasks(self):
+        """清理过期任务（超过1天）"""
+        cutoff_time = datetime.now() - timedelta(days=1)
+        cutoff_iso = cutoff_time.isoformat()
+
+        with self.lock:
+            expired_tasks = [
+                task_id
+                for task_id, task in self.tasks.items()
+                if task.get("created_at", "") < cutoff_iso
+            ]
+
+            for task_id in expired_tasks:
+                del self.tasks[task_id]
+
+        if expired_tasks:
+            self._save_tasks()
+            print(f"🧹 已清理 {len(expired_tasks)} 个过期构建任务")
 
 
 # ============ 导出任务管理器 ============
@@ -1982,6 +2280,7 @@ class ExportTaskManager:
 
         task_info = {
             "task_id": task_id,
+            "task_type": "export",  # 添加任务类型标识
             "image": image,
             "tag": tag,
             "compress": compress,
