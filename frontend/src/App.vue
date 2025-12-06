@@ -53,6 +53,16 @@
                 <button 
                   type="button"
                   class="nav-link" 
+                  :class="{ active: activeTab === 'source-build' }"
+                  @click="activeTab = 'source-build'"
+                >
+                  <i class="fas fa-code-branch"></i> 源码构建
+                </button>
+              </li>
+              <li class="nav-item">
+                <button 
+                  type="button"
+                  class="nav-link" 
                   :class="{ active: activeTab === 'export' }"
                   @click="activeTab = 'export'"
                 >
@@ -104,6 +114,7 @@
             <!-- 标签页内容 -->
             <div class="tab-content">
               <BuildPanel v-if="activeTab === 'build'" />
+              <SourceBuildPanel v-if="activeTab === 'source-build'" />
               <ExportPanel v-if="activeTab === 'export'" />
               <ExportTaskList v-if="activeTab === 'export-tasks'" />
               <ComposePanel v-if="activeTab === 'compose'" />
@@ -134,6 +145,7 @@ import axios from 'axios'
 // 懒加载组件
 import LoginPage from './components/LoginPage.vue'
 import BuildPanel from './components/BuildPanel.vue'
+import SourceBuildPanel from './components/SourceBuildPanel.vue'
 import ExportPanel from './components/ExportPanel.vue'
 import ExportTaskList from './components/ExportTaskList.vue'
 import ComposePanel from './components/ComposePanel.vue'

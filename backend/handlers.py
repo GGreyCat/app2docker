@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import threading
 import urllib
 import uuid
@@ -15,7 +16,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib import parse
 import yaml
 
-from backend.config import load_config, save_config, CONFIG_FILE
+from backend.config import load_config, save_config, CONFIG_FILE, get_git_config
 from backend.utils import generate_image_name, get_safe_filename
 from backend.auth import authenticate, verify_token, require_auth
 
@@ -133,7 +134,7 @@ def get_template_path(template_name, project_type=None):
 
     # 如果没有指定项目类型，遍历所有子目录查找
     if not project_type:
-        for ptype in ["jar", "nodejs"]:
+        for ptype in ["jar", "nodejs", "python", "go", "rust", "web"]:
             # 用户模板目录
             user_type_path = os.path.join(USER_TEMPLATES_DIR, ptype, filename)
             if os.path.exists(user_type_path):
@@ -1528,6 +1529,333 @@ class BuildManager:
     def get_logs(self, build_id: str):
         with self.lock:
             return list(self.logs[build_id])
+
+    def start_build_from_source(
+        self,
+        git_url: str,
+        image_name: str,
+        tag: str,
+        should_push: bool,
+        selected_template: str,
+        project_type: str = "jar",
+        template_params: dict = None,
+        push_registry: str = None,
+        branch: str = None,
+        sub_path: str = None,
+        use_project_dockerfile: bool = True,  # 是否优先使用项目中的 Dockerfile
+    ):
+        """从 Git 源码开始构建"""
+        build_id = str(uuid.uuid4())
+        thread = threading.Thread(
+            target=self._build_from_source_task,
+            args=(
+                build_id,
+                git_url,
+                image_name,
+                tag,
+                should_push,
+                selected_template,
+                project_type,
+                template_params or {},
+                push_registry,
+                branch,
+                sub_path,
+                use_project_dockerfile,
+            ),
+            daemon=True,
+        )
+        thread.start()
+        with self.lock:
+            self.tasks[build_id] = thread
+        return build_id
+
+    def _build_from_source_task(
+        self,
+        build_id: str,
+        git_url: str,
+        image_name: str,
+        tag: str,
+        should_push: bool,
+        selected_template: str,
+        project_type: str = "jar",
+        template_params: dict = None,
+        push_registry: str = None,
+        branch: str = None,
+        sub_path: str = None,
+        use_project_dockerfile: bool = True,  # 是否优先使用项目中的 Dockerfile
+    ):
+        """从 Git 源码构建任务"""
+        full_tag = f"{image_name}:{tag}"
+        build_context = os.path.join(BUILD_DIR, image_name.replace("/", "_"))
+
+        def log(msg: str):
+            """添加日志"""
+            with self.lock:
+                if not msg.endswith("\n"):
+                    msg = msg + "\n"
+                self.logs[build_id].append(msg)
+
+        try:
+            log(f"🚀 开始从 Git 源码构建: {git_url}\n")
+
+            # 清理旧的构建上下文
+            if os.path.exists(build_context):
+                log(f"🧹 清理旧的构建上下文: {build_context}\n")
+                shutil.rmtree(build_context)
+            os.makedirs(build_context, exist_ok=True)
+
+            # 克隆 Git 仓库
+            log(f"📥 正在克隆 Git 仓库...\n")
+            # 创建临时目录用于克隆（Git clone 会在目标目录下创建仓库目录）
+            temp_clone_dir = os.path.join(build_context, "source_temp")
+            os.makedirs(temp_clone_dir, exist_ok=True)
+
+            git_config = get_git_config()
+            # Git clone 会在目标目录下创建仓库目录，所以目标目录应该是父目录
+            clone_success = self._clone_git_repo(
+                git_url, temp_clone_dir, branch, git_config, log
+            )
+
+            if not clone_success:
+                raise RuntimeError("Git 克隆失败")
+
+            # Git clone 会在目标目录下创建仓库目录，找到实际的仓库目录
+            # 通常仓库目录名是 URL 的最后一部分（去掉 .git）
+            repo_name = git_url.rstrip("/").split("/")[-1].replace(".git", "")
+            actual_clone_dir = os.path.join(temp_clone_dir, repo_name)
+
+            # 如果找不到，尝试查找 temp_clone_dir 下的第一个目录
+            if not os.path.exists(actual_clone_dir):
+                items = os.listdir(temp_clone_dir)
+                if items:
+                    actual_clone_dir = os.path.join(temp_clone_dir, items[0])
+
+            if not os.path.exists(actual_clone_dir):
+                raise RuntimeError("无法找到克隆的仓库目录")
+
+            # 如果指定了子目录，使用子目录作为构建上下文
+            source_dir = actual_clone_dir
+            if sub_path:
+                source_dir = os.path.join(actual_clone_dir, sub_path)
+                if not os.path.exists(source_dir):
+                    raise RuntimeError(f"指定的子目录不存在: {sub_path}")
+                log(f"📂 使用子目录作为构建上下文: {sub_path}\n")
+
+            # 将源码复制到构建上下文根目录
+            log(f"📋 准备构建上下文...\n")
+            for item in os.listdir(source_dir):
+                src = os.path.join(source_dir, item)
+                dst = os.path.join(build_context, item)
+                if os.path.isdir(src):
+                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src, dst)
+
+            # 检查项目中是否存在 Dockerfile
+            project_dockerfile_path = os.path.join(source_dir, "Dockerfile")
+            has_project_dockerfile = os.path.exists(project_dockerfile_path)
+
+            # 决定使用项目中的 Dockerfile 还是模板
+            if has_project_dockerfile and use_project_dockerfile:
+                log(f"📄 检测到项目中的 Dockerfile，使用项目中的 Dockerfile\n")
+                # 复制项目中的 Dockerfile 到构建上下文
+                dockerfile_path = os.path.join(build_context, "Dockerfile")
+                shutil.copy2(project_dockerfile_path, dockerfile_path)
+                log(f"✅ 已使用项目中的 Dockerfile\n")
+            else:
+                if has_project_dockerfile and not use_project_dockerfile:
+                    log(f"📋 项目中有 Dockerfile，但用户选择使用模板\n")
+                else:
+                    log(f"📋 项目中没有 Dockerfile，使用模板生成\n")
+
+                # 使用模板生成 Dockerfile
+                from backend.template_parser import load_template, parse_template
+
+                template_path = get_template_path(selected_template, project_type)
+                if not template_path or not os.path.exists(template_path):
+                    raise RuntimeError(f"模板不存在: {selected_template}")
+
+                template_content = load_template(template_path)
+                dockerfile_content = parse_template(
+                    template_content, template_params or {}, project_type
+                )
+
+                # 保存 Dockerfile
+                dockerfile_path = os.path.join(build_context, "Dockerfile")
+                with open(dockerfile_path, "w", encoding="utf-8") as f:
+                    f.write(dockerfile_content)
+                log(f"✅ Dockerfile 已从模板生成\n")
+
+            # 清理临时克隆目录
+            shutil.rmtree(temp_clone_dir, ignore_errors=True)
+
+            # 构建镜像
+            log(f"🔨 开始构建 Docker 镜像: {full_tag}\n")
+            if not DOCKER_AVAILABLE:
+                raise RuntimeError("Docker 服务不可用")
+
+            build_stream = docker_builder.build_image(
+                build_context, full_tag, dockerfile_path
+            )
+            for chunk in build_stream:
+                if isinstance(chunk, dict):
+                    if "stream" in chunk:
+                        log(chunk["stream"])
+                    elif "error" in chunk:
+                        raise RuntimeError(chunk["error"])
+                else:
+                    log(str(chunk))
+
+            log(f"✅ 镜像构建完成: {full_tag}\n")
+
+            # 推送镜像
+            if should_push:
+                log(f"📤 开始推送镜像到仓库...\n")
+                from backend.config import (
+                    get_all_registries,
+                    get_active_registry,
+                    get_registry_by_name,
+                )
+
+                registry_config = None
+                if push_registry:
+                    registry_config = get_registry_by_name(push_registry)
+                    if not registry_config:
+                        raise RuntimeError(f"指定的仓库 '{push_registry}' 不存在")
+                else:
+                    registry_config = get_active_registry()
+
+                username = registry_config.get("username")
+                password = registry_config.get("password")
+                auth_config = None
+                if username and password:
+                    auth_config = {"username": username, "password": password}
+
+                push_stream = docker_builder.push_image(full_tag, auth_config)
+                for chunk in push_stream:
+                    if isinstance(chunk, dict):
+                        if "status" in chunk:
+                            log(chunk["status"] + "\n")
+                        elif "error" in chunk:
+                            raise RuntimeError(chunk["error"])
+                    else:
+                        log(str(chunk))
+
+                log(f"✅ 推送完成\n")
+
+            log(f"✅ 所有操作已完成\n")
+
+        except Exception as e:
+            import traceback
+
+            error_msg = str(e)
+            log(f"❌ 构建失败: {error_msg}\n")
+            traceback.print_exc()
+
+    def _clone_git_repo(
+        self,
+        git_url: str,
+        clone_dir: str,
+        branch: str = None,
+        git_config: dict = None,
+        log_func=None,
+    ):
+        """克隆 Git 仓库
+
+        Args:
+            git_url: Git 仓库 URL
+            clone_dir: 目标目录（Git 会在此目录下创建仓库目录）
+            branch: 要检出的分支
+            git_config: Git 配置（用户名、密码、SSH key）
+            log_func: 日志函数
+        """
+        try:
+            git_config = git_config or {}
+            log = log_func or (lambda x: None)
+
+            # 准备 Git 命令
+            cmd = ["git", "clone"]
+
+            # 如果是 HTTPS URL 且有用户名密码，嵌入到 URL 中
+            if (
+                git_url.startswith("https://")
+                and git_config.get("username")
+                and git_config.get("password")
+            ):
+                # 将用户名密码嵌入 URL
+                from urllib.parse import urlparse, urlunparse
+
+                parsed = urlparse(git_url)
+                auth_url = urlunparse(
+                    (
+                        parsed.scheme,
+                        f"{git_config['username']}:{git_config['password']}@{parsed.netloc}",
+                        parsed.path,
+                        parsed.params,
+                        parsed.query,
+                        parsed.fragment,
+                    )
+                )
+                git_url = auth_url
+                log("🔐 使用配置的用户名密码进行认证\n")
+
+            # 如果是 SSH URL 且有 SSH key，配置 SSH
+            if git_url.startswith("git@") and git_config.get("ssh_key_path"):
+                ssh_key_path = git_config["ssh_key_path"]
+                if os.path.exists(ssh_key_path):
+                    # 设置 GIT_SSH_COMMAND 使用指定的 SSH key
+                    os.environ["GIT_SSH_COMMAND"] = (
+                        f"ssh -i {ssh_key_path} -o StrictHostKeyChecking=no"
+                    )
+                    log(f"🔑 使用 SSH key: {ssh_key_path}\n")
+
+            # Git clone 会在目标目录下创建仓库目录
+            # 确定仓库名称（从 URL 提取）
+            repo_name = git_url.rstrip("/").split("/")[-1].replace(".git", "")
+            target_dir = os.path.join(clone_dir, repo_name)
+
+            cmd.append(git_url)
+            cmd.append(target_dir)
+
+            if branch:
+                cmd.extend(["-b", branch])
+                log(f"📌 检出分支: {branch}\n")
+
+            # 执行克隆
+            log(f"🔧 执行命令: {' '.join(cmd[:2])} ...\n")
+            # 确保父目录存在
+            os.makedirs(os.path.dirname(target_dir), exist_ok=True)
+            # 使用绝对路径，避免路径问题
+            abs_target_dir = os.path.abspath(target_dir)
+            abs_clone_dir = os.path.abspath(clone_dir)
+            # 更新命令中的目标路径为绝对路径
+            cmd[-1] = abs_target_dir
+            result = subprocess.run(
+                cmd,
+                cwd=os.path.dirname(abs_clone_dir),
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5分钟超时
+            )
+
+            if result.returncode != 0:
+                log(f"❌ Git 克隆失败: {result.stderr}\n")
+                return False
+
+            log(f"✅ Git 仓库克隆成功\n")
+
+            # 清理环境变量
+            if "GIT_SSH_COMMAND" in os.environ:
+                del os.environ["GIT_SSH_COMMAND"]
+
+            return True
+
+        except subprocess.TimeoutExpired:
+            log("❌ Git 克隆超时（超过5分钟）\n")
+            return False
+        except Exception as e:
+            log(f"❌ Git 克隆异常: {str(e)}\n")
+            return False
 
 
 # ============ 导出任务管理器 ============

@@ -37,6 +37,12 @@ DEFAULT_CONFIG = {
         "username": "admin",
         "password": "admin",
     },
+    "git": {
+        "username": "",  # Git 用户名
+        "password": "",  # Git 密码（或 token）
+        "ssh_key_path": "",  # SSH 私钥路径（可选）
+        "ssh_key_password": "",  # SSH 私钥密码（可选）
+    },
 }
 
 
@@ -174,3 +180,16 @@ def get_all_registries():
     """获取所有仓库配置"""
     config = load_config()
     return config.get("docker", {}).get("registries", [])
+
+
+def get_git_config():
+    """获取 Git 配置"""
+    config = load_config()
+    return config.get("git", {})
+
+
+def save_git_config(git_config: dict):
+    """保存 Git 配置"""
+    config = load_config()
+    config["git"] = git_config
+    save_config(config)

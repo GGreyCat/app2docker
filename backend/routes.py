@@ -41,6 +41,8 @@ from backend.config import (
     get_active_registry,
     get_registry_by_name,
     get_all_registries,
+    get_git_config,
+    save_git_config,
 )
 from backend.utils import get_safe_filename
 from backend.auth import authenticate, verify_token
@@ -254,6 +256,49 @@ async def clear_operation_logs(
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清理操作日志失败: {str(e)}")
+
+
+# === Git 配置管理 ===
+@router.get("/git-config")
+async def get_git_config_route(request: Request):
+    """获取 Git 配置"""
+    try:
+        git_config = get_git_config()
+        # 不返回密码和 SSH key 密码（安全考虑）
+        safe_config = {
+            "username": git_config.get("username", ""),
+            "ssh_key_path": git_config.get("ssh_key_path", ""),
+        }
+        return JSONResponse({"git_config": safe_config})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取 Git 配置失败: {str(e)}")
+
+
+@router.post("/git-config")
+async def save_git_config_route(
+    request: Request,
+    username: str = Body(""),
+    password: str = Body(""),
+    ssh_key_path: str = Body(""),
+    ssh_key_password: str = Body(""),
+):
+    """保存 Git 配置"""
+    try:
+        username_param = get_current_username(request)
+        git_config = {
+            "username": username,
+            "password": password,
+            "ssh_key_path": ssh_key_path,
+            "ssh_key_password": ssh_key_password,
+        }
+        save_git_config(git_config)
+        
+        # 记录操作日志
+        OperationLogger.log(username_param, "save_git_config", {})
+        
+        return JSONResponse({"success": True, "message": "Git 配置已保存"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存 Git 配置失败: {str(e)}")
 
 
 # === 配置相关 ===
@@ -480,6 +525,72 @@ async def upload_file(
     except Exception as e:
         import traceback
 
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"构建失败: {str(e)}")
+
+
+@router.post("/build-from-source")
+async def build_from_source(
+    request: Request,
+    project_type: str = Body(...),
+    template: str = Body(...),
+    git_url: str = Body(...),
+    imagename: str = Body(...),
+    tag: str = Body("latest"),
+    push: str = Body("off"),
+    template_params: Optional[str] = Body(None),
+    push_registry: Optional[str] = Body(None),
+    branch: Optional[str] = Body(None),
+    sub_path: Optional[str] = Body(None),
+    use_project_dockerfile: bool = Body(True, description="是否优先使用项目中的 Dockerfile"),
+):
+    """从 Git 源码构建镜像"""
+    try:
+        username = get_current_username(request)
+        
+        # 解析模板参数
+        params_dict = {}
+        if template_params:
+            try:
+                params_dict = json.loads(template_params)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="模板参数格式错误")
+
+        # 调用构建管理器
+        manager = BuildManager()
+        build_id = manager.start_build_from_source(
+            git_url=git_url,
+            image_name=imagename,
+            tag=tag,
+            should_push=(push == "on"),
+            selected_template=template,
+            project_type=project_type,
+            template_params=params_dict,
+            push_registry=push_registry,
+            branch=branch,
+            sub_path=sub_path,
+            use_project_dockerfile=use_project_dockerfile,
+        )
+
+        # 记录操作日志
+        OperationLogger.log(username, "build_from_source", {
+            "build_id": build_id,
+            "image": f"{imagename}:{tag}",
+            "template": template,
+            "project_type": project_type,
+            "git_url": git_url,
+            "branch": branch,
+            "push": push == "on",
+        })
+
+        return JSONResponse({
+            "build_id": build_id,
+            "message": "构建任务已启动，请通过日志查看进度",
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"构建失败: {str(e)}")
 

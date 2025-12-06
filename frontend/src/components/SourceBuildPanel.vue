@@ -1,0 +1,551 @@
+<template>
+  <div class="source-build-panel">
+    <form @submit.prevent="handleBuild">
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label">
+            项目类型 <span class="text-danger">*</span>
+          </label>
+          <select 
+            v-model="form.projectType" 
+            class="form-select" 
+            @change="updateTemplates"
+            required
+          >
+            <option v-for="type in projectTypes" :key="type.value" :value="type.value">
+              {{ type.label }}
+            </option>
+          </select>
+          <div class="form-text small">
+            <i class="fas fa-info-circle"></i> 选择项目类型（需要先在模板管理中添加对应类型的模板）
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">模板</label>
+          <select 
+            v-model="form.template" 
+            class="form-select" 
+            @change="loadTemplateParams"
+            :disabled="form.useProjectDockerfile"
+          >
+            <option v-for="tpl in filteredTemplates" :key="tpl.name" :value="tpl.name">
+              {{ tpl.name }}
+            </option>
+          </select>
+          <div class="form-text small">
+            <i class="fas fa-info-circle"></i> 
+            <span v-if="form.useProjectDockerfile">
+              将使用项目中的 Dockerfile，模板选项已禁用
+            </span>
+            <span v-else>
+              如果项目中没有 Dockerfile，将使用此模板生成
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dockerfile 选择选项 -->
+      <div class="row g-3 mb-3">
+        <div class="col-md-12">
+          <div class="form-check">
+            <input 
+              v-model="form.useProjectDockerfile" 
+              type="checkbox" 
+              class="form-check-input" 
+              id="useProjectDockerfile"
+            />
+            <label class="form-check-label" for="useProjectDockerfile">
+              <i class="fas fa-file-code"></i> 优先使用项目中的 Dockerfile
+            </label>
+          </div>
+          <div class="form-text small text-muted">
+            <i class="fas fa-info-circle"></i> 
+            勾选后，如果项目中存在 Dockerfile，将优先使用项目中的 Dockerfile；否则使用选择的模板
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">
+          Git 仓库地址 <span class="text-danger">*</span>
+        </label>
+        <input 
+          v-model="form.gitUrl" 
+          type="text" 
+          class="form-control" 
+          placeholder="https://github.com/user/repo.git 或 git@github.com:user/repo.git"
+          required
+        />
+        <div class="form-text small">
+          <i class="fas fa-info-circle"></i> 
+          支持 HTTPS 和 SSH 协议的 Git 仓库地址
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label">分支/标签</label>
+          <input 
+            v-model="form.branch" 
+            type="text" 
+            class="form-control" 
+            placeholder="main 或 master（默认）"
+          />
+          <div class="form-text small">
+            <i class="fas fa-info-circle"></i> 
+            留空则使用仓库的默认分支
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">子目录（可选）</label>
+          <input 
+            v-model="form.subPath" 
+            type="text" 
+            class="form-control" 
+            placeholder="留空则使用仓库根目录"
+          />
+          <div class="form-text small">
+            <i class="fas fa-info-circle"></i> 
+            如果项目在仓库的子目录中，指定相对路径
+          </div>
+        </div>
+      </div>
+
+      <!-- 推送选项（独立一栏） -->
+      <div class="row g-3 mb-3">
+        <div class="col-md-12">
+          <div class="form-check">
+            <input 
+              v-model="form.push" 
+              type="checkbox" 
+              class="form-check-input" 
+              id="pushImage"
+              @change="handlePushChange"
+            />
+            <label class="form-check-label" for="pushImage">
+              <i class="fas fa-cloud-upload-alt"></i> 构建后推送到仓库
+            </label>
+          </div>
+          <div class="form-text small text-muted">
+            <i class="fas fa-info-circle"></i> 
+            勾选后将构建的镜像推送到指定的仓库
+          </div>
+        </div>
+      </div>
+
+      <!-- 推送仓库选择（仅在勾选推送时显示） -->
+      <div v-if="form.push" class="row g-3 mb-3">
+        <div class="col-md-12">
+          <label class="form-label">
+            <i class="fas fa-server"></i> 推送仓库 <span class="text-danger">*</span>
+          </label>
+          <select 
+            v-model="form.pushRegistry" 
+            class="form-select"
+            @change="updateImageNameFromRegistry"
+            required
+          >
+            <option value="">请选择仓库</option>
+            <option v-for="reg in registries" :key="reg.name" :value="reg.name">
+              {{ reg.name }} - {{ reg.registry }}
+              <span v-if="reg.active"> (激活)</span>
+            </option>
+          </select>
+          <div class="form-text small">
+            <i class="fas fa-info-circle"></i> 
+            选择推送镜像的目标仓库，选择后会自动拼接镜像名称
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label">
+            镜像名称 <span class="text-danger">*</span>
+          </label>
+          <input 
+            v-model="form.imageName" 
+            type="text" 
+            class="form-control" 
+            :placeholder="imageNamePlaceholder" 
+            required
+          />
+          <div class="form-text small">
+            <i class="fas fa-info-circle"></i> 
+            <span v-if="form.push">
+              选择推送仓库后会自动拼接完整镜像名，您也可以手动修改
+            </span>
+            <span v-else>
+              输入镜像名称（不包含仓库前缀）
+            </span>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">标签</label>
+          <input v-model="form.tag" type="text" class="form-control" placeholder="latest" />
+        </div>
+      </div>
+
+      <!-- 模板参数动态输入框 -->
+      <div v-if="templateParams.length > 0" class="mb-3 p-3 bg-light rounded">
+        <h6 class="mb-3">
+          <i class="fas fa-sliders-h"></i> 模板参数
+        </h6>
+        <div class="row g-3">
+          <div v-for="param in templateParams" :key="param.name" class="col-md-6">
+            <label class="form-label">
+              {{ param.description }}
+              <span v-if="param.required" class="text-danger">*</span>
+              <small v-if="param.default" class="text-muted">(默认: {{ param.default }})</small>
+            </label>
+            <input 
+              v-model="form.templateParams[param.name]"
+              type="text" 
+              class="form-control form-control-sm"
+              :placeholder="param.default || param.name"
+              :required="param.required && !param.default"
+            />
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary w-100" :disabled="building">
+        <i class="fas fa-code-branch"></i> 
+        {{ building ? '构建中...' : '开始构建' }}
+        <span v-if="building" class="spinner-border spinner-border-sm ms-2"></span>
+      </button>
+    </form>
+  </div>
+</template>
+
+<script setup>
+import axios from 'axios'
+import { computed, onMounted, ref } from 'vue'
+
+const form = ref({
+  projectType: 'jar',
+  template: '',
+  gitUrl: '',
+  branch: '',
+  subPath: '',
+  imageName: 'myapp/demo',
+  tag: 'latest',
+  push: false,
+  templateParams: {},
+  pushRegistry: '',
+  useProjectDockerfile: true  // 默认优先使用项目中的 Dockerfile
+})
+
+const templates = ref([])
+const building = ref(false)
+const templateParams = ref([])
+const registries = ref([])
+
+const projectTypes = computed(() => {
+  const types = new Set()
+  templates.value.forEach(t => types.add(t.project_type))
+  
+  const labelMap = {
+    'jar': 'Java 应用（JAR）',
+    'nodejs': 'Node.js 应用',
+    'python': 'Python 应用',
+    'go': 'Go 应用',
+    'rust': 'Rust 应用'
+  }
+  
+  const result = []
+  types.forEach(type => {
+    result.push({
+      value: type,
+      label: labelMap[type] || `${type.charAt(0).toUpperCase()}${type.slice(1)} 应用`
+    })
+  })
+  
+  if (result.length === 0) {
+    return [
+      { value: 'jar', label: 'Java 应用（JAR）' },
+      { value: 'nodejs', label: 'Node.js 应用' },
+      { value: 'python', label: 'Python 应用' },
+      { value: 'go', label: 'Go 应用' }
+    ]
+  }
+  
+  return result
+})
+
+const filteredTemplates = computed(() => {
+  return templates.value.filter(t => t.project_type === form.value.projectType)
+})
+
+const imageNamePlaceholder = computed(() => {
+  if (form.value.push) {
+    const selectedRegistry = registries.value.find(r => r.name === form.value.pushRegistry)
+    if (selectedRegistry && selectedRegistry.registry_prefix) {
+      const prefix = selectedRegistry.registry_prefix.trim()
+      if (prefix) {
+        return `${prefix}/myapp/demo`
+      }
+    }
+  }
+  return 'myapp/demo'
+})
+
+async function loadTemplates() {
+  try {
+    const res = await axios.get('/api/templates')
+    templates.value = res.data.items || []
+    if (filteredTemplates.value.length > 0) {
+      form.value.template = filteredTemplates.value[0].name
+      await loadTemplateParams()
+    }
+  } catch (error) {
+    console.error('加载模板失败:', error)
+  }
+}
+
+async function loadRegistries() {
+  try {
+    const res = await axios.get('/api/registries')
+    registries.value = res.data.registries || []
+    
+    if (form.value.push) {
+      const activeRegistry = registries.value.find(r => r.active)
+      if (activeRegistry) {
+        form.value.pushRegistry = activeRegistry.name
+        updateImageNameFromRegistry()
+      } else if (registries.value.length > 0) {
+        form.value.pushRegistry = registries.value[0].name
+        updateImageNameFromRegistry()
+      }
+    }
+  } catch (error) {
+    console.error('加载仓库列表失败:', error)
+  }
+}
+
+function updateTemplates() {
+  if (filteredTemplates.value.length > 0) {
+    form.value.template = filteredTemplates.value[0].name
+    loadTemplateParams()
+  }
+}
+
+async function loadTemplateParams() {
+  templateParams.value = []
+  form.value.templateParams = {}
+  
+  if (!form.value.template || !form.value.projectType) {
+    return
+  }
+  
+  try {
+    const res = await axios.get('/api/template-params', {
+      params: {
+        template: form.value.template,
+        project_type: form.value.projectType
+      }
+    })
+    
+    templateParams.value = res.data.params || []
+    
+    templateParams.value.forEach(param => {
+      if (param.default) {
+        form.value.templateParams[param.name] = param.default
+      }
+    })
+  } catch (error) {
+    console.error('加载模板参数失败:', error)
+  }
+}
+
+function updateImageNameFromRegistry() {
+  if (!form.value.push || !form.value.pushRegistry) {
+    return
+  }
+  
+  const selectedRegistry = registries.value.find(r => r.name === form.value.pushRegistry)
+  if (selectedRegistry && selectedRegistry.registry_prefix) {
+    const prefix = selectedRegistry.registry_prefix.trim()
+    if (prefix) {
+      if (!form.value.imageName || !form.value.imageName.startsWith(prefix)) {
+        let imageName = form.value.imageName || 'myapp/demo'
+        registries.value.forEach(reg => {
+          const regPrefix = reg.registry_prefix?.trim()
+          if (regPrefix && imageName.startsWith(regPrefix + '/')) {
+            imageName = imageName.substring(regPrefix.length + 1)
+          }
+        })
+        form.value.imageName = `${prefix}/${imageName}`.replace(/\/+/g, '/')
+      }
+    }
+  }
+}
+
+function handlePushChange() {
+  if (form.value.push) {
+    const activeRegistry = registries.value.find(r => r.active)
+    if (activeRegistry) {
+      form.value.pushRegistry = activeRegistry.name
+    } else if (registries.value.length > 0) {
+      form.value.pushRegistry = registries.value[0].name
+    }
+    updateImageNameFromRegistry()
+  } else {
+    if (form.value.imageName) {
+      registries.value.forEach(reg => {
+        const regPrefix = reg.registry_prefix?.trim()
+        if (regPrefix && form.value.imageName.startsWith(regPrefix + '/')) {
+          form.value.imageName = form.value.imageName.substring(regPrefix.length + 1)
+        }
+      })
+    }
+    form.value.pushRegistry = ''
+  }
+}
+
+async function handleBuild() {
+  if (!form.value.gitUrl) {
+    alert('请输入 Git 仓库地址')
+    return
+  }
+  
+  if (form.value.push && !form.value.pushRegistry) {
+    alert('请选择推送仓库')
+    return
+  }
+  
+  building.value = true
+  
+    const payload = {
+      project_type: form.value.projectType,
+      template: form.value.template,
+      git_url: form.value.gitUrl.trim(),
+      branch: form.value.branch.trim() || undefined,
+      sub_path: form.value.subPath.trim() || undefined,
+      imagename: form.value.imageName.trim(),
+      tag: form.value.tag.trim() || 'latest',
+      push: form.value.push ? 'on' : 'off',
+      push_registry: form.value.push ? form.value.pushRegistry : undefined,
+      template_params: Object.keys(form.value.templateParams).length > 0 
+        ? JSON.stringify(form.value.templateParams) 
+        : undefined,
+      use_project_dockerfile: form.value.useProjectDockerfile
+    }
+  
+  try {
+    const res = await axios.post('/api/build-from-source', payload)
+    
+    const buildId = res.data.build_id
+    if (buildId) {
+      console.log('✅ 构建任务已启动, build_id:', buildId)
+      
+      window.dispatchEvent(new CustomEvent('show-build-log'))
+      
+      setTimeout(() => {
+        pollBuildLogs(buildId)
+      }, 100)
+    } else {
+      console.warn('⚠️ 未返回 build_id')
+      alert('构建启动失败：未返回 build_id')
+      building.value = false
+    }
+  } catch (error) {
+    console.error('❌ 构建请求失败:', error)
+    alert(error.response?.data?.error || error.response?.data?.detail || '构建失败')
+    building.value = false
+  }
+}
+
+let pollInterval = null
+async function pollBuildLogs(buildId) {
+  console.log('🔄 开始轮询构建日志, build_id:', buildId)
+  
+  let lastLogLength = 0
+  
+  const poll = async () => {
+    try {
+      const res = await axios.get('/api/get-logs', {
+        params: { build_id: buildId },
+        responseType: 'text'
+      })
+      
+      const logs = typeof res.data === 'string' ? res.data : String(res.data)
+      const logLines = logs
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+      
+      if (logLines.length > lastLogLength) {
+        for (let i = lastLogLength; i < logLines.length; i++) {
+          window.dispatchEvent(new CustomEvent('add-log', {
+            detail: { text: logLines[i] }
+          }))
+        }
+        lastLogLength = logLines.length
+      }
+      
+      const lastLine = logLines[logLines.length - 1] || ''
+      const isDone = lastLine.includes('所有操作已完成') ||
+                     lastLine.includes('构建完成') || 
+                     lastLine.includes('构建失败') || 
+                     lastLine.includes('构建异常') ||
+                     lastLine.includes('Successfully tagged') ||
+                     lastLine.includes('Error') ||
+                     lastLine.includes('推送完成')
+      
+      if (isDone) {
+        clearInterval(pollInterval)
+        building.value = false
+        console.log('✅ 构建任务结束')
+      }
+    } catch (error) {
+      console.error('❌ 获取日志失败:', error)
+      if (error.response?.status === 404 || error.response?.status === 500) {
+        clearInterval(pollInterval)
+        building.value = false
+        window.dispatchEvent(new CustomEvent('add-log', {
+          detail: { text: '❌ 日志获取失败: ' + (error.response?.statusText || error.message) }
+        }))
+      }
+    }
+  }
+  
+  window.dispatchEvent(new CustomEvent('add-log', {
+    detail: { text: `🚀 开始构建，Build ID: ${buildId}` }
+  }))
+  
+  await poll()
+  
+  let pollCount = 0
+  pollInterval = setInterval(() => {
+    pollCount++
+    if (pollCount > 240) {
+      clearInterval(pollInterval)
+      building.value = false
+      console.log('⏰ 构建日志轮询超时')
+      window.dispatchEvent(new CustomEvent('add-log', {
+        detail: { text: '⏰ 构建日志轮询超时（120秒）' }
+      }))
+    } else {
+      poll()
+    }
+  }, 500)
+}
+
+onMounted(() => {
+  loadTemplates()
+  loadRegistries()
+})
+</script>
+
+<style scoped>
+.source-build-panel {
+  animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+

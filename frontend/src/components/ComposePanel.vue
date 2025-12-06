@@ -33,7 +33,7 @@
       />
       <codemirror
         v-else
-        v-model="composeText"
+        v-model="composeText" 
         :style="{ height: '400px', fontSize: '13px' }"
         :autofocus="true"
         :indent-with-tab="true"

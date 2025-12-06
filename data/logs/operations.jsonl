@@ -1,13 +1,10 @@
-{"timestamp": "2025-12-06T11:07:05.113020", "username": "admin", "operation": "login", "details": {"ip": "unknown"}}
-{"timestamp": "2025-12-06T11:07:18.635038", "username": "admin", "operation": "change_password", "details": {"username": "admin"}}
-{"timestamp": "2025-12-06T11:17:24.462687", "username": "unknown", "operation": "save_registries", "details": {"registry_count": 1, "registry_names": ["Docker Hub"]}}
-{"timestamp": "2025-12-06T11:17:24.724708", "username": "unknown", "operation": "save_config", "details": {"expose_port": 8080, "default_push": false, "use_remote": true, "remote_host": "10.100.10.95"}}
-{"timestamp": "2025-12-06T11:25:27.362216", "username": "unknown", "operation": "save_registries", "details": {"registry_count": 1, "registry_names": ["Docker Hub"]}}
-{"timestamp": "2025-12-06T11:25:27.620182", "username": "unknown", "operation": "save_config", "details": {"expose_port": 8080, "default_push": false, "use_remote": true, "remote_host": "10.100.10.95"}}
-{"timestamp": "2025-12-06T11:25:34.121598", "username": "unknown", "operation": "logout", "details": {}}
-{"timestamp": "2025-12-06T11:25:47.775875", "username": "admin", "operation": "login", "details": {"ip": "unknown"}}
-{"timestamp": "2025-12-06T11:28:42.743580", "username": "unknown", "operation": "logout", "details": {}}
-{"timestamp": "2025-12-06T11:42:34.456107", "username": "admin", "operation": "login", "details": {"ip": "unknown"}}
-{"timestamp": "2025-12-06T11:42:38.930148", "username": "unknown", "operation": "logout", "details": {}}
-{"timestamp": "2025-12-06T11:43:59.637731", "username": "admin", "operation": "login", "details": {"ip": "unknown"}}
-{"timestamp": "2025-12-06T11:44:16.437343", "username": "admin", "operation": "change_password", "details": {"username": "admin"}}
+{"timestamp": "2025-12-06T13:08:58.166838", "username": "unknown", "operation": "clear_logs", "details": {"removed_count": 0, "days_kept": null}}
+{"timestamp": "2025-12-06T14:34:02.148636", "username": "unknown", "operation": "build_from_source", "details": {"build_id": "72426050-fd50-4353-b13e-df04f345d1bd", "image": "test:latest", "template": "dragonwell8", "project_type": "jar", "git_url": "https://github.com/test/test.git", "branch": null, "push": false}}
+{"timestamp": "2025-12-06T14:35:22.601248", "username": "admin", "operation": "login", "details": {"ip": "unknown"}}
+{"timestamp": "2025-12-06T14:35:27.461589", "username": "unknown", "operation": "logout", "details": {}}
+{"timestamp": "2025-12-06T14:35:35.412560", "username": "admin", "operation": "login", "details": {"ip": "unknown"}}
+{"timestamp": "2025-12-06T14:41:01.118761", "username": "unknown", "operation": "build_from_source", "details": {"build_id": "510c1688-2e6a-4f7a-9080-1aedd2885b1e", "image": "test/jar2docker:latest", "template": "node20python311", "project_type": "python", "git_url": "https://gitee.com/numen06/jar2docker.git", "branch": null, "push": false}}
+{"timestamp": "2025-12-06T14:47:24.830796", "username": "unknown", "operation": "build_from_source", "details": {"build_id": "65b6cb95-d921-4e81-8b76-5fff16c4bfa3", "image": "test/jar2docker:latest", "template": "node20python311", "project_type": "python", "git_url": "https://gitee.com/numen06/jar2docker.git", "branch": null, "push": false}}
+{"timestamp": "2025-12-06T14:47:28.720370", "username": "unknown", "operation": "build_from_source", "details": {"build_id": "bc834946-8a9c-47a9-8c70-a08cb90dfac3", "image": "test/jar2docker:latest", "template": "node20python311", "project_type": "python", "git_url": "https://gitee.com/numen06/jar2docker.git", "branch": null, "push": false}}
+{"timestamp": "2025-12-06T14:53:31.326703", "username": "unknown", "operation": "build_from_source", "details": {"build_id": "5c628713-9154-451c-ad9a-4d93843970bc", "image": "test/jar2docker:latest", "template": "node20python311", "project_type": "python", "git_url": "https://gitee.com/numen06/jar2docker.git", "branch": null, "push": false}}
+{"timestamp": "2025-12-06T14:55:15.448663", "username": "unknown", "operation": "build_from_source", "details": {"build_id": "8692d584-446a-4d7d-b4fe-683140459aa1", "image": "test/jar2docker:latest", "template": "node20python311", "project_type": "python", "git_url": "https://gitee.com/numen06/jar2docker.git", "branch": null, "push": false}}
