@@ -1640,17 +1640,35 @@ class BuildManager:
         )
 
         def log(msg: str):
-            """添加日志"""
-            if not msg.endswith("\n"):
-                msg = msg + "\n"
-            # 使用任务管理器记录日志
-            self.task_manager.add_log(task_id, msg)
-            # 保留旧的日志系统用于兼容
-            with self.lock:
-                self.logs[task_id].append(msg)
+            """添加日志（增强错误处理）"""
+            try:
+                if not msg.endswith("\n"):
+                    msg = msg + "\n"
+                # 使用任务管理器记录日志
+                try:
+                    self.task_manager.add_log(task_id, msg)
+                except Exception as e:
+                    # 如果任务管理器记录失败，至少打印到控制台
+                    print(f"⚠️ 任务日志记录失败 (task_id={task_id}): {e}")
+                    print(f"日志内容: {msg}")
+                # 保留旧的日志系统用于兼容
+                try:
+                    with self.lock:
+                        if task_id not in self.logs:
+                            self.logs[task_id] = deque()
+                        self.logs[task_id].append(msg)
+                except Exception as e:
+                    print(f"⚠️ 旧日志系统记录失败: {e}")
+            except Exception as e:
+                # 即使日志函数本身失败，也要打印到控制台
+                print(f"⚠️ 日志函数异常: {e}")
+                print(f"原始消息: {msg}")
 
         # 更新任务状态为运行中
-        self.task_manager.update_task_status(task_id, "running")
+        try:
+            self.task_manager.update_task_status(task_id, "running")
+        except Exception as e:
+            print(f"⚠️ 更新任务状态失败: {e}")
 
         try:
             log(f"🚀 开始从 Git 源码构建: {git_url}\n")
@@ -1783,7 +1801,15 @@ class BuildManager:
                         error_detail = chunk["errorDetail"]
                         log(f"💥 错误详情: {error_detail}\n")
                     # 记录其他未知字段
-                    unknown_keys = set(chunk.keys()) - {"stream", "status", "progress", "error", "errorDetail", "aux", "id"}
+                    unknown_keys = set(chunk.keys()) - {
+                        "stream",
+                        "status",
+                        "progress",
+                        "error",
+                        "errorDetail",
+                        "aux",
+                        "id",
+                    }
                     if unknown_keys:
                         log(f"🔧 其他信息: {chunk}\n")
                 else:
@@ -1829,10 +1855,30 @@ class BuildManager:
 
             error_msg = str(e)
             error_trace = traceback.format_exc()
-            log(f"❌ 构建失败: {error_msg}\n")
-            log(f"📋 错误堆栈:\n{error_trace}\n")
+
+            # 尝试记录错误日志，即使log函数失败也要确保错误被记录
+            try:
+                log(f"❌ 构建失败: {error_msg}\n")
+                log(f"📋 错误堆栈:\n{error_trace}\n")
+            except Exception as log_error:
+                # 如果log函数失败，直接使用任务管理器记录
+                print(f"⚠️ 日志记录失败，直接记录错误: {log_error}")
+                try:
+                    self.task_manager.add_log(task_id, f"❌ 构建失败: {error_msg}\n")
+                    self.task_manager.add_log(task_id, f"📋 错误堆栈:\n{error_trace}\n")
+                except Exception as add_log_error:
+                    print(f"⚠️ 直接记录日志也失败: {add_log_error}")
+                    # 最后的手段：打印到控制台
+                    print(f"❌ 构建失败 (task_id={task_id}): {error_msg}")
+                    print(f"📋 错误堆栈:\n{error_trace}")
+
             # 更新任务状态为失败
-            self.task_manager.update_task_status(task_id, "failed", error=error_msg)
+            try:
+                self.task_manager.update_task_status(task_id, "failed", error=error_msg)
+            except Exception as status_error:
+                print(f"⚠️ 更新任务状态失败: {status_error}")
+                print(f"任务ID: {task_id}, 错误: {error_msg}")
+
             traceback.print_exc()
         finally:
             # 清理构建上下文（可选，保留用于调试）
@@ -2108,31 +2154,45 @@ class BuildTaskManager:
         self._save_tasks()
 
     def add_log(self, task_id: str, log_message: str):
-        """添加任务日志"""
-        with self.lock:
-            if task_id in self.tasks:
-                if "logs" not in self.tasks[task_id]:
-                    self.tasks[task_id]["logs"] = []
-                # 限制日志数量，避免内存过大
-                if len(self.tasks[task_id]["logs"]) > 10000:
-                    self.tasks[task_id]["logs"] = self.tasks[task_id]["logs"][-5000:]
-                self.tasks[task_id]["logs"].append(log_message)
+        """添加任务日志（增强错误处理）"""
+        try:
+            with self.lock:
+                if task_id in self.tasks:
+                    if "logs" not in self.tasks[task_id]:
+                        self.tasks[task_id]["logs"] = []
+                    # 限制日志数量，避免内存过大
+                    if len(self.tasks[task_id]["logs"]) > 10000:
+                        self.tasks[task_id]["logs"] = self.tasks[task_id]["logs"][
+                            -5000:
+                        ]
+                    self.tasks[task_id]["logs"].append(log_message)
+                else:
+                    # 任务不存在，至少打印到控制台
+                    print(f"⚠️ 任务不存在 (task_id={task_id})，无法记录日志")
+                    print(f"日志内容: {log_message}")
 
-        # 每100条日志保存一次，或者如果是关键日志（错误、完成）则立即保存
-        should_save = False
-        with self.lock:
-            if task_id in self.tasks:
-                log_count = len(self.tasks[task_id].get("logs", []))
-                # 关键日志关键词
-                is_critical = any(
-                    keyword in log_message
-                    for keyword in ["❌", "✅", "ERROR", "FAIL", "完成", "失败"]
-                )
-                # 每100条或关键日志保存
-                should_save = (log_count % 100 == 0) or is_critical
+            # 每100条日志保存一次，或者如果是关键日志（错误、完成）则立即保存
+            should_save = False
+            with self.lock:
+                if task_id in self.tasks:
+                    log_count = len(self.tasks[task_id].get("logs", []))
+                    # 关键日志关键词
+                    is_critical = any(
+                        keyword in log_message
+                        for keyword in ["❌", "✅", "ERROR", "FAIL", "完成", "失败"]
+                    )
+                    # 每100条或关键日志保存
+                    should_save = (log_count % 100 == 0) or is_critical
 
-        if should_save:
-            self._save_tasks()
+            if should_save:
+                try:
+                    self._save_tasks()
+                except Exception as save_error:
+                    print(f"⚠️ 保存任务日志失败: {save_error}")
+        except Exception as e:
+            # 即使记录日志失败，也要打印到控制台
+            print(f"⚠️ 添加任务日志异常 (task_id={task_id}): {e}")
+            print(f"日志内容: {log_message}")
 
     def get_logs(self, task_id: str) -> str:
         """获取任务日志"""
