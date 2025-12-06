@@ -62,15 +62,26 @@ async def serve_favicon():
     # 优先使用前端构建产物中的 favicon
     dist_favicon = "dist/favicon.ico"
     if os.path.exists(dist_favicon):
-        return FileResponse(dist_favicon)
+        return FileResponse(dist_favicon, media_type="image/x-icon")
 
-    # 回退到根目录的 favicon（开发模式）
+    # 回退到 public 目录的 favicon（开发模式）
+    public_favicon = "frontend/public/favicon.ico"
+    if os.path.exists(public_favicon):
+        return FileResponse(public_favicon, media_type="image/x-icon")
+
+    # 回退到根目录的 favicon
     root_favicon = "favicon.ico"
     if os.path.exists(root_favicon):
-        return FileResponse(root_favicon)
+        return FileResponse(root_favicon, media_type="image/x-icon")
 
     # 最后使用 vite 默认图标
-    return FileResponse("frontend/public/vite.svg")
+    vite_svg = "frontend/public/vite.svg"
+    if os.path.exists(vite_svg):
+        return FileResponse(vite_svg, media_type="image/svg+xml")
+    
+    # 如果都不存在，返回 404
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="Favicon not found")
 
 
 # 健康检查端点（在 /api 之外）

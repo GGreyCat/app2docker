@@ -9,7 +9,7 @@ import uuid
 import gzip
 import zipfile
 import tarfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler
 from urllib import parse
@@ -1956,3 +1956,54 @@ class OperationLogger:
         except Exception as e:
             print(f"⚠️ 读取操作日志失败: {e}")
             return []
+
+    def clear_logs(self, days: int = None):
+        """清理操作日志
+
+        Args:
+            days: 保留最近 N 天的日志，如果为 None 则清空所有日志
+
+        Returns:
+            清理的日志条数
+        """
+        if not os.path.exists(self._logs_file):
+            return 0
+
+        try:
+            with self.lock:
+                if days is None:
+                    # 清空所有日志
+                    with open(self._logs_file, "w", encoding="utf-8") as f:
+                        f.write("")
+                    return 0
+                else:
+                    # 保留最近 N 天的日志
+                    cutoff_time = datetime.now() - timedelta(days=days)
+                    cutoff_iso = cutoff_time.isoformat()
+
+                    kept_logs = []
+                    removed_count = 0
+
+                    with open(self._logs_file, "r", encoding="utf-8") as f:
+                        for line in f:
+                            if not line.strip():
+                                continue
+                            try:
+                                log_entry = json.loads(line)
+                                timestamp = log_entry.get("timestamp", "")
+                                if timestamp >= cutoff_iso:
+                                    kept_logs.append(line)
+                                else:
+                                    removed_count += 1
+                            except json.JSONDecodeError:
+                                continue
+
+                    # 写回保留的日志
+                    with open(self._logs_file, "w", encoding="utf-8") as f:
+                        for line in kept_logs:
+                            f.write(line)
+
+                    return removed_count
+        except Exception as e:
+            print(f"⚠️ 清理操作日志失败: {e}")
+            raise
