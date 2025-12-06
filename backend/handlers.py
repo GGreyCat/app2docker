@@ -1646,6 +1646,7 @@ class ExportTaskManager:
         tag: str = "latest",
         compress: str = "none",
         registry: str = None,
+        use_local: bool = False,
     ) -> str:
         """创建导出任务"""
         task_id = str(uuid.uuid4())
@@ -1657,6 +1658,7 @@ class ExportTaskManager:
             "tag": tag,
             "compress": compress,
             "registry": registry,
+            "use_local": use_local,  # 是否使用本地仓库（不执行 pull）
             "status": "pending",  # pending, running, completed, failed
             "created_at": created_at.isoformat(),
             "completed_at": None,
@@ -1735,19 +1737,25 @@ class ExportTaskManager:
                 if not registry_config:
                     registry_config = get_active_registry()
 
-            username = registry_config.get("username")
-            password = registry_config.get("password")
-            auth_config = None
-            if username and password:
-                auth_config = {"username": username, "password": password}
+            # 检查是否使用本地仓库
+            use_local = task_info.get("use_local", False)
 
-            # 拉取镜像
-            pull_stream = docker_builder.pull_image(image, tag, auth_config)
-            for chunk in pull_stream:
-                if "error" in chunk:
-                    raise RuntimeError(chunk["error"])
+            if not use_local:
+                # 需要从远程仓库拉取镜像
+                username = registry_config.get("username")
+                password = registry_config.get("password")
+                auth_config = None
+                if username and password:
+                    auth_config = {"username": username, "password": password}
+
+                # 拉取镜像
+                pull_stream = docker_builder.pull_image(image, tag, auth_config)
+                for chunk in pull_stream:
+                    if "error" in chunk:
+                        raise RuntimeError(chunk["error"])
 
             full_tag = f"{image}:{tag}"
+            # 检查镜像是否存在（本地或已拉取）
             docker_builder.get_image(full_tag)
 
             # 创建任务文件目录

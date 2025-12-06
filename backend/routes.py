@@ -500,6 +500,7 @@ async def create_export_task(
     tag: str = Body("latest", description="镜像标签"),
     compress: str = Body("none", description="压缩格式: none, gzip"),
     registry: Optional[str] = Body(None, description="仓库名称（用于获取认证信息）"),
+    use_local: bool = Body(False, description="是否使用本地仓库（不执行 pull）"),
 ):
     """创建导出任务"""
     try:
@@ -528,6 +529,7 @@ async def create_export_task(
             tag=tag_name,
             compress=compress,
             registry=registry,
+            use_local=use_local,
         )
 
         # 记录操作日志

@@ -50,6 +50,27 @@
         </div>
       </div>
 
+      <!-- 本地仓库选项 -->
+      <div class="row g-3 mb-3">
+        <div class="col-md-12">
+          <div class="form-check">
+            <input 
+              v-model="form.useLocal" 
+              class="form-check-input" 
+              type="checkbox" 
+              id="useLocal"
+            />
+            <label class="form-check-label" for="useLocal">
+              <i class="fas fa-server"></i> 使用本地仓库（不执行 pull 操作）
+            </label>
+            <div class="form-text small">
+              <i class="fas fa-info-circle"></i> 
+              勾选后，将直接从本地 Docker 导出镜像，不会从远程仓库拉取
+            </div>
+          </div>
+        </div>
+      </div>
+
       <button type="submit" class="btn btn-warning w-100" :disabled="exporting">
         <i class="fas fa-download"></i> 
         {{ exporting ? '导出中...' : '导出镜像' }}
@@ -86,7 +107,8 @@ const form = ref({
   registry: '',  // 仓库名称
   image: '',  // 镜像名称（完整镜像名）
   tag: 'latest',
-  compress: 'none'
+  compress: 'none',
+  useLocal: false  // 是否使用本地仓库
 })
 
 const registries = ref([])
@@ -191,7 +213,8 @@ async function handleExport() {
     const payload = {
       image: form.value.image.trim(),
       tag: form.value.tag,
-      compress: form.value.compress
+      compress: form.value.compress,
+      use_local: form.value.useLocal
     }
     
     // 如果选择了仓库，传递仓库名称
