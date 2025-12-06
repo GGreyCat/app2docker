@@ -1763,16 +1763,32 @@ class BuildManager:
                 log(f"❌ 启动 Docker 构建失败: {str(e)}\n")
                 raise
 
+            log(f"🔍 开始处理 Docker 构建流输出...\n")
+            chunk_count = 0
             for chunk in build_stream:
+                chunk_count += 1
                 if isinstance(chunk, dict):
+                    # 记录所有字段，确保不遗漏任何信息
                     if "stream" in chunk:
-                        log(chunk["stream"])
-                    elif "error" in chunk:
+                        log(chunk["stream"])  # 编译日志在这里
+                    if "status" in chunk:
+                        log(f"📊 {chunk['status']}\n")
+                    if "progress" in chunk:
+                        log(f"⏳ {chunk['progress']}\n")
+                    if "error" in chunk:
                         error_msg = chunk["error"]
                         log(f"❌ 构建错误: {error_msg}\n")
                         raise RuntimeError(error_msg)
+                    if "errorDetail" in chunk:
+                        error_detail = chunk["errorDetail"]
+                        log(f"💥 错误详情: {error_detail}\n")
+                    # 记录其他未知字段
+                    unknown_keys = set(chunk.keys()) - {"stream", "status", "progress", "error", "errorDetail", "aux", "id"}
+                    if unknown_keys:
+                        log(f"🔧 其他信息: {chunk}\n")
                 else:
-                    log(str(chunk))
+                    log(f"📦 原始输出: {str(chunk)}\n")
+            log(f"✅ Docker 构建流处理完成，共 {chunk_count} 个数据块\n")
 
             log(f"✅ 镜像构建完成: {full_tag}\n")
 
