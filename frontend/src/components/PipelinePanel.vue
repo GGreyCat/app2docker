@@ -206,48 +206,102 @@
           </div>
           <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
             <form @submit.prevent="savePipeline">
-              <!-- 基本信息 -->
-              <div class="mb-4">
-                <h6 class="text-primary mb-3">
-                  <i class="fas fa-info-circle"></i> 基本信息
-                </h6>
-                <div class="mb-3">
-                  <label class="form-label">流水线名称 <span class="text-danger">*</span></label>
-                  <input 
-                    v-model="formData.name" 
-                    type="text" 
-                    class="form-control form-control-sm" 
-                    required
-                    placeholder="例如：主分支自动构建"
+              <!-- Tab 导航 -->
+              <ul class="nav nav-tabs mb-3" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button 
+                    class="nav-link" 
+                    :class="{ active: activeTab === 'basic' }"
+                    type="button"
+                    @click="activeTab = 'basic'"
+                    id="basic-tab"
                   >
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">描述</label>
-                  <input 
-                    v-model="formData.description" 
-                    type="text" 
-                    class="form-control form-control-sm"
-                    placeholder="流水线描述（可选）"
+                    <i class="fas fa-info-circle"></i> 基本信息
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button 
+                    class="nav-link" 
+                    :class="{ active: activeTab === 'build' }"
+                    type="button"
+                    @click="activeTab = 'build'"
+                    id="build-tab"
                   >
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Git 仓库地址 <span class="text-danger">*</span></label>
-                  <input 
-                    v-model="formData.git_url" 
-                    type="text" 
-                    class="form-control form-control-sm" 
-                    required
-                    placeholder="https://github.com/user/repo.git"
+                    <i class="fas fa-cogs"></i> 构建配置
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button 
+                    class="nav-link" 
+                    :class="{ active: activeTab === 'webhook' }"
+                    type="button"
+                    @click="activeTab = 'webhook'"
+                    id="webhook-tab"
                   >
-                </div>
-              </div>
+                    <i class="fas fa-link"></i> Webhook 设置
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button 
+                    class="nav-link" 
+                    :class="{ active: activeTab === 'other' }"
+                    type="button"
+                    @click="activeTab = 'other'"
+                    id="other-tab"
+                  >
+                    <i class="fas fa-sliders-h"></i> 其他选项
+                  </button>
+                </li>
+              </ul>
 
-              <!-- 构建配置 -->
-              <div class="mb-4">
-                <h6 class="text-primary mb-3">
-                  <i class="fas fa-cogs"></i> 构建配置
-                </h6>
-                <div class="row">
+              <!-- Tab 内容 -->
+              <div class="tab-content">
+                <!-- 基本信息 Tab -->
+                <div 
+                  class="tab-pane fade" 
+                  :class="{ 'show active': activeTab === 'basic' }"
+                  role="tabpanel"
+                  id="basic-pane"
+                >
+                  <div class="mb-3">
+                    <label class="form-label">流水线名称 <span class="text-danger">*</span></label>
+                    <input 
+                      v-model="formData.name" 
+                      type="text" 
+                      class="form-control form-control-sm" 
+                      required
+                      placeholder="例如：主分支自动构建"
+                    >
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label">描述</label>
+                    <input 
+                      v-model="formData.description" 
+                      type="text" 
+                      class="form-control form-control-sm"
+                      placeholder="流水线描述（可选）"
+                    >
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label">Git 仓库地址 <span class="text-danger">*</span></label>
+                    <input 
+                      v-model="formData.git_url" 
+                      type="text" 
+                      class="form-control form-control-sm" 
+                      required
+                      placeholder="https://github.com/user/repo.git"
+                    >
+                  </div>
+                </div>
+
+                <!-- 构建配置 Tab -->
+                <div 
+                  class="tab-pane fade" 
+                  :class="{ 'show active': activeTab === 'build' }"
+                  role="tabpanel"
+                  id="build-pane"
+                >
+                  <div class="row">
                   <div class="col-md-6 mb-3">
                     <label class="form-label">分支名称</label>
                     <input 
@@ -308,44 +362,146 @@
                     placeholder="留空表示根目录"
                   >
                 </div>
-              </div>
+                </div>
 
-              <!-- Webhook 设置 -->
-              <div class="mb-4">
-                <h6 class="text-primary mb-3">
-                  <i class="fas fa-link"></i> Webhook 设置
-                </h6>
+                <!-- Webhook 设置 Tab -->
+                <div 
+                  class="tab-pane fade" 
+                  :class="{ 'show active': activeTab === 'webhook' }"
+                  role="tabpanel"
+                  id="webhook-pane"
+                >
+                  <div class="mb-3">
+                    <label class="form-label">Webhook 密钥</label>
+                    <input 
+                      v-model="formData.webhook_secret" 
+                      type="text" 
+                      class="form-control form-control-sm"
+                      placeholder="留空自动生成"
+                    >
+                    <small class="text-muted">用于验证 Webhook 签名（可选）</small>
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label"><strong>Webhook 分支策略</strong></label>
+                    <div class="btn-group w-100 d-flex" role="group">
+                      <input 
+                        type="radio" 
+                        class="btn-check" 
+                        id="strategy-use-push" 
+                        value="use_push"
+                        v-model="formData.webhook_branch_strategy"
+                      >
+                      <label class="btn btn-outline-primary flex-fill" for="strategy-use-push" style="white-space: normal; padding: 0.5rem;">
+                        <i class="fas fa-code-branch d-block mb-1"></i>
+                        <small class="d-block fw-bold">使用推送分支</small>
+                        <small class="text-muted d-block" style="font-size: 0.7rem;">所有分支都触发</small>
+                      </label>
+                      
+                      <input 
+                        type="radio" 
+                        class="btn-check" 
+                        id="strategy-filter-match" 
+                        value="filter_match"
+                        v-model="formData.webhook_branch_strategy"
+                      >
+                      <label class="btn btn-outline-primary flex-fill" for="strategy-filter-match" style="white-space: normal; padding: 0.5rem;">
+                        <i class="fas fa-filter d-block mb-1"></i>
+                        <small class="d-block fw-bold">只允许匹配分支</small>
+                        <small class="text-muted d-block" style="font-size: 0.7rem;">使用推送分支构建</small>
+                      </label>
+                      
+                      <input 
+                        type="radio" 
+                        class="btn-check" 
+                        id="strategy-use-configured" 
+                        value="use_configured"
+                        v-model="formData.webhook_branch_strategy"
+                      >
+                      <label class="btn btn-outline-primary flex-fill" for="strategy-use-configured" style="white-space: normal; padding: 0.5rem;">
+                        <i class="fas fa-cog d-block mb-1"></i>
+                        <small class="d-block fw-bold">使用配置分支</small>
+                        <small class="text-muted d-block" style="font-size: 0.7rem;">所有分支都触发</small>
+                      </label>
+                    </div>
+                    <small class="text-muted d-block mt-2">
+                      <span v-if="formData.webhook_branch_strategy === 'use_push'">
+                        <i class="fas fa-info-circle"></i> 任何分支推送都会触发，使用推送的分支进行构建
+                      </span>
+                      <span v-else-if="formData.webhook_branch_strategy === 'filter_match'">
+                        <i class="fas fa-info-circle"></i> 只有推送的分支与上方配置的分支一致时才会触发，使用推送的分支构建
+                      </span>
+                      <span v-else>
+                        <i class="fas fa-info-circle"></i> 任何分支推送都会触发，但使用配置的分支进行构建
+                      </span>
+                    </small>
+                  </div>
+                
+                <!-- 分支标签映射 -->
                 <div class="mb-3">
-                  <label class="form-label">Webhook 密钥</label>
-                  <input 
-                    v-model="formData.webhook_secret" 
-                    type="text" 
-                    class="form-control form-control-sm"
-                    placeholder="留空自动生成"
-                  >
-                  <small class="text-muted">用于验证 Webhook 签名（可选）</small>
-                </div>
-                <div class="form-check mb-3">
-                  <input 
-                    v-model="formData.webhook_branch_filter" 
-                    class="form-check-input" 
-                    type="checkbox" 
-                    id="webhookBranchFilterCheck"
-                  >
-                  <label class="form-check-label" for="webhookBranchFilterCheck">
-                    分支过滤：只允许匹配的分支触发构建
+                  <label class="form-label">
+                    <strong>分支标签映射</strong>
+                    <button 
+                      type="button" 
+                      class="btn btn-sm btn-outline-success ms-2" 
+                      @click="addBranchTagMapping"
+                      title="添加映射"
+                    >
+                      <i class="fas fa-plus"></i> 添加
+                    </button>
                   </label>
-                  <small class="text-muted d-block ms-4 mt-1">
-                    启用后，只有推送的分支与上方配置的分支一致时才会触发
+                  <small class="text-muted d-block mb-2">
+                    为不同分支设置不同的镜像标签，支持通配符（如 feature/*）
                   </small>
+                  <div v-if="formData.branch_tag_mapping && formData.branch_tag_mapping.length > 0" class="border rounded p-2">
+                    <div 
+                      v-for="(mapping, index) in formData.branch_tag_mapping" 
+                      :key="index" 
+                      class="row g-2 mb-2 align-items-center"
+                    >
+                      <div class="col-md-5">
+                        <input 
+                          v-model="mapping.branch" 
+                          type="text" 
+                          class="form-control form-control-sm"
+                          placeholder="分支名（如：main 或 feature/*）"
+                        >
+                      </div>
+                      <div class="col-md-1 text-center">
+                        <i class="fas fa-arrow-right text-muted"></i>
+                      </div>
+                      <div class="col-md-5">
+                        <input 
+                          v-model="mapping.tag" 
+                          type="text" 
+                          class="form-control form-control-sm"
+                          placeholder="标签（如：latest）"
+                        >
+                      </div>
+                      <div class="col-md-1">
+                        <button 
+                          type="button" 
+                          class="btn btn-sm btn-outline-danger" 
+                          @click="removeBranchTagMapping(index)"
+                          title="删除"
+                        >
+                          <i class="fas fa-trash"></i>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="text-muted small">
+                    暂无映射，点击"添加"按钮添加分支标签映射
+                  </div>
                 </div>
-              </div>
+                </div>
 
-              <!-- 其他选项 -->
-              <div class="mb-4">
-                <h6 class="text-primary mb-3">
-                  <i class="fas fa-sliders-h"></i> 其他选项
-                </h6>
+                <!-- 其他选项 Tab -->
+                <div 
+                  class="tab-pane fade" 
+                  :class="{ 'show active': activeTab === 'other' }"
+                  role="tabpanel"
+                  id="other-pane"
+                >
                 <div class="form-check mb-3">
                   <input 
                     v-model="formData.push" 
@@ -396,6 +552,7 @@
                       <code>*/30 * * * *</code> 每30分钟
                     </small>
                   </div>
+                </div>
                 </div>
               </div>
             </form>
@@ -655,6 +812,8 @@ const selectedTask = ref(null)
 const taskLogs = ref('')
 const viewingLogs = ref(null)
 
+const activeTab = ref('basic')  // 当前激活的Tab
+
 const formData = ref({
   name: '',
   description: '',
@@ -667,7 +826,8 @@ const formData = ref({
   tag: 'latest',
   push: false,
   webhook_secret: '',
-  webhook_branch_filter: false,  // Webhook分支过滤
+  webhook_branch_strategy: 'use_push',  // Webhook分支策略
+  branch_tag_mapping: [],  // 分支标签映射
   enabled: true,
   trigger_schedule: false,  // 是否启用定时触发
   cron_expression: '',  // Cron 表达式
@@ -724,7 +884,8 @@ function showCreateModal() {
     tag: 'latest',
     push: false,
     webhook_secret: '',
-    webhook_branch_filter: false,
+    webhook_branch_strategy: 'use_push',
+    branch_tag_mapping: [],
     enabled: true,
     trigger_schedule: false,
     cron_expression: '',
@@ -734,6 +895,7 @@ function showCreateModal() {
 
 function editPipeline(pipeline) {
   editingPipeline.value = pipeline
+  activeTab.value = 'basic'  // 重置到第一个Tab
   formData.value = {
     name: pipeline.name,
     description: pipeline.description || '',
@@ -746,7 +908,8 @@ function editPipeline(pipeline) {
     tag: pipeline.tag || 'latest',
     push: pipeline.push || false,
     webhook_secret: pipeline.webhook_secret || '',
-    webhook_branch_filter: pipeline.webhook_branch_filter || false,
+    webhook_branch_strategy: getWebhookBranchStrategy(pipeline),
+    branch_tag_mapping: pipeline.branch_tag_mapping ? Object.entries(pipeline.branch_tag_mapping).map(([branch, tag]) => ({ branch, tag })) : [],
     enabled: pipeline.enabled !== false,
     trigger_schedule: !!pipeline.cron_expression,  // 如果有cron表达式则启用
     cron_expression: pipeline.cron_expression || '',
@@ -754,14 +917,73 @@ function editPipeline(pipeline) {
   showModal.value = true
 }
 
+// 添加分支标签映射
+function addBranchTagMapping() {
+  if (!formData.value.branch_tag_mapping) {
+    formData.value.branch_tag_mapping = []
+  }
+  formData.value.branch_tag_mapping.push({ branch: '', tag: '' })
+}
+
+// 删除分支标签映射
+function removeBranchTagMapping(index) {
+  formData.value.branch_tag_mapping.splice(index, 1)
+}
+
+// 根据旧配置获取新的分支策略
+function getWebhookBranchStrategy(pipeline) {
+  const webhook_branch_filter = pipeline.webhook_branch_filter || false
+  const webhook_use_push_branch = pipeline.webhook_use_push_branch !== false  // 默认为true
+  
+  if (webhook_branch_filter) {
+    return 'filter_match'
+  } else if (webhook_use_push_branch) {
+    return 'use_push'
+  } else {
+    return 'use_configured'
+  }
+}
+
 async function savePipeline() {
   try {
+    // 将分支标签映射从数组转换为对象
+    const branch_tag_mapping = {}
+    if (formData.value.branch_tag_mapping && formData.value.branch_tag_mapping.length > 0) {
+      formData.value.branch_tag_mapping.forEach(mapping => {
+        if (mapping.branch && mapping.tag) {
+          branch_tag_mapping[mapping.branch] = mapping.tag
+        }
+      })
+    }
+    
+    // 根据分支策略设置webhook_branch_filter和webhook_use_push_branch
+    let webhook_branch_filter = false
+    let webhook_use_push_branch = true
+    
+    if (formData.value.webhook_branch_strategy === 'filter_match') {
+      webhook_branch_filter = true
+      webhook_use_push_branch = true
+    } else if (formData.value.webhook_branch_strategy === 'use_push') {
+      webhook_branch_filter = false
+      webhook_use_push_branch = true
+    } else {  // use_configured
+      webhook_branch_filter = false
+      webhook_use_push_branch = false
+    }
+    
     // 准备提交数据
     const payload = {
       ...formData.value,
+      // 将分支策略转换为旧格式（向后兼容）
+      webhook_branch_filter: webhook_branch_filter,
+      webhook_use_push_branch: webhook_use_push_branch,
+      // 将分支标签映射转换为对象格式
+      branch_tag_mapping: Object.keys(branch_tag_mapping).length > 0 ? branch_tag_mapping : null,
       // 如果未启用定时触发，则cron_expression为null
       cron_expression: formData.value.trigger_schedule ? formData.value.cron_expression : null
     }
+    // 移除webhook_branch_strategy，因为后端不需要这个字段
+    delete payload.webhook_branch_strategy
     
     // 验证：如果启用定时触发，必须填写cron表达式
     if (payload.trigger_schedule && !payload.cron_expression) {

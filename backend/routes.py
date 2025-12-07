@@ -1910,6 +1910,9 @@ class CreatePipelineRequest(BaseModel):
     enabled: bool = True
     description: str = ""
     cron_expression: Optional[str] = None
+    webhook_branch_filter: bool = False
+    webhook_use_push_branch: bool = True
+    branch_tag_mapping: Optional[dict] = None  # 分支到标签的映射，如 {"main": "latest", "dev": "dev"}
 
 
 class UpdatePipelineRequest(BaseModel):
@@ -1930,6 +1933,8 @@ class UpdatePipelineRequest(BaseModel):
     description: Optional[str] = None
     cron_expression: Optional[str] = None
     webhook_branch_filter: Optional[bool] = None
+    webhook_use_push_branch: Optional[bool] = None
+    branch_tag_mapping: Optional[dict] = None
 
 
 @router.post("/pipelines")
@@ -1957,6 +1962,8 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
             description=request.description,
             cron_expression=request.cron_expression,
             webhook_branch_filter=request.webhook_branch_filter,
+            webhook_use_push_branch=request.webhook_use_push_branch,
+            branch_tag_mapping=request.branch_tag_mapping,
         )
         
         # 记录操作日志
@@ -2173,6 +2180,8 @@ async def update_pipeline(
             description=request.description,
             cron_expression=request.cron_expression,
             webhook_branch_filter=request.webhook_branch_filter,
+            webhook_use_push_branch=request.webhook_use_push_branch,
+            branch_tag_mapping=request.branch_tag_mapping,
         )
         
         if not success:
@@ -2428,15 +2437,20 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 print(f"⚠️ Webhook未提供分支信息，但启用了分支过滤，使用配置的分支: pipeline={pipeline.get('name')}, configured_branch={configured_branch}")
                 branch = configured_branch
         else:
-            # 未启用分支过滤，使用推送的分支进行构建（分支触发功能）
-            if webhook_branch:
-                # 有推送分支，使用推送的分支
-                branch = webhook_branch
-                print(f"🔔 Webhook 触发，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch} (分支过滤: {'启用' if webhook_branch_filter else '禁用'})")
+            # 未启用分支过滤，根据配置决定使用哪个分支
+            if webhook_use_push_branch:
+                # 启用使用推送分支，优先使用推送的分支
+                if webhook_branch:
+                    branch = webhook_branch
+                    print(f"🔔 Webhook 触发，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}")
+                else:
+                    # 没有推送分支信息，使用配置的分支
+                    branch = configured_branch
+                    print(f"⚠️ Webhook未提供分支信息，使用配置的分支: pipeline={pipeline.get('name')}, branch={branch}")
             else:
-                # 没有推送分支信息，使用配置的分支
+                # 禁用使用推送分支，使用配置的分支
                 branch = configured_branch
-                print(f"⚠️ Webhook未提供分支信息，使用配置的分支: pipeline={pipeline.get('name')}, branch={branch}")
+                print(f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (忽略推送分支: {webhook_branch})")
         
         # 检查是否有正在运行的任务
         pipeline_id = pipeline["pipeline_id"]
@@ -2456,12 +2470,34 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 # 任务已完成或不存在，解绑
                 manager.unbind_task(pipeline_id)
         
+        # 根据分支查找对应的标签
+        branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
+        tag = pipeline.get("tag", "latest")  # 默认标签
+        
+        if branch and branch_tag_mapping:
+            # 优先精确匹配
+            if branch in branch_tag_mapping:
+                tag = branch_tag_mapping[branch]
+                print(f"✅ 找到分支标签映射: {branch} -> {tag}")
+            else:
+                # 尝试通配符匹配（如 feature/* -> feature）
+                import fnmatch
+                for pattern, mapped_tag in branch_tag_mapping.items():
+                    if fnmatch.fnmatch(branch, pattern):
+                        tag = mapped_tag
+                        print(f"✅ 通配符匹配分支标签: {branch} (pattern: {pattern}) -> {tag}")
+                        break
+                else:
+                    print(f"ℹ️  未找到分支 {branch} 的标签映射，使用默认标签: {tag}")
+        else:
+            print(f"ℹ️  使用默认标签: {tag}")
+        
         # 启动构建任务
         build_manager = BuildManager()
         task_id = build_manager.start_build_from_source(
             git_url=pipeline["git_url"],
             image_name=pipeline.get("image_name") or "webhook-build",
-            tag=pipeline.get("tag", "latest"),
+            tag=tag,  # 使用映射后的标签
             should_push=pipeline.get("push", False),
             selected_template=pipeline.get("template", ""),
             project_type=pipeline.get("project_type", "jar"),
