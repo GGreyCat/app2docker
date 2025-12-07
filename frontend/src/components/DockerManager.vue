@@ -155,27 +155,27 @@
 
     <!-- 容器和镜像 Tab 管理 -->
     <div class="card">
-      <div class="card-header py-0 px-0">
-        <ul class="nav nav-tabs" role="tablist">
-          <li class="nav-item" role="presentation">
+      <div class="card-header bg-white py-0">
+        <ul class="nav nav-tabs border-0">
+          <li class="nav-item">
             <button 
-              class="nav-link px-4 py-2" 
+              class="nav-link" 
               :class="{ active: activeTab === 'containers' }" 
               @click="activeTab = 'containers'"
               type="button"
             >
-              <i class="fas fa-cubes me-1"></i>容器管理
+              <i class="fas fa-cubes"></i> 容器管理
               <span v-if="containerTotal > 0" class="badge bg-info ms-1">{{ containerTotal }}</span>
             </button>
           </li>
-          <li class="nav-item" role="presentation">
+          <li class="nav-item">
             <button 
-              class="nav-link px-4 py-2" 
+              class="nav-link" 
               :class="{ active: activeTab === 'images' }" 
               @click="activeTab = 'images'"
               type="button"
             >
-              <i class="fas fa-images me-1"></i>镜像管理
+              <i class="fas fa-images"></i> 镜像管理
               <span v-if="imageTotal > 0" class="badge bg-secondary ms-1">{{ imageTotal }}</span>
             </button>
           </li>
@@ -254,16 +254,34 @@
         </div>
         
         <!-- 容器分页 -->
-        <div v-if="filteredContainers.length > containerPageSize" class="d-flex justify-content-between align-items-center p-2 border-top">
-          <small class="text-muted">显示 {{ (containerPage-1)*containerPageSize+1 }}-{{ Math.min(containerPage*containerPageSize, filteredContainers.length) }} / 共 {{ filteredContainers.length }} 个</small>
+        <div v-if="containerTotalPages > 1" class="d-flex justify-content-between align-items-center p-2 border-top">
+          <div class="text-muted small">
+            显示第 {{ (containerPage - 1) * containerPageSize + 1 }} - {{ Math.min(containerPage * containerPageSize, filteredContainers.length) }} 条，共 {{ filteredContainers.length }} 条
+          </div>
           <nav>
             <ul class="pagination pagination-sm mb-0">
-              <li class="page-item" :class="{ disabled: containerPage <= 1 }">
-                <button class="page-link" @click="containerPage--">上一页</button>
+              <li class="page-item" :class="{ disabled: containerPage === 1 }">
+                <button class="page-link" @click="containerPage = 1" :disabled="containerPage === 1">
+                  <i class="fas fa-angle-double-left"></i>
+                </button>
               </li>
-              <li class="page-item disabled"><span class="page-link">{{ containerPage }}</span></li>
-              <li class="page-item" :class="{ disabled: containerPage * containerPageSize >= filteredContainers.length }">
-                <button class="page-link" @click="containerPage++">下一页</button>
+              <li class="page-item" :class="{ disabled: containerPage === 1 }">
+                <button class="page-link" @click="containerPage--" :disabled="containerPage === 1">
+                  <i class="fas fa-angle-left"></i>
+                </button>
+              </li>
+              <li class="page-item active">
+                <span class="page-link">{{ containerPage }} / {{ containerTotalPages }}</span>
+              </li>
+              <li class="page-item" :class="{ disabled: containerPage === containerTotalPages }">
+                <button class="page-link" @click="containerPage++" :disabled="containerPage === containerTotalPages">
+                  <i class="fas fa-angle-right"></i>
+                </button>
+              </li>
+              <li class="page-item" :class="{ disabled: containerPage === containerTotalPages }">
+                <button class="page-link" @click="containerPage = containerTotalPages" :disabled="containerPage === containerTotalPages">
+                  <i class="fas fa-angle-double-right"></i>
+                </button>
               </li>
             </ul>
           </nav>
@@ -323,7 +341,7 @@
               <tr v-for="img in paginatedImages" :key="img.id + img.tag">
                 <td><code class="small text-primary">{{ img.repository || '&lt;none&gt;' }}</code></td>
                 <td><span class="badge bg-info">{{ img.tag || '&lt;none&gt;' }}</span></td>
-                <td><small class="text-muted font-monospace">{{ img.id.substring(7, 19) }}</small></td>
+                <td><small class="text-muted font-monospace">{{ img.id ? img.id.substring(7, 19) : '-' }}</small></td>
                 <td class="small">{{ formatBytes(img.size) }}</td>
                 <td class="small">{{ formatTime(img.created) }}</td>
                 <td class="text-end">
@@ -335,16 +353,34 @@
         </div>
         
         <!-- 镜像分页 -->
-        <div v-if="filteredImages.length > imagePageSize" class="d-flex justify-content-between align-items-center p-2 border-top">
-          <small class="text-muted">显示 {{ (imagePage-1)*imagePageSize+1 }}-{{ Math.min(imagePage*imagePageSize, filteredImages.length) }} / 共 {{ filteredImages.length }} 个</small>
+        <div v-if="imageTotalPages > 1" class="d-flex justify-content-between align-items-center p-2 border-top">
+          <div class="text-muted small">
+            显示第 {{ (imagePage - 1) * imagePageSize + 1 }} - {{ Math.min(imagePage * imagePageSize, filteredImages.length) }} 条，共 {{ filteredImages.length }} 条
+          </div>
           <nav>
             <ul class="pagination pagination-sm mb-0">
-              <li class="page-item" :class="{ disabled: imagePage <= 1 }">
-                <button class="page-link" @click="imagePage--">上一页</button>
+              <li class="page-item" :class="{ disabled: imagePage === 1 }">
+                <button class="page-link" @click="imagePage = 1" :disabled="imagePage === 1">
+                  <i class="fas fa-angle-double-left"></i>
+                </button>
               </li>
-              <li class="page-item disabled"><span class="page-link">{{ imagePage }}</span></li>
-              <li class="page-item" :class="{ disabled: imagePage * imagePageSize >= filteredImages.length }">
-                <button class="page-link" @click="imagePage++">下一页</button>
+              <li class="page-item" :class="{ disabled: imagePage === 1 }">
+                <button class="page-link" @click="imagePage--" :disabled="imagePage === 1">
+                  <i class="fas fa-angle-left"></i>
+                </button>
+              </li>
+              <li class="page-item active">
+                <span class="page-link">{{ imagePage }} / {{ imageTotalPages }}</span>
+              </li>
+              <li class="page-item" :class="{ disabled: imagePage === imageTotalPages }">
+                <button class="page-link" @click="imagePage++" :disabled="imagePage === imageTotalPages">
+                  <i class="fas fa-angle-right"></i>
+                </button>
+              </li>
+              <li class="page-item" :class="{ disabled: imagePage === imageTotalPages }">
+                <button class="page-link" @click="imagePage = imageTotalPages" :disabled="imagePage === imageTotalPages">
+                  <i class="fas fa-angle-double-right"></i>
+                </button>
               </li>
             </ul>
           </nav>
@@ -410,6 +446,8 @@ const paginatedContainers = computed(() => {
   const start = (containerPage.value - 1) * containerPageSize
   return filteredContainers.value.slice(start, start + containerPageSize)
 })
+
+const containerTotalPages = computed(() => Math.ceil(filteredContainers.value.length / containerPageSize))
 
 function filterContainers() {
   containerPage.value = 1
@@ -495,21 +533,27 @@ const paginatedImages = computed(() => {
   return filteredImages.value.slice(start, start + imagePageSize)
 })
 
+const imageTotalPages = computed(() => Math.ceil(filteredImages.value.length / imagePageSize))
+
 function filterImages() {
   imagePage.value = 1
 }
 
 async function loadImages(force = false) {
+  // 首次加载或强制刷新时不使用缓存
   if (!force && imageLastSync.value && (Date.now() - new Date(imageLastSync.value).getTime() < imageCacheTimeout)) return
   loadingImages.value = true
   try {
     const res = await axios.get('/api/docker/images', { params: { page: 1, page_size: 1000 } })
+    console.log('🖼️ 镜像列表响应:', res.data)
     allImages.value = res.data.images || []
     imageTotal.value = res.data.total || allImages.value.length
     imageLastSync.value = new Date().toISOString()
+    console.log(`✅ 已加载 ${allImages.value.length} 个镜像`)
   } catch (error) {
     console.error('加载镜像列表失败:', error)
     allImages.value = []
+    imageTotal.value = 0
   } finally {
     loadingImages.value = false
   }
@@ -573,34 +617,50 @@ onMounted(() => {
 <style scoped>
 .docker-manager { animation: fadeIn 0.3s; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-.info-item { padding: 0.4rem 0.5rem; background: #f8f9fa; border-radius: 0.25rem; height: 100%; }
-.info-label { font-size: 0.7rem; color: #6c757d; margin-bottom: 0.1rem; }
-.info-value { font-size: 0.85rem; color: #212529; font-weight: 600; }
 
-/* Tab 样式修复 */
-.card-header.py-0 { background: #fff; border-bottom: 1px solid #dee2e6; }
-.nav-tabs { border-bottom: none; margin-bottom: -1px; }
-.nav-tabs .nav-link {
-  color: #6c757d;
-  border: 1px solid transparent;
-  border-top-left-radius: 0.375rem;
-  border-top-right-radius: 0.375rem;
-  margin-bottom: 0;
-  background: transparent;
-  transition: color 0.15s, border-color 0.15s;
+/* Docker 信息卡片 */
+.info-item { 
+  padding: 0.5rem; 
+  background: #f8f9fa; 
+  border-radius: 0.25rem; 
+  height: 100%; 
 }
-.nav-tabs .nav-link:hover {
-  color: #0d6efd;
-  border-color: #e9ecef #e9ecef #dee2e6;
+.info-label { 
+  font-size: 0.75rem; 
+  color: #6c757d; 
+  margin-bottom: 0.15rem; 
 }
-.nav-tabs .nav-link.active {
-  color: #0d6efd;
-  background-color: #fff;
-  border-color: #dee2e6 #dee2e6 #fff;
+.info-value { 
+  font-size: 0.9rem; 
+  color: #212529; 
+  font-weight: 600; 
+}
+
+/* 表格样式 */
+.table th { 
+  font-weight: 600; 
+  font-size: 0.85rem; 
+  white-space: nowrap; 
+}
+.table td { 
+  vertical-align: middle; 
+  font-size: 0.9rem; 
+}
+.table-sm td, .table-sm th { 
+  padding: 0.4rem 0.5rem; 
+}
+
+/* 分页样式优化 */
+.pagination .page-link {
+  min-width: 38px;
+  text-align: center;
+}
+
+.pagination .page-item.disabled .page-link {
+  cursor: not-allowed;
+}
+
+.pagination .page-item.active .page-link {
   font-weight: 600;
 }
-
-.table th { font-weight: 600; font-size: 0.8rem; white-space: nowrap; }
-.table td { vertical-align: middle; font-size: 0.85rem; }
-.table-sm td, .table-sm th { padding: 0.35rem 0.5rem; }
 </style>

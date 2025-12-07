@@ -1,46 +1,58 @@
 <template>
   <div class="source-build-panel">
     <form @submit.prevent="handleBuild">
-      <div class="row g-3 mb-3">
-        <div class="col-md-6">
-          <label class="form-label">
-            项目类型 <span class="text-danger">*</span>
-          </label>
-          <select 
-            v-model="form.projectType" 
-            class="form-select" 
-            @change="updateTemplates"
-            required
+      <div class="mb-3">
+        <label class="form-label">
+          项目类型 <span class="text-danger">*</span>
+        </label>
+        <div class="btn-group w-100" role="group">
+          <button
+            v-for="type in projectTypes"
+            :key="type.value"
+            type="button"
+            class="btn"
+            :class="form.projectType === type.value ? 'btn-primary' : 'btn-outline-primary'"
+            @click="changeProjectType(type.value)"
           >
-            <option v-for="type in projectTypes" :key="type.value" :value="type.value">
-              {{ type.label }}
-            </option>
-          </select>
-          <div class="form-text small">
-            <i class="fas fa-info-circle"></i> 选择项目类型（需要先在模板管理中添加对应类型的模板）
-          </div>
+            <i :class="getProjectTypeIcon(type.value)"></i>
+            {{ type.label }}
+          </button>
         </div>
-        <div class="col-md-6">
-          <label class="form-label">模板</label>
-          <select 
-            v-model="form.template" 
-            class="form-select" 
-            @change="loadTemplateParams"
+        <div class="form-text small text-muted">
+          <i class="fas fa-info-circle"></i> 选择后自动过滤对应类型的模板
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">模板</label>
+        <div class="input-group input-group-sm mb-1">
+          <span class="input-group-text"><i class="fas fa-search"></i></span>
+          <input
+            v-model="templateSearch"
+            type="text"
+            class="form-control"
+            placeholder="搜索模板..."
             :disabled="form.useProjectDockerfile"
-          >
-            <option v-for="tpl in filteredTemplates" :key="tpl.name" :value="tpl.name">
-              {{ tpl.name }}
-            </option>
-          </select>
-          <div class="form-text small">
-            <i class="fas fa-info-circle"></i> 
-            <span v-if="form.useProjectDockerfile">
-              将使用项目中的 Dockerfile，模板选项已禁用
-            </span>
-            <span v-else>
-              如果项目中没有 Dockerfile，将使用此模板生成
-            </span>
-          </div>
+          />
+        </div>
+        <select 
+          v-model="form.template" 
+          class="form-select" 
+          @change="loadTemplateParams"
+          :disabled="form.useProjectDockerfile"
+        >
+          <option v-for="tpl in filteredTemplates" :key="tpl.name" :value="tpl.name">
+            {{ tpl.name }} ({{ getProjectTypeLabel(tpl.project_type) }}{{ tpl.type === 'builtin' ? ' · 内置' : '' }})
+          </option>
+        </select>
+        <div class="form-text small text-muted">
+          <i class="fas fa-info-circle"></i> 
+          <span v-if="form.useProjectDockerfile">
+            将使用项目中的 Dockerfile，模板选项已禁用
+          </span>
+          <span v-else>
+            已按项目类型过滤，可在模板管理中维护
+          </span>
         </div>
       </div>
 
@@ -240,6 +252,7 @@ const templates = ref([])
 const building = ref(false)
 const templateParams = ref([])
 const registries = ref([])
+const templateSearch = ref('')  // 模板搜索关键字
 
 const projectTypes = computed(() => {
   const types = new Set()
@@ -253,28 +266,45 @@ const projectTypes = computed(() => {
     'rust': 'Rust 应用'
   }
   
+  // 定义排序顺序
+  const orderMap = {
+    'jar': 1,
+    'nodejs': 2,
+    'python': 3,
+    'rust': 4,
+    'go': 5  // Go 排在最后
+  }
+  
   const result = []
   types.forEach(type => {
     result.push({
       value: type,
-      label: labelMap[type] || `${type.charAt(0).toUpperCase()}${type.slice(1)} 应用`
+      label: labelMap[type] || `${type.charAt(0).toUpperCase()}${type.slice(1)} 应用`,
+      order: orderMap[type] || 999
     })
   })
   
   if (result.length === 0) {
     return [
-      { value: 'jar', label: 'Java 应用（JAR）' },
-      { value: 'nodejs', label: 'Node.js 应用' },
-      { value: 'python', label: 'Python 应用' },
-      { value: 'go', label: 'Go 应用' }
+      { value: 'jar', label: 'Java 应用（JAR）', order: 1 },
+      { value: 'nodejs', label: 'Node.js 应用', order: 2 },
+      { value: 'python', label: 'Python 应用', order: 3 },
+      { value: 'rust', label: 'Rust 应用', order: 4 },
+      { value: 'go', label: 'Go 应用', order: 5 }
     ]
   }
   
-  return result
+  // 按 order 排序
+  return result.sort((a, b) => a.order - b.order)
 })
 
 const filteredTemplates = computed(() => {
-  return templates.value.filter(t => t.project_type === form.value.projectType)
+  let list = templates.value.filter(t => t.project_type === form.value.projectType)
+  if (templateSearch.value) {
+    const kw = templateSearch.value.toLowerCase()
+    list = list.filter(t => t.name.toLowerCase().includes(kw))
+  }
+  return list
 })
 
 const imageNamePlaceholder = computed(() => {
@@ -328,6 +358,42 @@ function updateTemplates() {
     form.value.template = filteredTemplates.value[0].name
     loadTemplateParams()
   }
+}
+
+// 切换项目类型
+function changeProjectType(type) {
+  if (form.value.projectType === type) return
+  form.value.projectType = type
+  templateSearch.value = ''  // 清空搜索
+  updateTemplates()
+  // 如果当前模板不属于该类型，重置为第一个模板
+  if (!filteredTemplates.value.some(t => t.name === form.value.template)) {
+    form.value.template = filteredTemplates.value[0]?.name || ''
+  }
+}
+
+// 获取项目类型图标
+function getProjectTypeIcon(type) {
+  const iconMap = {
+    'jar': 'fab fa-java',
+    'nodejs': 'fab fa-node-js',
+    'python': 'fab fa-python',
+    'go': 'fas fa-code',
+    'rust': 'fas fa-cog'
+  }
+  return iconMap[type] || 'fas fa-cube'
+}
+
+// 获取项目类型标签
+function getProjectTypeLabel(type) {
+  const labelMap = {
+    'jar': 'Java',
+    'nodejs': 'Node.js',
+    'python': 'Python',
+    'go': 'Go',
+    'rust': 'Rust'
+  }
+  return labelMap[type] || type
 }
 
 async function loadTemplateParams() {
@@ -561,6 +627,22 @@ onMounted(() => {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* 项目类型按钮组样式 */
+.btn-group .btn {
+  font-size: 0.9rem;
+  padding: 0.5rem 0.75rem;
+  transition: all 0.2s;
+}
+
+.btn-group .btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.btn-group .btn i {
+  margin-right: 0.3rem;
 }
 </style>
 

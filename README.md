@@ -42,6 +42,20 @@ docker run -d \
 - ✅ 自动构建并部署到 Nginx
 - ✅ 支持 Node.js 18、20
 
+### Python 应用
+
+- ✅ Flask、Django 等 Web 应用
+- ✅ 支持 Python 3.9、3.10、3.11、3.12
+- ✅ 自动安装 requirements.txt 依赖
+- ✅ 使用阿里云镜像源加速
+
+### Go 应用
+
+- ✅ 原生 Go Web 应用
+- ✅ 支持 Go 1.21、1.22、1.23
+- ✅ 多阶段构建，优化镜像大小
+- ✅ 自动处理 go.mod 依赖
+
 ### 静态网站
 
 - ✅ HTML/CSS/JS 静态文件
@@ -56,7 +70,7 @@ docker run -d \
 
 1. 访问 http://localhost:8000
 2. 登录（admin/admin）
-3. 选择**项目类型**（Java/Node.js/静态网站）
+3. 选择**项目类型**（Java/Node.js/Python/Go/静态网站）
 4. 选择**模板**
 5. 上传**应用文件**（.jar / .zip / .tar.gz）
 6. 填写**镜像名称**和**标签**
@@ -122,6 +136,19 @@ docker run -d \
 
 - `nodejs18` - Node.js 18 + Nginx
 - `nodejs20` - Node.js 20 + Nginx
+
+**Python 应用**:
+
+- `python39` - Python 3.9
+- `python310` - Python 3.10
+- `python311` - Python 3.11
+- `python312` - Python 3.12
+
+**Go 应用**:
+
+- `go1.21` - Go 1.21（多阶段构建）
+- `go1.22` - Go 1.22（多阶段构建）
+- `go1.23` - Go 1.23（多阶段构建）
 
 **静态网站**:
 
@@ -217,6 +244,8 @@ CMD ["java", ${JAVA_OPTS}, "-jar", "/app.jar"]
 
 - Java: `.jar` 文件
 - Node.js: `.zip`、`.tar`、`.tar.gz` 压缩包
+- Python: `.zip`、`.tar`、`.tar.gz` 压缩包（需包含源码和 requirements.txt）
+- Go: `.zip`、`.tar`、`.tar.gz` 压缩包（需包含源码和 go.mod）
 - 静态网站: `.zip`、`.tar`、`.tar.gz` 压缩包
 
 ### Q: 如何升级镜像？

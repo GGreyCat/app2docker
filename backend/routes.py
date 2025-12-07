@@ -1367,7 +1367,7 @@ async def get_docker_info():
 
 
 @router.get("/docker/images")
-async def get_docker_images(page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=100)):
+async def get_docker_images(page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=1000)):
     """获取 Docker 镜像列表（支持分页）"""
     try:
         from backend.handlers import docker_builder, DOCKER_AVAILABLE

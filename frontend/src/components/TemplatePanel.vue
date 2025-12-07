@@ -28,13 +28,13 @@
               加载中...
             </td>
           </tr>
-          <tr v-else-if="templates.length === 0">
+          <tr v-else-if="paginatedTemplates.length === 0">
             <td colspan="5" class="text-center text-muted py-4">
               <i class="fas fa-file-code fa-2x mb-2 d-block"></i>
               暂无模板，请点击"新增模板"创建
             </td>
           </tr>
-          <tr v-for="tpl in templates" :key="tpl.name">
+          <tr v-for="tpl in paginatedTemplates" :key="tpl.name">
             <td>
               <strong>{{ tpl.name }}</strong>
               <i v-if="tpl.type === 'builtin'" class="fas fa-lock text-muted ms-1" title="内置模板"></i>
@@ -79,6 +79,40 @@
       </table>
     </div>
 
+    <!-- 分页控件 -->
+    <div v-if="totalPages > 1" class="d-flex justify-content-between align-items-center mt-3">
+      <div class="text-muted small">
+        显示第 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, templates.length) }} 条，共 {{ templates.length }} 条
+      </div>
+      <nav>
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <button class="page-link" @click="currentPage = 1" :disabled="currentPage === 1">
+              <i class="fas fa-angle-double-left"></i>
+            </button>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <button class="page-link" @click="currentPage--" :disabled="currentPage === 1">
+              <i class="fas fa-angle-left"></i>
+            </button>
+          </li>
+          <li class="page-item active">
+            <span class="page-link">{{ currentPage }} / {{ totalPages }}</span>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <button class="page-link" @click="currentPage++" :disabled="currentPage === totalPages">
+              <i class="fas fa-angle-right"></i>
+            </button>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <button class="page-link" @click="currentPage = totalPages" :disabled="currentPage === totalPages">
+              <i class="fas fa-angle-double-right"></i>
+            </button>
+          </li>
+        </ul>
+      </nav>
+    </div>
+
     <!-- 模板编辑器模态框 -->
     <TemplateEditorModal 
       v-model="showEditor"
@@ -96,8 +130,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
 import axios from 'axios'
+import { computed, onMounted, ref } from 'vue'
 import TemplateEditorModal from './TemplateEditorModal.vue'
 import TemplatePreviewModal from './TemplatePreviewModal.vue'
 
@@ -107,6 +141,18 @@ const showEditor = ref(false)
 const showPreview = ref(false)
 const currentTemplate = ref(null)
 const isNew = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+// 总页数
+const totalPages = computed(() => Math.ceil(templates.value.length / pageSize.value))
+
+// 当前页的模板列表
+const paginatedTemplates = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return templates.value.slice(start, end)
+})
 
 async function loadTemplates() {
   loading.value = true
@@ -216,5 +262,19 @@ onMounted(() => {
 .table th {
   font-weight: 600;
   font-size: 0.9rem;
+}
+
+/* 分页样式优化 */
+.pagination .page-link {
+  min-width: 38px;
+  text-align: center;
+}
+
+.pagination .page-item.disabled .page-link {
+  cursor: not-allowed;
+}
+
+.pagination .page-item.active .page-link {
+  font-weight: 600;
 }
 </style>

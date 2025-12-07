@@ -72,7 +72,7 @@
       </div>
     </div>
 
-    <div v-else-if="logs.length === 0" class="text-center py-4 text-muted">
+    <div v-else-if="paginatedLogs.length === 0" class="text-center py-4 text-muted">
       <i class="fas fa-inbox fa-2x mb-2"></i>
       <p class="mb-0">暂无操作日志</p>
     </div>
@@ -88,7 +88,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="log in logs" :key="log.timestamp + log.username + log.operation">
+          <tr v-for="log in paginatedLogs" :key="log.timestamp + log.username + log.operation">
             <td class="small">
               {{ formatTime(log.timestamp) }}
             </td>
@@ -109,6 +109,40 @@
       </table>
     </div>
 
+    <!-- 分页控件 -->
+    <div v-if="totalPages > 1" class="d-flex justify-content-between align-items-center mt-3">
+      <div class="text-muted small">
+        显示第 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, filteredLogs.length) }} 条，共 {{ filteredLogs.length }} 条
+      </div>
+      <nav>
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <button class="page-link" @click="currentPage = 1" :disabled="currentPage === 1">
+              <i class="fas fa-angle-double-left"></i>
+            </button>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <button class="page-link" @click="currentPage--" :disabled="currentPage === 1">
+              <i class="fas fa-angle-left"></i>
+            </button>
+          </li>
+          <li class="page-item active">
+            <span class="page-link">{{ currentPage }} / {{ totalPages }}</span>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <button class="page-link" @click="currentPage++" :disabled="currentPage === totalPages">
+              <i class="fas fa-angle-right"></i>
+            </button>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <button class="page-link" @click="currentPage = totalPages" :disabled="currentPage === totalPages">
+              <i class="fas fa-angle-double-right"></i>
+            </button>
+          </li>
+        </ul>
+      </nav>
+    </div>
+
     <!-- 错误提示 -->
     <div v-if="error" class="alert alert-danger mt-3 mb-0">
       <i class="fas fa-exclamation-circle"></i> {{ error }}
@@ -118,13 +152,37 @@
 
 <script setup>
 import axios from 'axios'
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 const logs = ref([])
 const loading = ref(false)
 const error = ref(null)
 const filterUsername = ref('')
 const filterOperation = ref('')
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+// 过滤后的日志
+const filteredLogs = computed(() => {
+  let result = logs.value
+  if (filterUsername.value) {
+    result = result.filter(log => log.username && log.username.toLowerCase().includes(filterUsername.value.toLowerCase()))
+  }
+  if (filterOperation.value) {
+    result = result.filter(log => log.operation === filterOperation.value)
+  }
+  return result
+})
+
+// 总页数
+const totalPages = computed(() => Math.ceil(filteredLogs.value.length / pageSize.value))
+
+// 当前页的日志列表
+const paginatedLogs = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return filteredLogs.value.slice(start, end)
+})
 
 function formatTime(isoString) {
   if (!isoString) return '-'
@@ -162,17 +220,13 @@ async function loadLogs() {
   error.value = null
   try {
     const params = {
-      limit: 100
+      limit: 1000  // 加载更多日志，前端分页
     }
-    if (filterUsername.value) {
-      params.username = filterUsername.value
-    }
-    if (filterOperation.value) {
-      params.operation = filterOperation.value
-    }
+    // 不在后端过滤，全部加载到前端再过滤
     
     const res = await axios.get('/api/operation-logs', { params })
     logs.value = res.data.logs || []
+    currentPage.value = 1  // 重置到第一页
   } catch (err) {
     error.value = err.response?.data?.error || err.message || '加载操作日志失败'
     console.error('加载操作日志失败:', err)
@@ -206,9 +260,9 @@ async function clearLogs(days) {
   }
 }
 
-// 监听过滤条件变化
+// 监听过滤条件变化，重置到第一页
 watch([filterUsername, filterOperation], () => {
-  loadLogs()
+  currentPage.value = 1
 })
 
 onMounted(() => {
@@ -235,5 +289,19 @@ code {
   background-color: #f8f9fa;
   padding: 2px 6px;
   border-radius: 3px;
+}
+
+/* 分页样式优化 */
+.pagination .page-link {
+  min-width: 38px;
+  text-align: center;
+}
+
+.pagination .page-item.disabled .page-link {
+  cursor: not-allowed;
+}
+
+.pagination .page-item.active .page-link {
+  font-weight: 600;
 }
 </style>

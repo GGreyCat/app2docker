@@ -48,6 +48,7 @@
                 <option value="jar">Java 应用（JAR）</option>
                 <option value="nodejs">Node.js 应用</option>
                 <option value="python">Python 应用</option>
+                <option value="rust">Rust 应用</option>
                 <option value="go">Go 应用</option>
               </datalist>
               <div v-if="!canChangeProjectType" class="form-text text-warning">
@@ -114,12 +115,12 @@
 </template>
 
 <script setup>
-import { ref, watch, computed, shallowRef, onMounted, onUnmounted } from 'vue'
-import axios from 'axios'
-import { Codemirror } from 'vue-codemirror'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { StreamLanguage } from '@codemirror/language'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
+import { oneDark } from '@codemirror/theme-one-dark'
+import axios from 'axios'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { Codemirror } from 'vue-codemirror'
 
 const props = defineProps({
   modelValue: Boolean,

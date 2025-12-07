@@ -5,14 +5,14 @@
         <i class="fas fa-tasks"></i> 任务管理
       </h5>
       <div class="d-flex gap-2 align-items-center">
-        <select v-model="statusFilter" class="form-select form-select-sm" style="width: auto;">
+        <select v-model="statusFilter" class="form-select form-select-sm" style="width: auto;" @change="resetPage">
           <option value="">全部状态</option>
           <option value="pending">等待中</option>
           <option value="running">进行中</option>
           <option value="completed">已完成</option>
           <option value="failed">失败</option>
         </select>
-        <select v-model="categoryFilter" class="form-select form-select-sm" style="width: auto;">
+        <select v-model="categoryFilter" class="form-select form-select-sm" style="width: auto;" @change="resetPage">
           <option value="">全部类型</option>
           <option value="build">构建任务</option>
           <option value="export">导出任务</option>
@@ -30,7 +30,7 @@
       </div>
     </div>
 
-    <div v-else-if="filteredTasks.length === 0" class="text-center py-4 text-muted">
+    <div v-else-if="paginatedTasks.length === 0" class="text-center py-4 text-muted">
       <i class="fas fa-inbox fa-2x mb-2"></i>
       <p class="mb-0">暂无任务</p>
     </div>
@@ -50,7 +50,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="task in filteredTasks" :key="task.task_id">
+          <tr v-for="task in paginatedTasks" :key="task.task_id">
             <td>
               <span v-if="task.task_category === 'build'" class="badge bg-info">
                 <i class="fas fa-hammer"></i> 构建
@@ -136,6 +136,45 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- 分页控件 -->
+    <div v-if="totalPages > 1" class="d-flex justify-content-between align-items-center mt-3">
+      <div class="text-muted small">
+        显示第 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, totalTasks) }} 条，共 {{ totalTasks }} 条
+      </div>
+      <nav>
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <button class="page-link" @click="changePage(1)" :disabled="currentPage === 1">
+              <i class="fas fa-angle-double-left"></i>
+            </button>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <button class="page-link" @click="changePage(currentPage - 1)" :disabled="currentPage === 1">
+              <i class="fas fa-angle-left"></i>
+            </button>
+          </li>
+          <li 
+            v-for="page in visiblePages" 
+            :key="page" 
+            class="page-item" 
+            :class="{ active: currentPage === page }"
+          >
+            <button class="page-link" @click="changePage(page)">{{ page }}</button>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <button class="page-link" @click="changePage(currentPage + 1)" :disabled="currentPage === totalPages">
+              <i class="fas fa-angle-right"></i>
+            </button>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <button class="page-link" @click="changePage(totalPages)" :disabled="currentPage === totalPages">
+              <i class="fas fa-angle-double-right"></i>
+            </button>
+          </li>
+        </ul>
+      </nav>
     </div>
 
     <!-- 错误提示 -->
@@ -231,6 +270,8 @@ const selectedTask = ref(null)
 const taskLogs = ref('')
 const showErrorModal = ref(false)
 const selectedErrorTask = ref(null)
+const currentPage = ref(1)  // 当前页码
+const pageSize = ref(10)    // 每页显示数量
 let refreshInterval = null
 
 const filteredTasks = computed(() => {
@@ -243,6 +284,66 @@ const filteredTasks = computed(() => {
   }
   return result
 })
+
+// 总任务数
+const totalTasks = computed(() => filteredTasks.value.length)
+
+// 总页数
+const totalPages = computed(() => Math.ceil(totalTasks.value / pageSize.value))
+
+// 当前页的任务列表
+const paginatedTasks = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return filteredTasks.value.slice(start, end)
+})
+
+// 可见的页码列表
+const visiblePages = computed(() => {
+  const total = totalPages.value
+  const current = currentPage.value
+  const pages = []
+  
+  if (total <= 7) {
+    // 总页数小于7，显示所有页码
+    for (let i = 1; i <= total; i++) {
+      pages.push(i)
+    }
+  } else {
+    // 总页数大于7，智能显示
+    if (current <= 4) {
+      // 前部：1 2 3 4 5 ... 最后页
+      for (let i = 1; i <= 5; i++) pages.push(i)
+      pages.push('...')
+      pages.push(total)
+    } else if (current >= total - 3) {
+      // 后部：1 ... 倍数第5页 倍数第4页 倍数第3页 倍数第2页 最后页
+      pages.push(1)
+      pages.push('...')
+      for (let i = total - 4; i <= total; i++) pages.push(i)
+    } else {
+      // 中间：1 ... current-1 current current+1 ... 最后页
+      pages.push(1)
+      pages.push('...')
+      for (let i = current - 1; i <= current + 1; i++) pages.push(i)
+      pages.push('...')
+      pages.push(total)
+    }
+  }
+  
+  return pages.filter(p => p !== '...' || pages.indexOf(p) === pages.lastIndexOf(p))
+})
+
+// 切换页码
+function changePage(page) {
+  if (page < 1 || page > totalPages.value || page === currentPage.value) return
+  currentPage.value = page
+}
+
+// 重置到第1页（切换过滤条件时）
+function resetPage() {
+  currentPage.value = 1
+}
 
 function showErrorDetails(task) {
   selectedErrorTask.value = task
@@ -470,6 +571,20 @@ code {
 pre {
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+/* 分页样式优化 */
+.pagination .page-link {
+  min-width: 38px;
+  text-align: center;
+}
+
+.pagination .page-item.disabled .page-link {
+  cursor: not-allowed;
+}
+
+.pagination .page-item.active .page-link {
+  font-weight: 600;
 }
 </style>
 
