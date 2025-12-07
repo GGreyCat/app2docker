@@ -261,25 +261,30 @@
           <nav>
             <ul class="pagination pagination-sm mb-0">
               <li class="page-item" :class="{ disabled: containerPage === 1 }">
-                <button class="page-link" @click="containerPage = 1" :disabled="containerPage === 1">
+                <button class="page-link" @click="changeContainerPage(1)" :disabled="containerPage === 1">
                   <i class="fas fa-angle-double-left"></i>
                 </button>
               </li>
               <li class="page-item" :class="{ disabled: containerPage === 1 }">
-                <button class="page-link" @click="containerPage--" :disabled="containerPage === 1">
+                <button class="page-link" @click="changeContainerPage(containerPage - 1)" :disabled="containerPage === 1">
                   <i class="fas fa-angle-left"></i>
                 </button>
               </li>
-              <li class="page-item active">
-                <span class="page-link">{{ containerPage }} / {{ containerTotalPages }}</span>
+              <li 
+                v-for="page in visibleContainerPages" 
+                :key="page" 
+                class="page-item" 
+                :class="{ active: containerPage === page }"
+              >
+                <button class="page-link" @click="changeContainerPage(page)">{{ page }}</button>
               </li>
               <li class="page-item" :class="{ disabled: containerPage === containerTotalPages }">
-                <button class="page-link" @click="containerPage++" :disabled="containerPage === containerTotalPages">
+                <button class="page-link" @click="changeContainerPage(containerPage + 1)" :disabled="containerPage === containerTotalPages">
                   <i class="fas fa-angle-right"></i>
                 </button>
               </li>
               <li class="page-item" :class="{ disabled: containerPage === containerTotalPages }">
-                <button class="page-link" @click="containerPage = containerTotalPages" :disabled="containerPage === containerTotalPages">
+                <button class="page-link" @click="changeContainerPage(containerTotalPages)" :disabled="containerPage === containerTotalPages">
                   <i class="fas fa-angle-double-right"></i>
                 </button>
               </li>
@@ -360,25 +365,30 @@
           <nav>
             <ul class="pagination pagination-sm mb-0">
               <li class="page-item" :class="{ disabled: imagePage === 1 }">
-                <button class="page-link" @click="imagePage = 1" :disabled="imagePage === 1">
+                <button class="page-link" @click="changeImagePage(1)" :disabled="imagePage === 1">
                   <i class="fas fa-angle-double-left"></i>
                 </button>
               </li>
               <li class="page-item" :class="{ disabled: imagePage === 1 }">
-                <button class="page-link" @click="imagePage--" :disabled="imagePage === 1">
+                <button class="page-link" @click="changeImagePage(imagePage - 1)" :disabled="imagePage === 1">
                   <i class="fas fa-angle-left"></i>
                 </button>
               </li>
-              <li class="page-item active">
-                <span class="page-link">{{ imagePage }} / {{ imageTotalPages }}</span>
+              <li 
+                v-for="page in visibleImagePages" 
+                :key="page" 
+                class="page-item" 
+                :class="{ active: imagePage === page }"
+              >
+                <button class="page-link" @click="changeImagePage(page)">{{ page }}</button>
               </li>
               <li class="page-item" :class="{ disabled: imagePage === imageTotalPages }">
-                <button class="page-link" @click="imagePage++" :disabled="imagePage === imageTotalPages">
+                <button class="page-link" @click="changeImagePage(imagePage + 1)" :disabled="imagePage === imageTotalPages">
                   <i class="fas fa-angle-right"></i>
                 </button>
               </li>
               <li class="page-item" :class="{ disabled: imagePage === imageTotalPages }">
-                <button class="page-link" @click="imagePage = imageTotalPages" :disabled="imagePage === imageTotalPages">
+                <button class="page-link" @click="changeImagePage(imageTotalPages)" :disabled="imagePage === imageTotalPages">
                   <i class="fas fa-angle-double-right"></i>
                 </button>
               </li>
@@ -448,6 +458,43 @@ const paginatedContainers = computed(() => {
 })
 
 const containerTotalPages = computed(() => Math.ceil(filteredContainers.value.length / containerPageSize))
+
+// 容器可见页码列表
+const visibleContainerPages = computed(() => {
+  const total = containerTotalPages.value
+  const current = containerPage.value
+  const pages = []
+  
+  if (total <= 7) {
+    for (let i = 1; i <= total; i++) {
+      pages.push(i)
+    }
+  } else {
+    if (current <= 4) {
+      for (let i = 1; i <= 5; i++) pages.push(i)
+      pages.push('...')
+      pages.push(total)
+    } else if (current >= total - 3) {
+      pages.push(1)
+      pages.push('...')
+      for (let i = total - 4; i <= total; i++) pages.push(i)
+    } else {
+      pages.push(1)
+      pages.push('...')
+      for (let i = current - 1; i <= current + 1; i++) pages.push(i)
+      pages.push('...')
+      pages.push(total)
+    }
+  }
+  
+  return pages.filter(p => p !== '...' || pages.indexOf(p) === pages.lastIndexOf(p))
+})
+
+// 切换容器页码
+function changeContainerPage(page) {
+  if (page < 1 || page > containerTotalPages.value || page === containerPage.value) return
+  containerPage.value = page
+}
 
 function filterContainers() {
   containerPage.value = 1
