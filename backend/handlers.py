@@ -1478,37 +1478,29 @@ class BuildManager:
             log(f"\n✅ 镜像构建成功: {full_tag}\n")
 
             if should_push:
-                # 推送时统一使用激活的registry
+                # 推送时直接使用构建好的镜像名，从激活的registry获取认证信息
                 from backend.config import get_active_registry
 
                 push_registry_config = get_active_registry()
                 log(f"\n📤 开始推送镜像: {full_tag}\n")
-                log(f"🎯 使用激活仓库: {push_registry_config.get('name', 'Unknown')}\n")
+                log(
+                    f"🎯 使用激活仓库配置获取认证信息: {push_registry_config.get('name', 'Unknown')}\n"
+                )
 
-                # 构建完整的推送repository路径
-                registry_host = push_registry_config.get("registry", "docker.io")
-                registry_prefix = push_registry_config.get(
-                    "registry_prefix", ""
-                ).strip()
-
-                # 构建完整的repository路径
-                if registry_prefix:
-                    push_repository = f"{registry_host}/{registry_prefix}/{image_name}"
-                else:
-                    push_repository = f"{registry_host}/{image_name}"
-
-                # 移除可能的重复斜杠
-                push_repository = push_repository.replace("//", "/")
-
-                log(f"📦 推送路径: {push_repository}:{tag}\n")
+                # 直接使用构建时的镜像名
+                push_repository = image_name
+                log(f"📦 推送镜像: {full_tag}\n")
 
                 push_username = push_registry_config.get("username")
                 push_password = push_registry_config.get("password")
 
-                if not push_username or not push_password:
+                auth_config = None
+                if push_username and push_password:
+                    auth_config = {"username": push_username, "password": push_password}
+                    log(f"✅ 已配置认证信息\n")
+                else:
                     log(f"⚠️  推送仓库未配置认证信息，推送可能失败\n")
 
-                auth_config = {"username": push_username, "password": push_password}
                 try:
                     push_stream = docker_builder.push_image(
                         push_repository, tag, auth_config=auth_config
@@ -1524,7 +1516,7 @@ class BuildManager:
                         if "error" in chunk:
                             log(f"\n❌ 推送失败: {chunk['error']}\n")
                             return
-                    log(f"\n✅ 推送完成到 {registry_host}: {push_repository}:{tag}\n")
+                    log(f"\n✅ 推送完成: {full_tag}\n")
                 except Exception as e:
                     log(f"\n❌ 推送异常: {e}\n")
 
@@ -1937,77 +1929,34 @@ logs/
 
             log(f"✅ 镜像构建完成: {full_tag}\n")
 
-            # 如果需要推送，统一使用激活的registry自动推送
+            # 如果需要推送，直接使用构建好的镜像名推送，从激活的registry获取认证信息
             if should_push:
                 log(f"📡 开始推送镜像...\n")
-                # 统一使用激活的registry
+                # 从激活的registry获取认证信息
                 registry_config = get_active_registry()
 
-                # 从构建的镜像名中提取纯镜像名（去掉可能的registry前缀）
-                # 例如: registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker -> jar2docker
-                pure_image_name = image_name
-                # 检查是否包含斜杠，如果包含则提取最后一部分
-                if "/" in image_name:
-                    # 提取最后一个斜杠后的部分作为纯镜像名
-                    pure_image_name = image_name.split("/")[-1]
-                    log(
-                        f"📝 从镜像名 '{image_name}' 提取纯镜像名: '{pure_image_name}'\n"
-                    )
+                # 直接使用构建时的镜像名和标签进行推送
+                # full_tag 格式: image_name:tag，可能包含registry路径
+                # 例如: registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker:dev
+                push_repository = image_name  # 直接使用构建时的镜像名
 
-                # 构建完整的推送repository路径
-                registry_host = registry_config.get("registry", "docker.io")
-                registry_prefix = registry_config.get("registry_prefix", "").strip()
+                log(
+                    f"🎯 使用激活仓库配置获取认证信息: {registry_config.get('name', 'Unknown')}\n"
+                )
+                log(f"📦 推送镜像: {full_tag}\n")
 
-                # 构建完整的repository路径
-                if registry_prefix:
-                    # 如果有prefix，格式为: registry_host/prefix/image_name
-                    push_repository = (
-                        f"{registry_host}/{registry_prefix}/{pure_image_name}"
-                    )
-                else:
-                    # 如果没有prefix，格式为: registry_host/image_name
-                    push_repository = f"{registry_host}/{pure_image_name}"
-
-                # 移除可能的重复斜杠
-                push_repository = push_repository.replace("//", "/")
-
-                log(f"🎯 使用激活仓库: {registry_config.get('name', 'Unknown')}\n")
-                log(f"📦 推送路径: {push_repository}:{tag}\n")
-
+                # 从激活的registry配置中获取认证信息
                 username = registry_config.get("username")
                 password = registry_config.get("password")
                 auth_config = None
                 if username and password:
                     auth_config = {"username": username, "password": password}
+                    log(f"✅ 已配置认证信息\n")
                 else:
                     log(f"⚠️  推送仓库未配置认证信息，推送可能失败\n")
 
                 try:
-                    # 先给镜像打标签到目标registry路径
-                    push_tag = f"{push_repository}:{tag}"
-                    log(f"🏷️  给镜像打标签: {full_tag} -> {push_tag}\n")
-                    try:
-                        # 使用 Docker API 给镜像打标签
-                        if hasattr(docker_builder, "client") and docker_builder.client:
-                            # docker-py 的 tag 方法: image.tag(repository, tag=tag)
-                            # 或者使用: client.images.tag(image_id, repository, tag=tag)
-                            image = docker_builder.get_image(full_tag)
-                            # 尝试使用 image.tag 方法
-                            if hasattr(image, "tag"):
-                                image.tag(push_repository, tag=tag)
-                            else:
-                                # 使用 client.images.tag 方法
-                                docker_builder.client.images.tag(
-                                    image=full_tag, repository=push_repository, tag=tag
-                                )
-                            log(f"✅ 镜像标签已创建: {push_tag}\n")
-                        else:
-                            raise RuntimeError("Docker 客户端不可用")
-                    except Exception as tag_error:
-                        log(f"❌ 打标签失败: {str(tag_error)}\n")
-                        raise RuntimeError(f"无法给镜像打标签: {str(tag_error)}")
-
-                    # 推送镜像
+                    # 直接推送构建好的镜像
                     push_stream = docker_builder.push_image(
                         push_repository, tag, auth_config=auth_config
                     )
@@ -2020,7 +1969,7 @@ logs/
                         else:
                             log(str(chunk))
 
-                    log(f"✅ 推送完成到 {registry_host}: {push_repository}:{tag}\n")
+                    log(f"✅ 推送完成: {full_tag}\n")
                 except Exception as e:
                     log(f"❌ 推送异常: {str(e)}\n")
                     raise
