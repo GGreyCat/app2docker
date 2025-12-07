@@ -24,17 +24,6 @@ docker run -d \
 访问：**http://localhost:8000**  
 默认账号：`admin` / `admin`
 
-**自定义端口**：
-
-```bash
-docker run -d \
-  -e APP_PORT=9000 \
-  -p 9000:9000 \
-  -v $(pwd)/data:/app/data \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  registry.cn-shanghai.aliyuncs.com/51jbm/app2docker:latest
-```
-
 ---
 
 ## 📦 核心功能
