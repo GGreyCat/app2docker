@@ -353,12 +353,20 @@ class PipelineManager:
             elif algo.lower() == "sha256":
                 mac = hmac.new(secret.encode(), payload, hashlib.sha256)
             else:
+                print(f"❌ 不支持的签名算法: {algo}")
                 return False
             
             expected_sig = mac.hexdigest()
             
             # 常量时间比较，防止时序攻击
-            return hmac.compare_digest(expected_sig, sig)
+            result = hmac.compare_digest(expected_sig, sig)
+            
+            if not result:
+                print(f"❌ 签名不匹配: expected={expected_sig[:8]}..., got={sig[:8]}..., algo={algo}")
+            
+            return result
         except Exception as e:
-            print(f"❌ Webhook 签名验证失败: {e}")
+            print(f"❌ Webhook 签名验证异常: {e}")
+            import traceback
+            traceback.print_exc()
             return False
