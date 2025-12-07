@@ -728,6 +728,81 @@ async def delete_build_task(task_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"删除任务失败: {str(e)}")
 
 
+@router.post("/tasks/cleanup")
+async def cleanup_tasks(
+    request: Request,
+    status: Optional[str] = Body(None, description="清理指定状态的任务：completed, failed"),
+    days: Optional[int] = Body(None, description="清理N天前的任务"),
+    task_type: Optional[str] = Body(None, description="任务类型：build, export"),
+):
+    """批量清理任务"""
+    try:
+        username = get_current_username(request)
+        removed_count = 0
+        
+        # 清理构建任务
+        if not task_type or task_type == "build":
+            build_manager = BuildTaskManager()
+            if days:
+                # 清理指定天数前的任务
+                from datetime import timedelta
+                cutoff_time = datetime.now() - timedelta(days=days)
+                cutoff_iso = cutoff_time.isoformat()
+                
+                with build_manager.lock:
+                    tasks_to_remove = [
+                        task_id for task_id, task in build_manager.tasks.items()
+                        if task.get("created_at", "") < cutoff_iso
+                        and (not status or task.get("status") == status)
+                    ]
+                    for task_id in tasks_to_remove:
+                        build_manager.delete_task(task_id)
+                        removed_count += 1
+            elif status:
+                # 清理指定状态的任务
+                with build_manager.lock:
+                    tasks_to_remove = [
+                        task_id for task_id, task in build_manager.tasks.items()
+                        if task.get("status") == status
+                    ]
+                    for task_id in tasks_to_remove:
+                        build_manager.delete_task(task_id)
+                        removed_count += 1
+        
+        # 清理导出任务
+        if not task_type or task_type == "export":
+            export_manager = ExportTaskManager()
+            if days:
+                export_manager.cleanup_expired_tasks(days=days)
+            elif status:
+                with export_manager.lock:
+                    tasks_to_remove = [
+                        task_id for task_id, task in export_manager.tasks.items()
+                        if task.get("status") == status
+                    ]
+                    for task_id in tasks_to_remove:
+                        export_manager.delete_task(task_id)
+                        removed_count += 1
+        
+        # 记录操作日志
+        OperationLogger.log(username, "cleanup_tasks", {
+            "removed_count": removed_count,
+            "status": status,
+            "days": days,
+            "task_type": task_type
+        })
+        
+        return JSONResponse({
+            "success": True,
+            "removed_count": removed_count,
+            "message": f"已清理 {removed_count} 个任务"
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"清理任务失败: {str(e)}")
+
+
 @router.get("/get-logs")
 async def get_logs(build_id: str = Query(...)):
     """获取构建日志（兼容旧接口）"""

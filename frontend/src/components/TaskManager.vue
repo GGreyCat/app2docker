@@ -20,6 +20,9 @@
         <button class="btn btn-sm btn-outline-primary" @click="loadTasks">
           <i class="fas fa-sync-alt"></i> 刷新
         </button>
+        <button class="btn btn-sm btn-outline-danger" @click="showCleanupModal = true">
+          <i class="fas fa-broom"></i> 清理
+        </button>
       </div>
     </div>
 
@@ -250,6 +253,91 @@
       </div>
     </div>
     <div v-if="showLogModal" class="modal-backdrop fade show" @click="closeLogModal"></div>
+
+    <!-- 清理任务模态框 -->
+    <div v-if="showCleanupModal" class="modal fade show" style="display: block;" tabindex="-1" @click.self="closeCleanupModal">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-warning text-dark">
+            <h5 class="modal-title">
+              <i class="fas fa-broom"></i> 批量清理任务
+            </h5>
+            <button type="button" class="btn-close" @click="closeCleanupModal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-warning">
+              <i class="fas fa-exclamation-triangle"></i>
+              清理后的任务无法恢复，请谨慎操作！
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">清理类型</label>
+              <select v-model="cleanupOptions.type" class="form-select">
+                <option value="status">按状态清理</option>
+                <option value="days">按时间清理</option>
+              </select>
+            </div>
+
+            <div v-if="cleanupOptions.type === 'status'" class="mb-3">
+              <label class="form-label">选择状态</label>
+              <select v-model="cleanupOptions.status" class="form-select">
+                <option value="">所有状态</option>
+                <option value="completed">已完成</option>
+                <option value="failed">失败</option>
+              </select>
+            </div>
+
+            <div v-if="cleanupOptions.type === 'days'" class="mb-3">
+              <label class="form-label">清理 N 天前的任务</label>
+              <input 
+                v-model.number="cleanupOptions.days" 
+                type="number" 
+                class="form-control" 
+                min="1"
+                placeholder="例如：7 表示清理7天前的任务"
+              />
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">任务类型</label>
+              <select v-model="cleanupOptions.taskType" class="form-select">
+                <option value="">所有类型</option>
+                <option value="build">仅构建任务</option>
+                <option value="export">仅导出任务</option>
+              </select>
+            </div>
+
+            <div class="alert alert-info mb-0">
+              <small>
+                <i class="fas fa-info-circle"></i>
+                <strong>预计清理：</strong>
+                <span v-if="cleanupOptions.type === 'status'">
+                  {{ cleanupOptions.status ? `${cleanupOptions.status === 'completed' ? '已完成' : '失败'}` : '所有状态' }}的
+                </span>
+                <span v-else>
+                  {{ cleanupOptions.days || 'N' }} 天前的
+                </span>
+                {{ cleanupOptions.taskType === 'build' ? '构建任务' : cleanupOptions.taskType === 'export' ? '导出任务' : '所有任务' }}
+              </small>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeCleanupModal">取消</button>
+            <button 
+              type="button" 
+              class="btn btn-danger" 
+              @click="executeCleanup"
+              :disabled="cleaning || (cleanupOptions.type === 'days' && !cleanupOptions.days)"
+            >
+              <span v-if="cleaning" class="spinner-border spinner-border-sm me-1"></span>
+              <i v-else class="fas fa-broom"></i>
+              {{ cleaning ? '清理中...' : '确认清理' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-if="showCleanupModal" class="modal-backdrop fade show" @click="closeCleanupModal"></div>
   </div>
 </template>
 
@@ -272,6 +360,14 @@ const showErrorModal = ref(false)
 const selectedErrorTask = ref(null)
 const currentPage = ref(1)  // 当前页码
 const pageSize = ref(10)    // 每页显示数量
+const showCleanupModal = ref(false)  // 清理模态框
+const cleaning = ref(false)  // 清理中状态
+const cleanupOptions = ref({
+  type: 'status',  // status 或 days
+  status: 'completed',  // completed, failed, 或 ''
+  days: 7,  // 清理N天前的任务
+  taskType: ''  // build, export, 或 ''
+})
 let refreshInterval = null
 
 const filteredTasks = computed(() => {
@@ -526,6 +622,74 @@ async function deleteTask(task) {
     }, 5000)
   } finally {
     deleting.value = null
+  }
+}
+
+function closeCleanupModal() {
+  showCleanupModal.value = false
+  // 重置选项
+  cleanupOptions.value = {
+    type: 'status',
+    status: 'completed',
+    days: 7,
+    taskType: ''
+  }
+}
+
+async function executeCleanup() {
+  if (cleaning.value) return
+  
+  // 二次确认
+  let confirmMsg = ''
+  if (cleanupOptions.value.type === 'status') {
+    const statusText = cleanupOptions.value.status 
+      ? (cleanupOptions.value.status === 'completed' ? '已完成' : '失败')
+      : '所有状态'
+    confirmMsg = `确定要清理${statusText}的任务吗？`
+  } else {
+    confirmMsg = `确定要清理${cleanupOptions.value.days}天前的任务吗？`
+  }
+  
+  if (!confirm(confirmMsg)) {
+    return
+  }
+  
+  cleaning.value = true
+  error.value = null
+  
+  try {
+    const payload = {
+      task_type: cleanupOptions.value.taskType || null
+    }
+    
+    if (cleanupOptions.value.type === 'status') {
+      payload.status = cleanupOptions.value.status || null
+    } else {
+      payload.days = cleanupOptions.value.days
+    }
+    
+    const res = await axios.post('/api/tasks/cleanup', payload)
+    
+    // 显示成功消息
+    alert(`成功清理 ${res.data.removed_count} 个任务`)
+    
+    // 关闭模态框
+    closeCleanupModal()
+    
+    // 刷新任务列表
+    await loadTasks()
+  } catch (err) {
+    console.error('清理任务失败:', err)
+    const errorMsg = err.response?.data?.detail || err.response?.data?.error || err.message || '清理失败'
+    error.value = `清理任务失败: ${errorMsg}`
+    // 5秒后自动清除错误提示
+    setTimeout(() => {
+      if (error.value && error.value.includes('清理任务失败')) {
+        error.value = null
+      }
+    }, 5000)
+  } finally {
+    cleaning.value = false
   }
 }
 
