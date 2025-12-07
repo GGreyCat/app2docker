@@ -104,13 +104,6 @@ const extensions = [
   StreamLanguage.define(shell)
 ]
 
-// ESC键关闭
-function handleEscape(e) {
-  if (e.key === 'Escape' && props.modelValue) {
-    close()
-  }
-}
-
 watch(() => props.modelValue, async (show) => {
   if (show && props.template) {
     loading.value = true
@@ -127,14 +120,6 @@ watch(() => props.modelValue, async (show) => {
       loading.value = false
     }
   }
-})
-
-onMounted(() => {
-  document.addEventListener('keydown', handleEscape)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscape)
 })
 
 function formatSize(bytes) {

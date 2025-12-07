@@ -405,14 +405,6 @@ function close() {
   emit('update:modelValue', false)
 }
 
-// ESC键关闭
-function handleEscape(e) {
-  if (e.key === 'Escape' && props.modelValue) {
-    console.log('✅ ConfigModal: ESC键关闭')
-    close()
-  }
-}
-
 watch(
   () => props.modelValue,
   (val) => {
@@ -423,16 +415,6 @@ watch(
   },
   { immediate: true }  // 立即执行一次，确保首次打开时也会加载
 )
-
-onMounted(() => {
-  console.log('📌 ConfigModal: 挂载，添加ESC监听器')
-  document.addEventListener('keydown', handleEscape)
-})
-
-onUnmounted(() => {
-  console.log('🗑️ ConfigModal: 卸载，移除ESC监听器')
-  document.removeEventListener('keydown', handleEscape)
-})
 </script>
 
 <style scoped>

@@ -161,13 +161,6 @@ const projectTypeChanged = computed(() => {
   return form.value.projectType !== props.template.project_type
 })
 
-// ESC键关闭
-function handleEscape(e) {
-  if (e.key === 'Escape' && props.modelValue) {
-    close()
-  }
-}
-
 watch(() => props.modelValue, async (show) => {
   if (show) {
     if (props.isNew) {
@@ -196,13 +189,6 @@ watch(() => props.modelValue, async (show) => {
   }
 })
 
-onMounted(() => {
-  document.addEventListener('keydown', handleEscape)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscape)
-})
 
 function validateProjectType() {
   // 清理项目类型输入：只保留字母、数字、下划线、连字符

@@ -107,6 +107,7 @@
 import axios from 'axios'
 import { onMounted, ref } from 'vue'
 import { getToken, getUsername, isAuthenticated, logout } from './utils/auth'
+import { useModalEscape } from './composables/useModalEscape'
 
 // 懒加载组件
 import BuildPanel from './components/BuildPanel.vue'
@@ -141,6 +142,9 @@ async function handleLogout() {
     console.log('👋 已登出')
   }
 }
+
+// 统一处理所有模态框的 ESC 键
+useModalEscape()
 
 onMounted(() => {
   console.log('🚀 App 组件挂载')

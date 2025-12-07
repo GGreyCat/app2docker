@@ -211,13 +211,6 @@ function close() {
   emit('update:modelValue', false)
 }
 
-// ESC键关闭
-function handleEscape(e) {
-  if (e.key === 'Escape' && props.modelValue) {
-    close()
-  }
-}
-
 // 事件处理函数
 const handleShowBuildLog = () => {
   console.log('📖 收到 show-build-log 事件')
@@ -231,15 +224,11 @@ const handleAddLog = (e) => {
 
 // 监听全局事件
 onMounted(() => {
-  console.log('🎬 BuildLogModal 已挂载，开始监听日志事件')
-  document.addEventListener('keydown', handleEscape)
   window.addEventListener('show-build-log', handleShowBuildLog)
   window.addEventListener('add-log', handleAddLog)
 })
 
 onUnmounted(() => {
-  console.log('🛑 BuildLogModal 卸载，移除事件监听')
-  document.removeEventListener('keydown', handleEscape)
   window.removeEventListener('show-build-log', handleShowBuildLog)
   window.removeEventListener('add-log', handleAddLog)
 })
