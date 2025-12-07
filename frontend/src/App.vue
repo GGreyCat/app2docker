@@ -85,11 +85,11 @@
             <BuildPanel v-if="activeTab === 'build'" />
             <SourceBuildPanel v-if="activeTab === 'source-build'" />
             <ExportPanel v-if="activeTab === 'export'" />
-            <TaskManager v-if="activeTab === 'tasks'" />
             <TemplatePanel v-if="activeTab === 'template'" />
             <OperationLogs v-if="activeTab === 'logs'" />
             <DockerManager v-if="activeTab === 'docker'" />
-            <PipelinePanel v-if="activeTab === 'pipeline'" />
+            <PipelinePanel v-if="activeTab === 'pipeline'" @view-task="handleViewTask" />
+            <TaskManager v-if="activeTab === 'tasks'" :highlight-task-id="highlightTaskId" />
           </div>
         </div>
       </div>
@@ -126,6 +126,7 @@ const username = ref('')
 const activeTab = ref('build')
 const showConfig = ref(false)
 const showUserCenter = ref(false)
+const highlightTaskId = ref(null)
 
 function handleLoginSuccess(data) {
   authenticated.value = true
@@ -140,6 +141,17 @@ async function handleLogout() {
     username.value = ''
     console.log('👋 已登出')
   }
+}
+
+function handleViewTask(taskId) {
+  // 切换到任务管理标签页
+  activeTab.value = 'tasks'
+  // 设置要高亮的任务ID
+  highlightTaskId.value = taskId
+  // 3秒后清除高亮
+  setTimeout(() => {
+    highlightTaskId.value = null
+  }, 3000)
 }
 
 onMounted(() => {

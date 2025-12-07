@@ -164,6 +164,7 @@ class PipelineScheduler:
                 template_params=template_params,
                 sub_path=sub_path,
                 use_project_dockerfile=use_project_dockerfile,
+                pipeline_id=pipeline_id,  # 传递流水线ID
             )
             
             print(f"✅ 定时触发流水线: {pipeline_name}, 任务ID: {task_id[:8]}")

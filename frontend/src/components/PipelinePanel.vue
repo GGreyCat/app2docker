@@ -20,6 +20,7 @@
             <th>镜像</th>
             <th>状态</th>
             <th>当前任务</th>
+            <th>最后构建</th>
             <th>定时</th>
             <th>触发次数</th>
             <th>最后触发</th>
@@ -28,12 +29,12 @@
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="10" class="text-center">
+            <td colspan="11" class="text-center">
               <span class="spinner-border spinner-border-sm"></span> 加载中...
             </td>
           </tr>
           <tr v-else-if="pipelines.length === 0">
-            <td colspan="10" class="text-center text-muted">
+            <td colspan="11" class="text-center text-muted">
               暂无流水线配置
             </td>
           </tr>
@@ -69,6 +70,30 @@
                   <i class="fas fa-clock"></i> 等待中
                 </span>
                 <span v-else class="text-muted small">-</span>
+              </span>
+              <span v-else class="text-muted small">-</span>
+            </td>
+            <td>
+              <span v-if="pipeline.last_build">
+                <a 
+                  href="#" 
+                  @click.prevent="viewTask(pipeline.last_build.task_id)"
+                  :class="{
+                    'badge': true,
+                    'bg-success': pipeline.last_build.status === 'completed',
+                    'bg-danger': pipeline.last_build.status === 'failed',
+                    'text-decoration-none': true
+                  }"
+                  :title="`点击查看任务详情 (${pipeline.last_build.task_id.substring(0, 8)})`"
+                >
+                  <i v-if="pipeline.last_build.status === 'completed'" class="fas fa-check-circle"></i>
+                  <i v-else-if="pipeline.last_build.status === 'failed'" class="fas fa-times-circle"></i>
+                  {{ pipeline.last_build.status === 'completed' ? '成功' : '失败' }}
+                </a>
+                <br>
+                <small class="text-muted">
+                  {{ formatTime(pipeline.last_build.completed_at || pipeline.last_build.created_at) }}
+                </small>
               </span>
               <span v-else class="text-muted small">-</span>
             </td>
@@ -365,7 +390,7 @@
 
 <script setup>
 import axios from 'axios'
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, inject } from 'vue'
 
 const pipelines = ref([])
 const templates = ref([])
@@ -586,6 +611,18 @@ function formatTime(isoString) {
   if (diff < 604800) return `${Math.floor(diff / 86400)} 天前`
   
   return date.toLocaleDateString('zh-CN')
+}
+
+// 获取父组件传递的方法（如果存在）
+const emit = defineEmits(['view-task'])
+
+function viewTask(taskId) {
+  // 触发事件，让父组件切换到任务管理标签页并高亮任务
+  emit('view-task', taskId)
+  
+  // 如果父组件没有处理，则尝试通过 URL hash 传递
+  // 这需要任务管理组件支持从 hash 中读取 task_id
+  window.location.hash = `task_id=${taskId}`
 }
 </script>
 

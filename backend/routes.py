@@ -1890,9 +1890,13 @@ async def list_pipelines(enabled: Optional[bool] = Query(None, description="过�
         manager = PipelineManager()
         pipelines = manager.list_pipelines(enabled=enabled)
         
-        # 为每个流水线添加当前任务状态
+        # 为每个流水线添加当前任务状态和最后一次构建状态
         build_manager = BuildManager()
+        pipeline_id = None
         for pipeline in pipelines:
+            pipeline_id = pipeline.get("pipeline_id")
+            
+            # 获取当前正在运行的任务
             task_id = pipeline.get("current_task_id")
             if task_id:
                 task = build_manager.task_manager.get_task(task_id)
@@ -1907,8 +1911,38 @@ async def list_pipelines(enabled: Optional[bool] = Query(None, description="过�
                     }
                 else:
                     # 任务不存在，清除绑定
-                    manager.unbind_task(pipeline["pipeline_id"])
+                    manager.unbind_task(pipeline_id)
                     pipeline["current_task_id"] = None
+            
+            # 查找最后一次完成的构建任务（completed 或 failed）
+            all_tasks = build_manager.task_manager.list_tasks(task_type="build_from_source")
+            last_task = None
+            for task in all_tasks:
+                # 检查任务是否属于该流水线
+                task_pipeline_id = task.get("pipeline_id")
+                if task_pipeline_id == pipeline_id:
+                    task_status = task.get("status")
+                    # 只考虑已完成的任务（completed 或 failed）
+                    if task_status in ["completed", "failed"]:
+                        if not last_task or task.get("created_at", "") > last_task.get("created_at", ""):
+                            last_task = task
+            
+            # 添加最后一次构建信息
+            if last_task:
+                pipeline["last_build"] = {
+                    "task_id": last_task.get("task_id"),
+                    "status": last_task.get("status"),
+                    "created_at": last_task.get("created_at"),
+                    "completed_at": last_task.get("completed_at"),
+                    "image": last_task.get("image"),
+                    "tag": last_task.get("tag"),
+                    "error": last_task.get("error"),
+                }
+                # 添加一个便捷的成功状态字段
+                pipeline["last_build_success"] = (last_task.get("status") == "completed")
+            else:
+                pipeline["last_build"] = None
+                pipeline["last_build_success"] = None
         
         return JSONResponse({"pipelines": pipelines, "total": len(pipelines)})
     except Exception as e:
@@ -2042,6 +2076,7 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
             branch=pipeline.get("branch"),
             sub_path=pipeline.get("sub_path"),
             use_project_dockerfile=pipeline.get("use_project_dockerfile", True),
+            pipeline_id=pipeline_id,  # 传递流水线ID
         )
         
         # 记录触发并绑定任务
@@ -2074,18 +2109,40 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
 async def webhook_trigger(webhook_token: str, request: Request):
     """Webhook 触发端点（支持 GitHub/GitLab/Gitee）"""
     try:
+        # 调试：打印所有请求头
+        print(f"🔍 Webhook 请求头:")
+        for key, value in request.headers.items():
+            print(f"  {key}: {value}")
+        
         # 获取请求体（原始字节）
         body = await request.body()
+        print(f"📦 请求体大小: {len(body)} bytes")
         
         # 获取流水线配置
         manager = PipelineManager()
         pipeline = manager.get_pipeline_by_token(webhook_token)
         
         if not pipeline:
+            print(f"❌ 未找到流水线: webhook_token={webhook_token}")
             raise HTTPException(status_code=404, detail="流水线不存在")
         
+        print(f"✅ 找到流水线: {pipeline.get('name')} (pipeline_id={pipeline.get('pipeline_id')})")
+        
         if not pipeline.get("enabled", False):
+            print(f"❌ 流水线已禁用: {pipeline.get('name')}")
             raise HTTPException(status_code=403, detail="流水线已禁用")
+        
+        # 检查是否是 Gitee ping 事件（测试请求）
+        # FastAPI/Starlette 会将 header 名称标准化为小写
+        gitee_ping = request.headers.get("x-gitee-ping", "")
+        print(f"🔍 X-Gitee-Ping: {gitee_ping}")
+        if gitee_ping and gitee_ping.lower() == "true":
+            print(f"✅ Gitee Ping 测试请求: pipeline={pipeline.get('name')}")
+            return JSONResponse({
+                "message": "Webhook 配置正确",
+                "pipeline": pipeline.get("name"),
+                "status": "ok"
+            })
         
         # 验证 Webhook 签名（可选）
         webhook_secret = pipeline.get("webhook_secret")
@@ -2111,8 +2168,15 @@ async def webhook_trigger(webhook_token: str, request: Request):
             # Gitee: X-Gitee-Token
             elif "x-gitee-token" in request.headers:
                 gitee_token = request.headers["x-gitee-token"]
-                signature_found = True
-                signature_verified = (gitee_token == webhook_secret)
+                print(f"🔍 X-Gitee-Token: '{gitee_token}' (长度: {len(gitee_token) if gitee_token else 0})")
+                # 只有当 token 不为空时才进行验证
+                if gitee_token and gitee_token.strip():
+                    signature_found = True
+                    signature_verified = (gitee_token == webhook_secret)
+                    print(f"🔍 Token 验证: found={signature_found}, verified={signature_verified}")
+                else:
+                    # 如果 token 为空，说明 Gitee 没有配置密码，跳过验证
+                    print(f"⚠️ Gitee Token 为空，跳过验证")
             
             # 如果提供了签名但验证失败，则拒绝请求
             if signature_found and not signature_verified:
@@ -2184,6 +2248,7 @@ async def webhook_trigger(webhook_token: str, request: Request):
             branch=branch,
             sub_path=pipeline.get("sub_path"),
             use_project_dockerfile=pipeline.get("use_project_dockerfile", True),
+            pipeline_id=pipeline["pipeline_id"],  # 传递流水线ID
         )
         
         # 记录触发并绑定任务
