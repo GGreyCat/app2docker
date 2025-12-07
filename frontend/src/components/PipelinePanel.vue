@@ -75,24 +75,24 @@
             </td>
             <td>
               <span v-if="pipeline.last_build">
-                <a 
-                  href="#" 
-                  @click.prevent="viewTask(pipeline.last_build.task_id)"
+                <span 
                   :class="{
                     'badge': true,
                     'bg-success': pipeline.last_build.status === 'completed',
                     'bg-danger': pipeline.last_build.status === 'failed',
-                    'text-decoration-none': true
                   }"
-                  :title="`点击查看任务详情 (${pipeline.last_build.task_id.substring(0, 8)})`"
                 >
                   <i v-if="pipeline.last_build.status === 'completed'" class="fas fa-check-circle"></i>
                   <i v-else-if="pipeline.last_build.status === 'failed'" class="fas fa-times-circle"></i>
                   {{ pipeline.last_build.status === 'completed' ? '成功' : '失败' }}
-                </a>
+                </span>
                 <br>
                 <small class="text-muted">
                   {{ formatTime(pipeline.last_build.completed_at || pipeline.last_build.created_at) }}
+                </small>
+                <br>
+                <small class="text-muted">
+                  <code>{{ pipeline.last_build.task_id.substring(0, 8) }}</code>
                 </small>
               </span>
               <span v-else class="text-muted small">-</span>
@@ -451,7 +451,6 @@
                     <th>触发时间</th>
                     <th>完成时间</th>
                     <th>分支/信息</th>
-                    <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -513,16 +512,6 @@
                         </span>
                       </small>
                       <small v-else class="text-muted">-</small>
-                    </td>
-                    <td>
-                      <button 
-                        v-if="task.status !== 'deleted'"
-                        class="btn btn-sm btn-outline-info" 
-                        @click="viewTask(task.task_id)"
-                        title="查看任务详情"
-                      >
-                        <i class="fas fa-eye"></i>
-                      </button>
                     </td>
                   </tr>
                 </tbody>
@@ -772,18 +761,6 @@ function formatTime(isoString) {
   if (diff < 604800) return `${Math.floor(diff / 86400)} 天前`
   
   return date.toLocaleDateString('zh-CN')
-}
-
-// 获取父组件传递的方法（如果存在）
-const emit = defineEmits(['view-task'])
-
-function viewTask(taskId) {
-  // 触发事件，让父组件切换到任务管理标签页并高亮任务
-  emit('view-task', taskId)
-  
-  // 如果父组件没有处理，则尝试通过 URL hash 传递
-  // 这需要任务管理组件支持从 hash 中读取 task_id
-  window.location.hash = `task_id=${taskId}`
 }
 
 function showHistory(pipeline) {

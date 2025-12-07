@@ -56,8 +56,6 @@
           <tr 
             v-for="task in paginatedTasks" 
             :key="task.task_id"
-            :class="{ 'table-warning': props.highlightTaskId === task.task_id }"
-            :ref="props.highlightTaskId === task.task_id ? (el) => { if (el) highlightedRow.value = el } : null"
           >
             <td>
               <span v-if="task.task_category === 'build'" class="badge bg-info">
@@ -512,14 +510,7 @@
 
 <script setup>
 import axios from 'axios'
-import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
-
-const props = defineProps({
-  highlightTaskId: {
-    type: String,
-    default: null
-  }
-})
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 const tasks = ref([])
 const loading = ref(false)
@@ -528,7 +519,6 @@ const statusFilter = ref('')
 const categoryFilter = ref('')
 const downloading = ref(null)
 const deleting = ref(null)
-const highlightedRow = ref(null)
 const rebuilding = ref(null)  // 重建中的任务ID
 const viewingLogs = ref(null)
 const showLogModal = ref(false)
@@ -1054,20 +1044,6 @@ async function rebuildTask(task) {
     rebuilding.value = null
   }
 }
-
-// 监听 highlightTaskId 变化，滚动到对应任务
-watch(() => props.highlightTaskId, async (newTaskId) => {
-  if (newTaskId) {
-    // 确保任务已加载
-    await loadTasks()
-    await nextTick()
-    
-    // 滚动到高亮的行
-    if (highlightedRow.value) {
-      highlightedRow.value.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
-  }
-}, { immediate: true })
 
 onMounted(() => {
   loadTasks()
