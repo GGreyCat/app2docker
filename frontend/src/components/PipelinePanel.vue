@@ -10,19 +10,19 @@
     </div>
 
     <!-- 流水线列表 -->
-    <div class="table-responsive">
-      <table class="table table-sm table-hover">
+    <div class="table-responsive" style="overflow-x: hidden;">
+      <table class="table table-sm table-hover" style="table-layout: fixed; width: 100%;">
         <thead>
           <tr>
-            <th style="width: 15%;">名称</th>
-            <th style="width: 18%;">Git 仓库</th>
-            <th style="width: 8%;">分支</th>
+            <th style="width: 12%;">名称</th>
+            <th style="width: 15%;">Git 仓库</th>
+            <th style="width: 7%;">分支</th>
             <th style="width: 12%;">镜像</th>
-            <th style="width: 8%;">状态</th>
+            <th style="width: 7%;">状态</th>
             <th style="width: 8%;">当前任务</th>
             <th style="width: 12%;">最后构建</th>
-            <th style="width: 6%;">定时</th>
-            <th style="width: 6%;">触发次数</th>
+            <th style="width: 5%;">定时</th>
+            <th style="width: 5%;">触发次数</th>
             <th style="width: 10%;">最后触发</th>
             <th style="width: 7%;">操作</th>
           </tr>
@@ -175,7 +175,7 @@
     </div>
 
     <!-- 创建/编辑流水线模态框 -->
-    <div v-if="showModal" class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5)">
+    <div v-if="showModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="closeModal">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">
@@ -369,9 +369,10 @@
         </div>
       </div>
     </div>
+    <div v-if="showModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
 
     <!-- Webhook URL 模态框 -->
-    <div v-if="showWebhookModal" class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5)">
+    <div v-if="showWebhookModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="showWebhookModal = false">
       <div class="modal-dialog">
         <div class="modal-content">
           <div class="modal-header">
@@ -408,9 +409,10 @@
         </div>
       </div>
     </div>
+    <div v-if="showWebhookModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
 
     <!-- 日志查看模态框 -->
-    <div v-if="showLogModal && selectedTask" class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5)">
+    <div v-if="showLogModal && selectedTask" class="modal fade show" style="display: block; z-index: 1070;" tabindex="-1" @click.self="closeLogModal">
       <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
@@ -428,9 +430,10 @@
         </div>
       </div>
     </div>
+    <div v-if="showLogModal" class="modal-backdrop fade show" style="z-index: 1065;"></div>
 
     <!-- 历史构建模态框 -->
-    <div v-if="showHistoryModal" class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5)">
+    <div v-if="showHistoryModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="closeHistoryModal">
       <div class="modal-dialog modal-xl">
         <div class="modal-content">
           <div class="modal-header">
@@ -476,18 +479,18 @@
               <i class="fas fa-inbox fa-2x mb-2"></i>
               <p class="mb-0">暂无历史构建记录</p>
             </div>
-            <div v-else class="table-responsive">
-              <table class="table table-sm table-hover">
+            <div v-else class="table-responsive" style="overflow-x: hidden;">
+              <table class="table table-sm table-hover" style="table-layout: fixed; width: 100%;">
                 <thead>
                   <tr>
-                    <th style="width: 10%;">任务ID</th>
-                    <th style="width: 10%;">触发来源</th>
-                    <th style="width: 10%;">状态</th>
-                    <th style="width: 15%;">镜像</th>
+                    <th style="width: 9%;">任务ID</th>
+                    <th style="width: 9%;">触发来源</th>
+                    <th style="width: 9%;">状态</th>
+                    <th style="width: 13%;">镜像</th>
                     <th style="width: 12%;">触发时间</th>
                     <th style="width: 12%;">完成时间</th>
                     <th style="width: 18%;">分支/信息</th>
-                    <th style="width: 13%;">操作</th>
+                    <th style="width: 16%;">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -581,6 +584,7 @@
         </div>
       </div>
     </div>
+    <div v-if="showHistoryModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
   </div>
 </template>
 
@@ -920,17 +924,27 @@ function closeLogModal() {
 .table {
   font-size: 0.875rem;
   table-layout: fixed; /* 固定表格布局，使列宽生效 */
+  width: 100%;
+  margin: 0;
 }
 
 .table th {
   white-space: nowrap; /* 表头不换行 */
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 0.5rem;
 }
 
 .table td {
   word-wrap: break-word; /* 允许单元格内容换行 */
   overflow-wrap: break-word;
+  padding: 0.5rem;
+  vertical-align: middle;
+}
+
+/* 确保表格容器不出现横向滚动 */
+.table-responsive {
+  overflow-x: hidden !important;
 }
 
 .font-monospace {
