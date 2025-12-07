@@ -185,12 +185,49 @@
                     </div>
                     <div class="col-md-6">
                       <label class="form-label">密码</label>
-                      <input 
-                        v-model="registry.password" 
-                        type="password" 
-                        class="form-control" 
-                        placeholder="密码"
-                      />
+                      <div class="input-group">
+                        <input 
+                          v-model="registry.password" 
+                          type="password" 
+                          class="form-control" 
+                          placeholder="密码"
+                        />
+                        <button 
+                          type="button" 
+                          class="btn btn-outline-primary" 
+                          @click="testRegistryLogin(index)"
+                          :disabled="testingRegistry === index"
+                          :title="testingRegistry === index ? '测试中...' : '测试登录'"
+                        >
+                          <i 
+                            :class="testingRegistry === index ? 'fas fa-spinner fa-spin' : 'fas fa-vial'"
+                          ></i>
+                          {{ testingRegistry === index ? '测试中...' : '测试' }}
+                        </button>
+                      </div>
+                      <div v-if="registryTestResult[index]" class="mt-2">
+                        <div 
+                          v-if="registryTestResult[index].success" 
+                          class="alert alert-success alert-sm mb-0 py-1"
+                        >
+                          <i class="fas fa-check-circle"></i> {{ registryTestResult[index].message }}
+                        </div>
+                        <div 
+                          v-else 
+                          class="alert alert-danger alert-sm mb-0 py-1"
+                        >
+                          <i class="fas fa-times-circle"></i> {{ registryTestResult[index].message }}
+                          <div v-if="registryTestResult[index].suggestions" class="mt-1">
+                            <small>
+                              <ul class="mb-0 ps-3">
+                                <li v-for="(suggestion, idx) in registryTestResult[index].suggestions" :key="idx">
+                                  {{ suggestion }}
+                                </li>
+                              </ul>
+                            </small>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -266,6 +303,8 @@ const config = ref({
 })
 
 const saving = ref(false)
+const testingRegistry = ref(null) // 正在测试的registry索引
+const registryTestResult = ref({}) // 测试结果，key为索引
 
 async function loadConfig() {
   try {
@@ -401,16 +440,60 @@ function setActiveRegistry(index) {
   })
 }
 
-function close() {
-  emit('update:modelValue', false)
+// 测试Registry登录
+async function testRegistryLogin(index) {
+  const registry = config.value.registries[index]
+  
+  if (!registry.registry) {
+    alert('请先填写Registry地址')
+    return
+  }
+  
+  if (!registry.username || !registry.password) {
+    alert('请先填写用户名和密码')
+    return
+  }
+  
+  testingRegistry.value = index
+  // 清除之前的测试结果
+  registryTestResult.value[index] = null
+  
+  try {
+    const res = await axios.post('/api/registries/test', {
+      name: registry.name,
+      registry: registry.registry,
+      username: registry.username,
+      password: registry.password
+    })
+    
+    registryTestResult.value[index] = {
+      success: res.data.success,
+      message: res.data.message,
+      details: res.data.details,
+      suggestions: res.data.suggestions
+    }
+    
+    if (res.data.success) {
+      console.log('✅ Registry登录测试成功:', res.data)
+    } else {
+      console.warn('⚠️ Registry登录测试失败:', res.data)
+    }
+  } catch (error) {
+    console.error('❌ Registry登录测试异常:', error)
+    const errorData = error.response?.data || {}
+    registryTestResult.value[index] = {
+      success: false,
+      message: errorData.message || errorData.detail || '测试失败',
+      details: errorData.details,
+      suggestions: errorData.suggestions
+    }
+  } finally {
+    testingRegistry.value = null
+  }
 }
 
-// ESC键关闭
-function handleEscape(e) {
-  if (e.key === 'Escape' && props.modelValue) {
-    console.log('✅ ConfigModal: ESC键关闭')
-    close()
-  }
+function close() {
+  emit('update:modelValue', false)
 }
 
 watch(
@@ -423,16 +506,6 @@ watch(
   },
   { immediate: true }  // 立即执行一次，确保首次打开时也会加载
 )
-
-onMounted(() => {
-  console.log('📌 ConfigModal: 挂载，添加ESC监听器')
-  document.addEventListener('keydown', handleEscape)
-})
-
-onUnmounted(() => {
-  console.log('🗑️ ConfigModal: 卸载，移除ESC监听器')
-  document.removeEventListener('keydown', handleEscape)
-})
 </script>
 
 <style scoped>
@@ -442,6 +515,16 @@ onUnmounted(() => {
 
 .modal-backdrop.show {
   opacity: 0.5;
+}
+
+.alert-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  margin-bottom: 0;
+}
+
+.alert-sm ul {
+  margin-top: 0.25rem;
 }
 </style>
 

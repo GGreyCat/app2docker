@@ -23,6 +23,7 @@ from backend.config import (
     get_git_config,
     get_registry_by_name,
     get_active_registry,
+    get_all_registries,
 )
 from backend.utils import generate_image_name, get_safe_filename
 from backend.auth import authenticate, verify_token, require_auth
@@ -1104,7 +1105,7 @@ class BuildManager:
         original_filename: str,
         project_type: str = "jar",
         template_params: dict = None,
-        push_registry: str = None,  # 推送时使用的仓库名称
+        push_registry: str = None,  # 已废弃，保留以兼容旧代码，实际不再使用
         extract_archive: bool = True,  # 是否解压压缩包（默认解压）
     ):
         # 创建任务
@@ -1154,7 +1155,7 @@ class BuildManager:
         original_filename: str,
         project_type: str = "jar",
         template_params: dict = None,
-        push_registry: str = None,  # 推送时使用的仓库名称
+        push_registry: str = None,  # 已废弃，保留以兼容旧代码，实际不再使用
         extract_archive: bool = True,  # 是否解压压缩包（默认解压）
     ):
         full_tag = f"{image_name}:{tag}"
@@ -1336,25 +1337,14 @@ class BuildManager:
                     log(line)
 
                 if should_push:
-                    # 推送时使用用户选择的仓库
-                    from backend.config import get_registry_by_name, get_active_registry
+                    # 推送时统一使用激活的registry
+                    from backend.config import get_active_registry
 
-                    # 优先使用用户指定的推送仓库
-                    push_registry_config = None
-                    if push_registry:
-                        push_registry_config = get_registry_by_name(push_registry)
-                        if not push_registry_config:
-                            log(
-                                f"⚠️  指定的推送仓库 '{push_registry}' 不存在，使用激活仓库\n"
-                            )
-
-                    # 如果没有指定或指定失败，使用激活的仓库
-                    if not push_registry_config:
-                        push_registry_config = get_active_registry()
+                    push_registry_config = get_active_registry()
 
                     log("🚀 开始模拟推送...\n")
                     log(
-                        f"🎯 使用推送仓库: {push_registry_config.get('name', 'Unknown')}\n"
+                        f"🎯 使用激活仓库: {push_registry_config.get('name', 'Unknown')}\n"
                     )
                     username = push_registry_config.get("username", None)
                     log(f"🚀 账号: {username}\n")
@@ -1489,39 +1479,141 @@ class BuildManager:
             log(f"\n✅ 镜像构建成功: {full_tag}\n")
 
             if should_push:
-                # 推送时使用用户选择的仓库
-                from backend.config import get_registry_by_name, get_active_registry
+                # 推送时直接使用构建好的镜像名，根据镜像名找到对应的registry获取认证信息
+                from backend.config import get_active_registry, get_all_registries
 
-                # 优先使用用户指定的推送仓库
-                push_registry_config = None
-                if push_registry:
-                    push_registry_config = get_registry_by_name(push_registry)
-                    if push_registry_config:
-                        log(f"\n📤 开始推送镜像: {full_tag}\n")
-                        log(f"🎯 使用指定推送仓库: {push_registry}\n")
-                    else:
-                        log(
-                            f"⚠️  指定的推送仓库 '{push_registry}' 不存在，使用激活仓库\n"
-                        )
+                # 根据镜像名找到对应的registry配置
+                def find_matching_registry_for_push(image_name):
+                    """根据镜像名找到匹配的registry配置"""
+                    # 如果镜像名包含斜杠，提取registry部分
+                    parts = image_name.split("/")
+                    if len(parts) >= 2 and "." in parts[0]:
+                        # 镜像名格式: registry.com/namespace/image
+                        image_registry = parts[0]
+                        all_registries = get_all_registries()
+                        for reg in all_registries:
+                            reg_address = reg.get("registry", "")
+                            if reg_address and (
+                                image_registry == reg_address
+                                or image_registry.startswith(reg_address)
+                                or reg_address.startswith(image_registry)
+                            ):
+                                return reg
+                    return None
 
-                # 如果没有指定或指定失败，使用激活的仓库
+                # 尝试根据镜像名找到匹配的registry
+                push_registry_config = find_matching_registry_for_push(image_name)
                 if not push_registry_config:
+                    # 如果找不到匹配的，使用激活的registry
                     push_registry_config = get_active_registry()
-                    log(f"\n📤 开始推送镜像: {full_tag}\n")
                     log(
-                        f"🎯 使用激活仓库: {push_registry_config.get('name', 'Unknown')}\n"
+                        f"\n⚠️  未找到匹配的registry配置，使用激活仓库: {push_registry_config.get('name', 'Unknown')}\n"
                     )
+                else:
+                    log(
+                        f"\n🎯 找到匹配的registry配置: {push_registry_config.get('name', 'Unknown')}\n"
+                    )
+
+                log(f"📤 开始推送镜像: {full_tag}\n")
+
+                # 直接使用构建时的镜像名
+                push_repository = image_name
+                log(f"📦 推送镜像: {full_tag}\n")
 
                 push_username = push_registry_config.get("username")
                 push_password = push_registry_config.get("password")
+                push_registry_host = push_registry_config.get("registry", "")
 
-                if not push_username or not push_password:
-                    log(f"⚠️  推送仓库未配置认证信息，推送可能失败\n")
+                log(
+                    f"🔐 Registry配置 - 地址: {push_registry_host}, 用户名: {push_username}, 密码: {'***' if push_password else '(未配置)'}\n"
+                )
 
-                auth_config = {"username": push_username, "password": push_password}
+                auth_config = None
+                if push_username and push_password:
+                    # 构建auth_config，包含registry信息
+                    # docker-py的push API需要serveraddress字段来指定registry
+                    auth_config = {
+                        "username": push_username,
+                        "password": push_password,
+                    }
+                    # 对于非docker.io的registry，必须设置serveraddress
+                    if push_registry_host:
+                        if push_registry_host != "docker.io":
+                            auth_config["serveraddress"] = push_registry_host
+                        else:
+                            # docker.io也可以显式设置
+                            auth_config["serveraddress"] = "https://index.docker.io/v1/"
+                    else:
+                        # 如果没有registry_host，默认使用docker.io
+                        auth_config["serveraddress"] = "https://index.docker.io/v1/"
+
+                    log(f"✅ 已配置认证信息\n")
+                    log(
+                        f"🔐 Auth配置: username={push_username}, serveraddress={auth_config.get('serveraddress', 'docker.io')}\n"
+                    )
+
+                    # 推送前先登录到registry（重要：确保认证生效）
+                    try:
+                        if hasattr(docker_builder, "client") and docker_builder.client:
+                            # 对于阿里云等registry，需要确保使用正确的registry地址
+                            login_registry = (
+                                push_registry_host
+                                if push_registry_host
+                                and push_registry_host != "docker.io"
+                                else None
+                            )
+                            log(
+                                f"🔑 正在登录到registry: {login_registry or 'docker.io'}\n"
+                            )
+                            log(f"🔑 用户名: {push_username}\n")
+
+                            # 执行登录
+                            login_result = docker_builder.client.login(
+                                username=push_username,
+                                password=push_password,
+                                registry=login_registry,
+                            )
+                            log(f"✅ 登录成功: {login_result}\n")
+                        else:
+                            log(f"⚠️  Docker客户端不可用，跳过登录\n")
+                    except Exception as login_error:
+                        error_msg = str(login_error)
+                        log(f"❌ 登录失败: {error_msg}\n")
+
+                        # 检查是否是认证错误
+                        if (
+                            "401" in error_msg
+                            or "Unauthorized" in error_msg
+                            or "unauthorized" in error_msg
+                        ):
+                            log(f"⚠️  认证失败，可能的原因：\n")
+                            log(f"   1. 用户名或密码不正确\n")
+                            log(f"   2. 对于阿里云registry，请确认：\n")
+                            log(
+                                f"      - 用户名：使用阿里云账号或独立的镜像仓库用户名\n"
+                            )
+                            log(f"      - 密码：使用阿里云账号密码或镜像仓库独立密码\n")
+                            log(f"      - 如果使用访问令牌，请确认令牌未过期\n")
+                            log(f"   3. 请检查registry配置中的认证信息是否正确\n")
+                            log(
+                                f"⚠️  继续尝试推送（推送时会使用auth_config，但可能仍然失败）\n"
+                            )
+                        else:
+                            log(f"⚠️  继续尝试推送（推送时会使用auth_config）\n")
+                else:
+                    log(f"⚠️  registry未配置认证信息，推送可能失败\n")
+
                 try:
+                    log(f"🚀 开始推送，repository: {push_repository}, tag: {tag}\n")
+                    if auth_config:
+                        log(
+                            f"🔐 使用认证信息: username={auth_config.get('username')}, serveraddress={auth_config.get('serveraddress', 'docker.io')}\n"
+                        )
+                    else:
+                        log(f"⚠️  未使用认证信息\n")
+
                     push_stream = docker_builder.push_image(
-                        image_name, tag, auth_config=auth_config
+                        push_repository, tag, auth_config=auth_config
                     )
                     for chunk in push_stream:
                         status = (
@@ -1532,13 +1624,34 @@ class BuildManager:
                         if status:
                             log(f"📡 {status}\n")
                         if "error" in chunk:
-                            log(f"\n❌ 推送失败: {chunk['error']}\n")
+                            error_detail = chunk.get("errorDetail", {})
+                            error_msg = chunk["error"]
+                            log(f"\n❌ 推送失败: {error_msg}\n")
+                            if error_detail:
+                                log(f"❌ 错误详情: {error_detail}\n")
                             return
-                    log(
-                        f"\n✅ 推送完成到 {push_registry_config.get('registry', 'Unknown')}: {full_tag}\n"
-                    )
+                    log(f"\n✅ 推送完成: {full_tag}\n")
                 except Exception as e:
-                    log(f"\n❌ 推送异常: {e}\n")
+                    error_str = str(e)
+                    log(f"\n❌ 推送异常: {error_str}\n")
+
+                    # 如果是认证错误，提供更详细的提示
+                    if (
+                        "denied" in error_str.lower()
+                        or "unauthorized" in error_str.lower()
+                        or "401" in error_str
+                    ):
+                        log(f"💡 推送认证失败，建议：\n")
+                        log(f"   1. 确认registry配置中的用户名和密码正确\n")
+                        log(f"   2. 对于阿里云registry，请使用独立的Registry登录密码\n")
+                        log(f"   3. 可以尝试手动执行以下命令测试：\n")
+                        log(
+                            f"      docker login --username={push_username} {push_registry_host}\n"
+                        )
+                        log(f"      docker push {full_tag}\n")
+                        log(
+                            f"   4. 如果手动命令成功，说明配置有问题；如果也失败，说明认证信息不正确\n"
+                        )
 
             log("\n🎉🎉🎉 所有操作已完成！🎉🎉🎉\n")
             # 更新任务状态为完成
@@ -1576,6 +1689,7 @@ class BuildManager:
         branch: str = None,
         sub_path: str = None,
         use_project_dockerfile: bool = True,  # 是否优先使用项目中的 Dockerfile
+        pipeline_id: str = None,  # 流水线ID（可选）
     ):
         """从 Git 源码开始构建"""
         try:
@@ -1594,6 +1708,7 @@ class BuildManager:
                 branch=branch,
                 sub_path=sub_path,
                 use_project_dockerfile=use_project_dockerfile,
+                pipeline_id=pipeline_id,  # 传递流水线ID
             )
             print(f"✅ 任务创建成功: task_id={task_id}")
         except Exception as e:
@@ -1747,17 +1862,28 @@ class BuildManager:
 
             # 将源码复制到构建上下文根目录（排除不必要的文件）
             log(f"📋 准备构建上下文...\n")
-            
+
             # 定义需要排除的文件和目录（类似 .dockerignore）
             exclude_patterns = {
-                '.git', '.gitignore', '.dockerignore',
-                '__pycache__', '*.pyc', '.pytest_cache',
-                'node_modules', '.venv', 'venv',
-                '.idea', '.vscode', '.cursor',
-                '*.md', '*.log', '.DS_Store',
-                'test_*.py', '*_test.py'
+                ".git",
+                ".gitignore",
+                ".dockerignore",
+                "__pycache__",
+                "*.pyc",
+                ".pytest_cache",
+                "node_modules",
+                ".venv",
+                "venv",
+                ".idea",
+                ".vscode",
+                ".cursor",
+                "*.md",
+                "*.log",
+                ".DS_Store",
+                "test_*.py",
+                "*_test.py",
             }
-            
+
             def should_exclude(item_name):
                 """判断文件/目录是否应该被排除"""
                 # 直接匹配
@@ -1765,23 +1891,24 @@ class BuildManager:
                     return True
                 # 通配符匹配
                 import fnmatch
+
                 for pattern in exclude_patterns:
                     if fnmatch.fnmatch(item_name, pattern):
                         return True
                 return False
-            
+
             copied_count = 0
             excluded_count = 0
-            
+
             for item in os.listdir(source_dir):
                 if should_exclude(item):
                     excluded_count += 1
                     log(f"⏭️  跳过: {item}\n")
                     continue
-                    
+
                 src = os.path.join(source_dir, item)
                 dst = os.path.join(build_context, item)
-                
+
                 try:
                     if os.path.isdir(src):
                         shutil.copytree(src, dst, dirs_exist_ok=True)
@@ -1790,7 +1917,7 @@ class BuildManager:
                     copied_count += 1
                 except Exception as e:
                     log(f"⚠️  复制失败 {item}: {e}\n")
-            
+
             log(f"✅ 已复制 {copied_count} 个文件/目录，跳过 {excluded_count} 个\n")
 
             # 检查项目中是否存在 Dockerfile
@@ -1837,11 +1964,12 @@ class BuildManager:
             dockerfile_relative = os.path.relpath(dockerfile_path, build_context)
             log(f"📄 Dockerfile 相对路径: {dockerfile_relative}\n")
             # 创建 .dockerignore 文件以进一步优化构建上下文
-            dockerignore_path = os.path.join(build_context, '.dockerignore')
+            dockerignore_path = os.path.join(build_context, ".dockerignore")
             if not os.path.exists(dockerignore_path):
                 log(f"📝 创建 .dockerignore 文件...\n")
-                with open(dockerignore_path, 'w') as f:
-                    f.write("""# Git 相关
+                with open(dockerignore_path, "w") as f:
+                    f.write(
+                        """# Git 相关
 .git
 .gitignore
 .gitattributes
@@ -1880,9 +2008,10 @@ LICENSE
 # 日志
 *.log
 logs/
-""")
+"""
+                    )
                 log(f"✅ .dockerignore 已创建\n")
-            
+
             log(f"🐳 准备调用 Docker 构建器...\n")
             try:
                 build_stream = docker_builder.build_image(
@@ -1892,6 +2021,7 @@ logs/
             except Exception as e:
                 log(f"❌ 启动 Docker 构建失败: {str(e)}\n")
                 import traceback
+
                 log(f"详细错误:\n{traceback.format_exc()}\n")
                 raise
 
@@ -1932,33 +2062,196 @@ logs/
 
             log(f"✅ 镜像构建完成: {full_tag}\n")
 
-            # 如果需要推送
+            # 如果需要推送，直接使用构建好的镜像名推送，从激活的registry获取认证信息
             if should_push:
                 log(f"📡 开始推送镜像...\n")
-                if push_registry:
-                    registry_config = get_registry_by_name(push_registry)
-                    if not registry_config:
-                        raise RuntimeError(f"指定的仓库 '{push_registry}' 不存在")
-                else:
-                    registry_config = get_active_registry()
 
+                # 直接使用构建时的镜像名和标签进行推送
+                # full_tag 格式: image_name:tag，可能包含registry路径
+                # 例如: registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker:dev
+                push_repository = image_name  # 直接使用构建时的镜像名
+
+                # 根据镜像名找到对应的registry配置
+                def find_matching_registry_for_push(image_name):
+                    """根据镜像名找到匹配的registry配置"""
+                    # 如果镜像名包含斜杠，提取registry部分
+                    parts = image_name.split("/")
+                    if len(parts) >= 2 and "." in parts[0]:
+                        # 镜像名格式: registry.com/namespace/image
+                        image_registry = parts[0]
+                        log(f"🔍 从镜像名提取registry: {image_registry}\n")
+                        all_registries = get_all_registries()
+                        log(f"🔍 共有 {len(all_registries)} 个registry配置\n")
+                        for reg in all_registries:
+                            reg_address = reg.get("registry", "")
+                            reg_name = reg.get("name", "Unknown")
+                            log(f"🔍 检查registry: {reg_name}, 地址: {reg_address}\n")
+                            if reg_address and (
+                                image_registry == reg_address
+                                or image_registry.startswith(reg_address)
+                                or reg_address.startswith(image_registry)
+                            ):
+                                log(f"✅ 找到匹配的registry: {reg_name}\n")
+                                return reg
+                    return None
+
+                # 尝试根据镜像名找到匹配的registry
+                registry_config = find_matching_registry_for_push(image_name)
+                if not registry_config:
+                    # 如果找不到匹配的，使用激活的registry
+                    registry_config = get_active_registry()
+                    log(
+                        f"⚠️  未找到匹配的registry配置，使用激活仓库: {registry_config.get('name', 'Unknown')}\n"
+                    )
+                else:
+                    log(
+                        f"🎯 找到匹配的registry配置: {registry_config.get('name', 'Unknown')}\n"
+                    )
+
+                log(f"📦 推送镜像: {full_tag}\n")
+
+                # 从registry配置中获取认证信息
                 username = registry_config.get("username")
                 password = registry_config.get("password")
+                registry_host = registry_config.get("registry", "")
+
+                log(
+                    f"🔐 Registry配置 - 地址: {registry_host}, 用户名: {username}, 密码: {'***' if password else '(未配置)'}\n"
+                )
+
                 auth_config = None
                 if username and password:
-                    auth_config = {"username": username, "password": password}
-
-                push_stream = docker_builder.push_image(full_tag, auth_config)
-                for chunk in push_stream:
-                    if isinstance(chunk, dict):
-                        if "status" in chunk:
-                            log(chunk["status"] + "\n")
-                        elif "error" in chunk:
-                            raise RuntimeError(chunk["error"])
+                    # 构建auth_config，包含registry信息
+                    # docker-py的push API需要serveraddress字段来指定registry
+                    auth_config = {
+                        "username": username,
+                        "password": password,
+                    }
+                    # 对于非docker.io的registry，必须设置serveraddress
+                    # 注意：对于阿里云等registry，直接使用registry地址，不需要加协议
+                    if registry_host:
+                        if registry_host != "docker.io":
+                            # 对于阿里云等registry，直接使用registry地址
+                            auth_config["serveraddress"] = registry_host
+                        else:
+                            # docker.io使用标准地址
+                            auth_config["serveraddress"] = "https://index.docker.io/v1/"
                     else:
-                        log(str(chunk))
+                        # 如果没有registry_host，默认使用docker.io
+                        auth_config["serveraddress"] = "https://index.docker.io/v1/"
 
-                log(f"✅ 推送完成\n")
+                    log(f"✅ 已配置认证信息\n")
+                    log(
+                        f"🔐 Auth配置: username={username}, serveraddress={auth_config.get('serveraddress', 'docker.io')}\n"
+                    )
+
+                    # 对于阿里云registry，添加特殊提示
+                    if registry_host and "aliyuncs.com" in registry_host:
+                        log(
+                            f"ℹ️  检测到阿里云registry，请确保使用独立的Registry登录密码\n"
+                        )
+
+                    # 推送前先登录到registry（重要：确保认证生效）
+                    try:
+                        if hasattr(docker_builder, "client") and docker_builder.client:
+                            # 对于阿里云等registry，需要确保使用正确的registry地址
+                            login_registry = (
+                                registry_host
+                                if registry_host and registry_host != "docker.io"
+                                else None
+                            )
+                            log(
+                                f"🔑 正在登录到registry: {login_registry or 'docker.io'}\n"
+                            )
+                            log(f"🔑 用户名: {username}\n")
+
+                            # 执行登录
+                            login_result = docker_builder.client.login(
+                                username=username,
+                                password=password,
+                                registry=login_registry,
+                            )
+                            log(f"✅ 登录成功: {login_result}\n")
+                        else:
+                            log(f"⚠️  Docker客户端不可用，跳过登录\n")
+                    except Exception as login_error:
+                        error_msg = str(login_error)
+                        log(f"❌ 登录失败: {error_msg}\n")
+
+                        # 检查是否是认证错误
+                        if (
+                            "401" in error_msg
+                            or "Unauthorized" in error_msg
+                            or "unauthorized" in error_msg
+                        ):
+                            log(f"⚠️  认证失败，可能的原因：\n")
+                            log(f"   1. 用户名或密码不正确\n")
+                            log(f"   2. 对于阿里云registry，请确认：\n")
+                            log(
+                                f"      - 用户名：使用阿里云账号或独立的镜像仓库用户名\n"
+                            )
+                            log(f"      - 密码：使用阿里云账号密码或镜像仓库独立密码\n")
+                            log(f"      - 如果使用访问令牌，请确认令牌未过期\n")
+                            log(f"   3. 请检查registry配置中的认证信息是否正确\n")
+                            log(
+                                f"⚠️  继续尝试推送（推送时会使用auth_config，但可能仍然失败）\n"
+                            )
+                        else:
+                            log(f"⚠️  继续尝试推送（推送时会使用auth_config）\n")
+                else:
+                    log(f"⚠️  registry未配置认证信息，推送可能失败\n")
+
+                try:
+                    # 直接推送构建好的镜像
+                    log(f"🚀 开始推送，repository: {push_repository}, tag: {tag}\n")
+                    if auth_config:
+                        log(
+                            f"🔐 使用认证信息: username={auth_config.get('username')}, serveraddress={auth_config.get('serveraddress', 'docker.io')}\n"
+                        )
+                    else:
+                        log(f"⚠️  未使用认证信息\n")
+
+                    push_stream = docker_builder.push_image(
+                        push_repository, tag, auth_config=auth_config
+                    )
+                    for chunk in push_stream:
+                        if isinstance(chunk, dict):
+                            if "status" in chunk:
+                                log(chunk["status"] + "\n")
+                            elif "error" in chunk:
+                                error_detail = chunk.get("errorDetail", {})
+                                error_msg = chunk["error"]
+                                log(f"❌ 推送错误: {error_msg}\n")
+                                if error_detail:
+                                    log(f"❌ 错误详情: {error_detail}\n")
+                                raise RuntimeError(chunk["error"])
+                        else:
+                            log(str(chunk))
+
+                    log(f"✅ 推送完成: {full_tag}\n")
+                except Exception as e:
+                    error_str = str(e)
+                    log(f"❌ 推送异常: {error_str}\n")
+
+                    # 如果是认证错误，提供更详细的提示
+                    if (
+                        "denied" in error_str.lower()
+                        or "unauthorized" in error_str.lower()
+                        or "401" in error_str
+                    ):
+                        log(f"💡 推送认证失败，建议：\n")
+                        log(f"   1. 确认registry配置中的用户名和密码正确\n")
+                        log(f"   2. 对于阿里云registry，请使用独立的Registry登录密码\n")
+                        log(f"   3. 可以尝试手动执行以下命令测试：\n")
+                        log(
+                            f"      docker login --username={username} {registry_host}\n"
+                        )
+                        log(f"      docker push {full_tag}\n")
+                        log(
+                            f"   4. 如果手动命令成功，说明配置有问题；如果也失败，说明认证信息不正确\n"
+                        )
+
+                    raise
 
             log(f"✅ 所有操作已完成\n")
             # 更新任务状态为完成
@@ -2073,10 +2366,10 @@ logs/
             abs_clone_dir = os.path.abspath(clone_dir)
             # 更新命令中的目标路径为绝对路径
             cmd[-1] = abs_target_dir
-            
+
             # 调试日志：打印完整命令
             log(f"🔧 完整命令: {' '.join(cmd)}\n")
-            
+
             result = subprocess.run(
                 cmd,
                 cwd=os.path.dirname(abs_clone_dir),
@@ -2340,6 +2633,20 @@ class BuildTaskManager:
                     self.tasks[task_id]["error"] = error
                 if status in ("completed", "failed"):
                     self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
+
+                    # 任务完成或失败时，解绑流水线
+                    try:
+                        from backend.pipeline_manager import PipelineManager
+
+                        pipeline_manager = PipelineManager()
+                        pipeline_id = pipeline_manager.find_pipeline_by_task(task_id)
+                        if pipeline_id:
+                            pipeline_manager.unbind_task(pipeline_id)
+                            print(
+                                f"✅ 任务 {task_id[:8]} 已完成，解绑流水线 {pipeline_id[:8]}"
+                            )
+                    except Exception as e:
+                        print(f"⚠️ 解绑流水线失败: {e}")
         self._save_tasks()
 
     def add_log(self, task_id: str, log_message: str):
