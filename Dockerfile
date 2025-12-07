@@ -41,6 +41,11 @@ FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/python:3
 # 切换到 root 用户以安装系统包
 USER root
 
+
+# Step: 替换 base 和 module repo 源为 aliyun
+RUN sed -i 's/mirrors.cloud.aliyuncs.com/mirrors.aliyun.com/g' /etc/yum.repos.d/Alinux.repo && \
+    sed -i 's/mirrors.cloud.aliyuncs.com/mirrors.aliyun.com/g' /etc/yum.repos.d/Alinux-M.repo
+    
 # 设置时区为上海
 ENV TZ=Asia/Shanghai
 RUN yum install -y \
