@@ -39,8 +39,11 @@ RUN npm run build
 FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/python:3.11.1
 
 ENV TZ=Asia/Shanghai
-RUN dnf install -y tzdata curl git && ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && echo "$TZ" > /etc/timezone && dnf clean all
-
+RUN dnf install -y --disablerepo=alinux3-module tzdata curl git \
+    && ln -sf /usr/share/zoneinfo=$TZ /etc/localtime \
+    && echo "$TZ" > /etc/timezone \
+    && dnf clean all
+    
 WORKDIR /app
 
 # 复制 Python 依赖文件
