@@ -38,13 +38,14 @@ RUN npm run build
 # 使用阿里云 Python 镜像加速下载
 FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/python:3.11.1
 
+# 👇 【统一修复源】—— 外网构建必加！
+RUN sed -i 's|mirrors\.cloud\.aliyuncs\.com|mirrors.aliyun.com|g' /etc/yum.repos.d/*.repo 2>/dev/null || true
+
 ENV TZ=Asia/Shanghai
-RUN echo '[alinux3]\nname=Alibaba Cloud Linux 3\nbaseurl=https://mirrors.aliyun.com/alinux/3/baseos/\$basearch/\nenabled=1\ngpgcheck=1\ngpgkey=https://mirrors.aliyun.com/alinux/RPM-GPG-KEY-Alibaba-Cloud-3' > /etc/yum.repos.d/alinux3.repo && \
-    dnf makecache && \
-    dnf install -y tzdata curl git && \
-    ln -sf /usr/share/zoneinfo=$TZ /etc/localtime && \
-    echo "$TZ" > /etc/timezone && \
-    dnf clean all
+RUN dnf install -y tzdata curl git \
+    && ln -sf /usr/share/zoneinfo=$TZ /etc/localtime \
+    && echo "$TZ" > /etc/timezone \
+    && dnf clean all
 
 WORKDIR /app
 
