@@ -834,25 +834,31 @@ async def cleanup_tasks(
                 cutoff_time = datetime.now() - timedelta(days=days)
                 cutoff_iso = cutoff_time.isoformat()
                 
+                # 在锁内收集要删除的任务ID
                 with build_manager.lock:
                     tasks_to_remove = [
                         task_id for task_id, task in build_manager.tasks.items()
                         if task.get("created_at", "") < cutoff_iso
                         and (not status or task.get("status") == status)
                     ]
-                    for task_id in tasks_to_remove:
-                        build_manager.delete_task(task_id)
-                        removed_count += 1
+                
+                # 在锁外执行删除，避免死锁
+                for task_id in tasks_to_remove:
+                    build_manager.delete_task(task_id)
+                    removed_count += 1
             elif status:
                 # 清理指定状态的任务
+                # 在锁内收集要删除的任务ID
                 with build_manager.lock:
                     tasks_to_remove = [
                         task_id for task_id, task in build_manager.tasks.items()
                         if task.get("status") == status
                     ]
-                    for task_id in tasks_to_remove:
-                        build_manager.delete_task(task_id)
-                        removed_count += 1
+                
+                # 在锁外执行删除，避免死锁
+                for task_id in tasks_to_remove:
+                    build_manager.delete_task(task_id)
+                    removed_count += 1
         
         # 清理导出任务
         if not task_type or task_type == "export":
@@ -862,24 +868,30 @@ async def cleanup_tasks(
                 from datetime import timedelta
                 cutoff_time = datetime.now() - timedelta(days=days)
                 
+                # 在锁内收集要删除的任务ID
                 with export_manager.lock:
                     tasks_to_remove = [
                         task_id for task_id, task in export_manager.tasks.items()
                         if datetime.fromisoformat(task.get("created_at", "")) < cutoff_time
                         and (not status or task.get("status") == status)
                     ]
-                    for task_id in tasks_to_remove:
-                        export_manager.delete_task(task_id)
-                        removed_count += 1
+                
+                # 在锁外执行删除，避免死锁
+                for task_id in tasks_to_remove:
+                    export_manager.delete_task(task_id)
+                    removed_count += 1
             elif status:
+                # 在锁内收集要删除的任务ID
                 with export_manager.lock:
                     tasks_to_remove = [
                         task_id for task_id, task in export_manager.tasks.items()
                         if task.get("status") == status
                     ]
-                    for task_id in tasks_to_remove:
-                        export_manager.delete_task(task_id)
-                        removed_count += 1
+                
+                # 在锁外执行删除，避免死锁
+                for task_id in tasks_to_remove:
+                    export_manager.delete_task(task_id)
+                    removed_count += 1
         
         # 记录操作日志
         OperationLogger.log(username, "cleanup_tasks", {
