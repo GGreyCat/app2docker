@@ -1943,6 +1943,17 @@ logs/
                 # 统一使用激活的registry
                 registry_config = get_active_registry()
 
+                # 从构建的镜像名中提取纯镜像名（去掉可能的registry前缀）
+                # 例如: registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker -> jar2docker
+                pure_image_name = image_name
+                # 检查是否包含斜杠，如果包含则提取最后一部分
+                if "/" in image_name:
+                    # 提取最后一个斜杠后的部分作为纯镜像名
+                    pure_image_name = image_name.split("/")[-1]
+                    log(
+                        f"📝 从镜像名 '{image_name}' 提取纯镜像名: '{pure_image_name}'\n"
+                    )
+
                 # 构建完整的推送repository路径
                 registry_host = registry_config.get("registry", "docker.io")
                 registry_prefix = registry_config.get("registry_prefix", "").strip()
@@ -1950,10 +1961,12 @@ logs/
                 # 构建完整的repository路径
                 if registry_prefix:
                     # 如果有prefix，格式为: registry_host/prefix/image_name
-                    push_repository = f"{registry_host}/{registry_prefix}/{image_name}"
+                    push_repository = (
+                        f"{registry_host}/{registry_prefix}/{pure_image_name}"
+                    )
                 else:
                     # 如果没有prefix，格式为: registry_host/image_name
-                    push_repository = f"{registry_host}/{image_name}"
+                    push_repository = f"{registry_host}/{pure_image_name}"
 
                 # 移除可能的重复斜杠
                 push_repository = push_repository.replace("//", "/")
@@ -1970,6 +1983,31 @@ logs/
                     log(f"⚠️  推送仓库未配置认证信息，推送可能失败\n")
 
                 try:
+                    # 先给镜像打标签到目标registry路径
+                    push_tag = f"{push_repository}:{tag}"
+                    log(f"🏷️  给镜像打标签: {full_tag} -> {push_tag}\n")
+                    try:
+                        # 使用 Docker API 给镜像打标签
+                        if hasattr(docker_builder, "client") and docker_builder.client:
+                            # docker-py 的 tag 方法: image.tag(repository, tag=tag)
+                            # 或者使用: client.images.tag(image_id, repository, tag=tag)
+                            image = docker_builder.get_image(full_tag)
+                            # 尝试使用 image.tag 方法
+                            if hasattr(image, "tag"):
+                                image.tag(push_repository, tag=tag)
+                            else:
+                                # 使用 client.images.tag 方法
+                                docker_builder.client.images.tag(
+                                    image=full_tag, repository=push_repository, tag=tag
+                                )
+                            log(f"✅ 镜像标签已创建: {push_tag}\n")
+                        else:
+                            raise RuntimeError("Docker 客户端不可用")
+                    except Exception as tag_error:
+                        log(f"❌ 打标签失败: {str(tag_error)}\n")
+                        raise RuntimeError(f"无法给镜像打标签: {str(tag_error)}")
+
+                    # 推送镜像
                     push_stream = docker_builder.push_image(
                         push_repository, tag, auth_config=auth_config
                     )
