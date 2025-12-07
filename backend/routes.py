@@ -530,6 +530,91 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=f"构建失败: {str(e)}")
 
 
+@router.post("/verify-git-repo")
+async def verify_git_repo(
+    git_url: str = Body(..., embed=True, description="Git 仓库地址")
+):
+    """验证 Git 仓库并获取分支和标签列表"""
+    import subprocess
+    import tempfile
+    import shutil
+    
+    try:
+        # 使用 git ls-remote 命令获取远程仓库的分支和标签
+        # 这个命令不需要克隆整个仓库，只获取引用信息
+        cmd = ["git", "ls-remote", "--heads", "--tags", git_url]
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30  # 30秒超时
+        )
+        
+        if result.returncode != 0:
+            error_msg = result.stderr.strip()
+            if "Authentication failed" in error_msg or "Permission denied" in error_msg:
+                raise HTTPException(
+                    status_code=401,
+                    detail="仓库访问被拒绝，请检查 URL 是否正确或配置 SSH 密钥"
+                )
+            elif "not found" in error_msg.lower():
+                raise HTTPException(
+                    status_code=404,
+                    detail="仓库不存在，请检查 URL 是否正确"
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"无法访问仓库: {error_msg}"
+                )
+        
+        # 解析输出
+        branches = []
+        tags = []
+        
+        for line in result.stdout.strip().split('\n'):
+            if not line:
+                continue
+            
+            parts = line.split('\t')
+            if len(parts) != 2:
+                continue
+            
+            ref = parts[1]
+            
+            if ref.startswith('refs/heads/'):
+                branch_name = ref.replace('refs/heads/', '')
+                branches.append(branch_name)
+            elif ref.startswith('refs/tags/'):
+                tag_name = ref.replace('refs/tags/', '')
+                # 跳过带 ^{} 的标签（指向标签对象的注解）
+                if not tag_name.endswith('^{}'):
+                    tags.append(tag_name)
+        
+        return JSONResponse({
+            "success": True,
+            "branches": sorted(branches, key=lambda x: (x != 'main', x != 'master', x)),
+            "tags": sorted(tags, reverse=True),  # 标签按降序排列，最新的在前
+            "default_branch": next((b for b in branches if b in ['main', 'master']), branches[0] if branches else None)
+        })
+        
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=408,
+            detail="仓库访问超时，请检查网络连接或仓库地址"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"验证仓库失败: {str(e)}"
+        )
+
+
 @router.post("/build-from-source")
 async def build_from_source(
     request: Request,

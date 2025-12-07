@@ -81,31 +81,71 @@
         <label class="form-label">
           Git 仓库地址 <span class="text-danger">*</span>
         </label>
-        <input 
-          v-model="form.gitUrl" 
-          type="text" 
-          class="form-control" 
-          placeholder="https://github.com/user/repo.git 或 git@github.com:user/repo.git"
-          required
-        />
+        <div class="input-group">
+          <input 
+            v-model="form.gitUrl" 
+            type="text" 
+            class="form-control" 
+            placeholder="https://github.com/user/repo.git 或 git@github.com:user/repo.git"
+            :disabled="verifying"
+            required
+          />
+          <button 
+            type="button" 
+            class="btn btn-outline-primary" 
+            @click="verifyGitRepo"
+            :disabled="!form.gitUrl || verifying || repoVerified"
+          >
+            <span v-if="verifying" class="spinner-border spinner-border-sm me-1"></span>
+            <i v-else-if="repoVerified" class="fas fa-check-circle me-1"></i>
+            <i v-else class="fas fa-search me-1"></i>
+            {{ verifying ? '验证中...' : (repoVerified ? '已验证' : '验证仓库') }}
+          </button>
+        </div>
         <div class="form-text small">
           <i class="fas fa-info-circle"></i> 
-          支持 HTTPS 和 SSH 协议的 Git 仓库地址
+          支持 HTTPS 和 SSH 协议的 Git 仓库地址，请先验证仓库再选择分支
+        </div>
+        <div v-if="repoError" class="alert alert-danger alert-sm mt-2 mb-0">
+          <i class="fas fa-exclamation-triangle"></i> {{ repoError }}
+        </div>
+        <div v-if="repoVerified" class="alert alert-success alert-sm mt-2 mb-0">
+          <i class="fas fa-check-circle"></i> 仓库验证成功！找到 {{ branchesAndTags.branches.length }} 个分支、{{ branchesAndTags.tags.length }} 个标签
         </div>
       </div>
 
       <div class="row g-3 mb-3">
         <div class="col-md-6">
-          <label class="form-label">分支/标签</label>
-          <input 
+          <label class="form-label">分支/标签
+            <span v-if="!repoVerified" class="text-muted small">(请先验证仓库)</span>
+          </label>
+          <select 
+            v-if="repoVerified"
             v-model="form.branch" 
+            class="form-select"
+          >
+            <option value="">使用默认分支 ({{ branchesAndTags.default_branch || 'main' }})</option>
+            <optgroup v-if="branchesAndTags.branches.length > 0" label="分支">
+              <option v-for="branch in branchesAndTags.branches" :key="branch" :value="branch">
+                {{ branch }}
+              </option>
+            </optgroup>
+            <optgroup v-if="branchesAndTags.tags.length > 0" label="标签">
+              <option v-for="tag in branchesAndTags.tags" :key="tag" :value="tag">
+                {{ tag }}
+              </option>
+            </optgroup>
+          </select>
+          <input 
+            v-else
             type="text" 
             class="form-control" 
-            placeholder="main 或 master（默认）"
+            placeholder="请先验证 Git 仓库"
+            disabled
           />
           <div class="form-text small">
             <i class="fas fa-info-circle"></i> 
-            留空则使用仓库的默认分支
+            验证仓库后可选择分支或标签，留空则使用默认分支
           </div>
         </div>
         <div class="col-md-6">
@@ -232,7 +272,7 @@
 
 <script setup>
 import axios from 'axios'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 const form = ref({
   projectType: 'jar',
@@ -253,6 +293,16 @@ const building = ref(false)
 const templateParams = ref([])
 const registries = ref([])
 const templateSearch = ref('')  // 模板搜索关键字
+
+// Git 仓库验证相关状态
+const verifying = ref(false)
+const repoVerified = ref(false)
+const repoError = ref('')
+const branchesAndTags = ref({
+  branches: [],
+  tags: [],
+  default_branch: null
+})
 
 const projectTypes = computed(() => {
   const types = new Set()
@@ -469,6 +519,60 @@ function handlePushChange() {
   }
 }
 
+// 验证 Git 仓库
+async function verifyGitRepo() {
+  if (!form.value.gitUrl) {
+    return
+  }
+  
+  verifying.value = true
+  repoError.value = ''
+  repoVerified.value = false
+  branchesAndTags.value = {
+    branches: [],
+    tags: [],
+    default_branch: null
+  }
+  
+  try {
+    const res = await axios.post('/api/verify-git-repo', {
+      git_url: form.value.gitUrl.trim()
+    })
+    
+    if (res.data.success) {
+      branchesAndTags.value = {
+        branches: res.data.branches || [],
+        tags: res.data.tags || [],
+        default_branch: res.data.default_branch
+      }
+      repoVerified.value = true
+      // 清空之前选择的分支
+      form.value.branch = ''
+    } else {
+      repoError.value = '仓库验证失败'
+    }
+  } catch (error) {
+    console.error('❗ 验证仓库失败:', error)
+    repoError.value = error.response?.data?.detail || '无法访问仓库，请检查 URL 是否正确'
+  } finally {
+    verifying.value = false
+  }
+}
+
+// 监听 Git URL 变化，重置验证状态
+watch(() => form.value.gitUrl, () => {
+  if (repoVerified.value) {
+    repoVerified.value = false
+    repoError.value = ''
+    form.value.branch = ''
+    branchesAndTags.value = {
+      branches: [],
+      tags: [],
+      default_branch: null
+    }
+  }
+})
+
 async function handleBuild() {
   if (!form.value.gitUrl) {
     alert('请输入 Git 仓库地址')
@@ -643,6 +747,16 @@ onMounted(() => {
 
 .btn-group .btn i {
   margin-right: 0.3rem;
+}
+
+/* 小型 Alert 样式 */
+.alert-sm {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.alert-sm i {
+  margin-right: 0.25rem;
 }
 </style>
 
