@@ -858,7 +858,19 @@ async def cleanup_tasks(
         if not task_type or task_type == "export":
             export_manager = ExportTaskManager()
             if days:
-                export_manager.cleanup_expired_tasks(days=days)
+                # 清理指定天数前的任务
+                from datetime import timedelta
+                cutoff_time = datetime.now() - timedelta(days=days)
+                
+                with export_manager.lock:
+                    tasks_to_remove = [
+                        task_id for task_id, task in export_manager.tasks.items()
+                        if datetime.fromisoformat(task.get("created_at", "")) < cutoff_time
+                        and (not status or task.get("status") == status)
+                    ]
+                    for task_id in tasks_to_remove:
+                        export_manager.delete_task(task_id)
+                        removed_count += 1
             elif status:
                 with export_manager.lock:
                     tasks_to_remove = [
