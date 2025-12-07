@@ -66,6 +66,7 @@ class PipelineManager:
         enabled: bool = True,
         description: str = "",
         cron_expression: str = None,
+        webhook_branch_filter: bool = False,
     ) -> str:
         """
         创建流水线配置
@@ -121,6 +122,7 @@ class PipelineManager:
             # Webhook 配置
             "webhook_token": webhook_token,
             "webhook_secret": webhook_secret,
+            "webhook_branch_filter": webhook_branch_filter,  # 是否启用分支过滤
             # 定时触发配置
             "cron_expression": cron_expression,
             "next_run_time": None,  # 下次执行时间
@@ -194,6 +196,7 @@ class PipelineManager:
         enabled: bool = None,
         description: str = None,
         cron_expression: str = None,
+        webhook_branch_filter: bool = None,
     ) -> bool:
         """
         更新流水线配置
@@ -240,6 +243,8 @@ class PipelineManager:
                 pipeline["description"] = description
             if cron_expression is not None:
                 pipeline["cron_expression"] = cron_expression
+            if webhook_branch_filter is not None:
+                pipeline["webhook_branch_filter"] = webhook_branch_filter
             
             # 更新时间
             pipeline["updated_at"] = datetime.now().isoformat()

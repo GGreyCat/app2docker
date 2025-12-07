@@ -1929,6 +1929,7 @@ class UpdatePipelineRequest(BaseModel):
     enabled: Optional[bool] = None
     description: Optional[str] = None
     cron_expression: Optional[str] = None
+    webhook_branch_filter: Optional[bool] = None
 
 
 @router.post("/pipelines")
@@ -1955,6 +1956,7 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
             enabled=request.enabled,
             description=request.description,
             cron_expression=request.cron_expression,
+            webhook_branch_filter=request.webhook_branch_filter,
         )
         
         # 记录操作日志
@@ -2170,6 +2172,7 @@ async def update_pipeline(
             enabled=request.enabled,
             description=request.description,
             cron_expression=request.cron_expression,
+            webhook_branch_filter=request.webhook_branch_filter,
         )
         
         if not success:
@@ -2385,22 +2388,47 @@ async def webhook_trigger(webhook_token: str, request: Request):
             payload = {}
         
         # 提取分支信息（不同平台格式不同）
-        branch = None
+        webhook_branch = None
         # GitHub: ref = refs/heads/main
         if "ref" in payload:
             ref = payload["ref"]
             if ref.startswith("refs/heads/"):
-                branch = ref.replace("refs/heads/", "")
+                webhook_branch = ref.replace("refs/heads/", "")
         # GitLab: ref = main
         elif "ref" in payload:
-            branch = payload["ref"]
+            webhook_branch = payload["ref"]
         # Gitee: ref = refs/heads/main
         
-        # 如果没有提取到分支，使用流水线配置的分支
-        if not branch:
-            branch = pipeline.get("branch")
+        # 检查是否启用分支过滤
+        webhook_branch_filter = pipeline.get("webhook_branch_filter", False)
+        configured_branch = pipeline.get("branch")
         
-        print(f"🔔 Webhook 触发: pipeline={pipeline.get('name')}, branch={branch}")
+        if webhook_branch_filter and configured_branch:
+            # 如果启用了分支过滤，检查推送的分支是否匹配配置的分支
+            if webhook_branch and webhook_branch != configured_branch:
+                print(f"⚠️ 分支不匹配，忽略触发: pipeline={pipeline.get('name')}, webhook_branch={webhook_branch}, configured_branch={configured_branch}")
+                return JSONResponse({
+                    "message": f"分支不匹配，已忽略触发（推送分支: {webhook_branch}, 配置分支: {configured_branch}）",
+                    "pipeline": pipeline.get("name"),
+                    "webhook_branch": webhook_branch,
+                    "configured_branch": configured_branch,
+                    "ignored": True
+                })
+            elif not webhook_branch:
+                # 如果没有提取到分支，且启用了分支过滤，使用配置的分支
+                print(f"⚠️ Webhook未提供分支信息，使用配置的分支: pipeline={pipeline.get('name')}, configured_branch={configured_branch}")
+                branch = configured_branch
+            else:
+                # 分支匹配，使用推送的分支
+                branch = webhook_branch
+                print(f"✅ 分支匹配: pipeline={pipeline.get('name')}, branch={branch}")
+        else:
+            # 未启用分支过滤，使用推送的分支，如果没有则使用配置的分支
+            branch = webhook_branch or configured_branch
+            if webhook_branch_filter and not configured_branch:
+                print(f"⚠️ 启用了分支过滤但未配置分支，使用推送的分支: pipeline={pipeline.get('name')}, branch={branch}")
+            else:
+                print(f"🔔 Webhook 触发: pipeline={pipeline.get('name')}, branch={branch} (分支过滤: {'启用' if webhook_branch_filter else '禁用'})")
         
         # 检查是否有正在运行的任务
         pipeline_id = pipeline["pipeline_id"]

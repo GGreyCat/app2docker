@@ -101,6 +101,9 @@
                 <span class="badge bg-secondary">
                   <i class="fas fa-code-branch"></i> {{ pipeline.branch || '默认' }}
                 </span>
+                <span v-if="pipeline.webhook_branch_filter" class="badge bg-warning" title="启用分支过滤">
+                  <i class="fas fa-filter"></i> 分支过滤
+                </span>
                 <span v-if="pipeline.cron_expression" class="badge bg-info" :title="pipeline.cron_expression">
                   <i class="fas fa-clock"></i> 定时
                 </span>
@@ -635,6 +638,7 @@ const formData = ref({
   tag: 'latest',
   push: false,
   webhook_secret: '',
+  webhook_branch_filter: false,  // Webhook分支过滤
   enabled: true,
   trigger_schedule: false,  // 是否启用定时触发
   cron_expression: '',  // Cron 表达式
@@ -691,6 +695,7 @@ function showCreateModal() {
     tag: 'latest',
     push: false,
     webhook_secret: '',
+    webhook_branch_filter: false,
     enabled: true,
     trigger_schedule: false,
     cron_expression: '',
@@ -712,6 +717,7 @@ function editPipeline(pipeline) {
     tag: pipeline.tag || 'latest',
     push: pipeline.push || false,
     webhook_secret: pipeline.webhook_secret || '',
+    webhook_branch_filter: pipeline.webhook_branch_filter || false,
     enabled: pipeline.enabled !== false,
     trigger_schedule: !!pipeline.cron_expression,  // 如果有cron表达式则启用
     cron_expression: pipeline.cron_expression || '',
