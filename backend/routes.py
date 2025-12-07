@@ -1968,6 +1968,59 @@ async def delete_pipeline(pipeline_id: str, http_request: Request):
         raise HTTPException(status_code=500, detail=f"删除流水线失败: {str(e)}")
 
 
+@router.post("/pipelines/{pipeline_id}/run")
+async def run_pipeline(pipeline_id: str, http_request: Request):
+    """手动触发流水线执行"""
+    try:
+        username = get_current_username(http_request)
+        manager = PipelineManager()
+        
+        # 获取流水线配置
+        pipeline = manager.get_pipeline(pipeline_id)
+        if not pipeline:
+            raise HTTPException(status_code=404, detail="流水线不存在")
+        
+        # 启动构建任务
+        build_manager = BuildManager()
+        task_id = build_manager.start_build_from_source(
+            git_url=pipeline["git_url"],
+            image_name=pipeline.get("image_name") or "manual-build",
+            tag=pipeline.get("tag", "latest"),
+            should_push=pipeline.get("push", False),
+            selected_template=pipeline.get("template", ""),
+            project_type=pipeline.get("project_type", "jar"),
+            template_params=pipeline.get("template_params", {}),
+            push_registry=pipeline.get("push_registry"),
+            branch=pipeline.get("branch"),
+            sub_path=pipeline.get("sub_path"),
+            use_project_dockerfile=pipeline.get("use_project_dockerfile", True),
+        )
+        
+        # 记录触发
+        manager.record_trigger(pipeline_id)
+        
+        # 记录操作日志
+        OperationLogger.log(username, "pipeline_run", {
+            "pipeline_id": pipeline_id,
+            "pipeline_name": pipeline.get("name"),
+            "task_id": task_id,
+            "branch": pipeline.get("branch"),
+        })
+        
+        return JSONResponse({
+            "message": "构建任务已启动",
+            "task_id": task_id,
+            "pipeline": pipeline.get("name"),
+            "branch": pipeline.get("branch"),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"执行流水线失败: {str(e)}")
+
+
 # === Webhook 触发 ===
 @router.post("/webhook/{webhook_token}")
 async def webhook_trigger(webhook_token: str, request: Request):
