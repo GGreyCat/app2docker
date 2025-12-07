@@ -2410,8 +2410,9 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 webhook_branch = ref
         # Gitee: ref = refs/heads/main (已在上面处理)
         
-        # 检查是否启用分支过滤
+        # 检查是否启用分支过滤和使用推送分支
         webhook_branch_filter = pipeline.get("webhook_branch_filter", False)
+        webhook_use_push_branch = pipeline.get("webhook_use_push_branch", True)  # 默认为True
         configured_branch = pipeline.get("branch")
         
         # 分支触发逻辑：优先使用推送的分支进行构建
@@ -2450,7 +2451,21 @@ async def webhook_trigger(webhook_token: str, request: Request):
             else:
                 # 禁用使用推送分支，使用配置的分支
                 branch = configured_branch
-                print(f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (忽略推送分支: {webhook_branch})")
+                if not branch:
+                    # 如果配置的分支为空，且没有推送分支信息，无法确定使用哪个分支
+                    if not webhook_branch:
+                        print(f"❌ 无法触发构建: pipeline={pipeline.get('name')}, 配置分支为空且Webhook未提供分支信息")
+                        return JSONResponse({
+                            "message": "无法触发构建：配置分支为空且Webhook未提供分支信息",
+                            "pipeline": pipeline.get("name"),
+                            "error": "missing_branch"
+                        }, status_code=400)
+                    else:
+                        # 配置分支为空，但Webhook提供了分支信息，使用推送的分支
+                        branch = webhook_branch
+                        print(f"⚠️ 配置分支为空，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}")
+                else:
+                    print(f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (忽略推送分支: {webhook_branch})")
         
         # 检查是否有正在运行的任务
         pipeline_id = pipeline["pipeline_id"]
