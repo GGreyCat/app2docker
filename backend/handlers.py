@@ -2065,7 +2065,6 @@ logs/
             # 如果需要推送，直接使用构建好的镜像名推送，从激活的registry获取认证信息
             if should_push:
                 log(f"📡 开始推送镜像...\n")
-
                 # 直接使用构建时的镜像名和标签进行推送
                 # full_tag 格式: image_name:tag，可能包含registry路径
                 # 例如: registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker:dev
