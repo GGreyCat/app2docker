@@ -4,85 +4,137 @@
       <h5 class="mb-0">
         <i class="fas fa-project-diagram"></i> 流水线管理
       </h5>
-      <button class="btn btn-primary btn-sm" @click="showCreateModal">
-        <i class="fas fa-plus"></i> 新建流水线
-      </button>
+      <div class="d-flex gap-2">
+        <button 
+          class="btn btn-outline-secondary btn-sm" 
+          @click="loadPipelines"
+          :disabled="loading"
+          title="刷新列表"
+        >
+          <i class="fas fa-sync-alt" :class="{ 'fa-spin': loading }"></i> 刷新
+        </button>
+        <button class="btn btn-primary btn-sm" @click="showCreateModal">
+          <i class="fas fa-plus"></i> 新建流水线
+        </button>
+      </div>
     </div>
 
-    <!-- 流水线列表 -->
-    <div class="table-responsive" style="overflow-x: hidden;">
-      <table class="table table-sm table-hover" style="table-layout: fixed; width: 100%;">
-        <thead>
-          <tr>
-            <th style="width: 12%;">名称</th>
-            <th style="width: 15%;">Git 仓库</th>
-            <th style="width: 7%;">分支</th>
-            <th style="width: 12%;">镜像</th>
-            <th style="width: 7%;">状态</th>
-            <th style="width: 8%;">当前任务</th>
-            <th style="width: 12%;">最后构建</th>
-            <th style="width: 5%;">定时</th>
-            <th style="width: 5%;">触发次数</th>
-            <th style="width: 10%;">最后触发</th>
-            <th style="width: 7%;">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="loading">
-            <td colspan="11" class="text-center">
-              <span class="spinner-border spinner-border-sm"></span> 加载中...
-            </td>
-          </tr>
-          <tr v-else-if="pipelines.length === 0">
-            <td colspan="11" class="text-center text-muted">
-              暂无流水线配置
-            </td>
-          </tr>
-          <tr v-for="pipeline in pipelines" :key="pipeline.pipeline_id">
-            <td>
-              <div class="text-truncate" :title="pipeline.name">
+    <!-- 流水线列表 - 卡片式布局 -->
+    <div v-if="loading" class="text-center py-5">
+      <span class="spinner-border spinner-border-sm"></span> 加载中...
+    </div>
+    <div v-else-if="pipelines.length === 0" class="text-center py-5 text-muted">
+      <i class="fas fa-inbox fa-3x mb-3"></i>
+      <p class="mb-0">暂无流水线配置</p>
+    </div>
+    <div v-else class="row g-4">
+      <div v-for="pipeline in pipelines" :key="pipeline.pipeline_id" class="col-12 col-md-6 col-xl-4">
+        <div class="card h-100 shadow-sm">
+          <!-- 卡片头部 -->
+          <div class="card-header bg-white">
+            <!-- 标题行 -->
+            <div class="mb-2">
+              <h5 class="card-title mb-0">
                 <strong>{{ pipeline.name }}</strong>
+                <span v-if="pipeline.enabled" class="badge bg-success ms-2">
+                  <i class="fas fa-check-circle"></i> 已启用
+                </span>
+                <span v-else class="badge bg-secondary ms-2">
+                  <i class="fas fa-times-circle"></i> 已禁用
+                </span>
+              </h5>
+              <p class="text-muted mb-0 mt-1" v-if="pipeline.description" style="font-size: 0.9rem;">{{ pipeline.description }}</p>
+            </div>
+            <!-- 操作按钮行 -->
+            <div class="btn-group btn-group-sm w-100">
+              <button 
+                class="btn btn-outline-success" 
+                @click="runPipeline(pipeline)"
+                :disabled="running === pipeline.pipeline_id"
+                title="手动运行"
+              >
+                <i class="fas fa-play"></i>
+                <span v-if="running === pipeline.pipeline_id" class="spinner-border spinner-border-sm ms-1"></span>
+              </button>
+              <button 
+                class="btn btn-outline-secondary" 
+                @click="showHistory(pipeline)"
+                title="查看历史构建"
+              >
+                <i class="fas fa-history"></i>
+              </button>
+              <button 
+                class="btn btn-outline-info" 
+                @click="showWebhookUrl(pipeline)"
+                title="查看 Webhook URL"
+              >
+                <i class="fas fa-link"></i>
+              </button>
+              <button 
+                class="btn btn-outline-primary" 
+                @click="editPipeline(pipeline)"
+                title="编辑"
+              >
+                <i class="fas fa-edit"></i>
+              </button>
+              <button 
+                class="btn btn-outline-danger" 
+                @click="deletePipeline(pipeline)"
+                title="删除"
+              >
+                <i class="fas fa-trash"></i>
+              </button>
+            </div>
+          </div>
+          
+          <!-- 卡片内容 -->
+          <div class="card-body">
+            <!-- Git 信息 -->
+            <div class="mb-3">
+              <div class="d-flex align-items-center mb-1">
+                <i class="fas fa-code-branch text-muted me-2" style="width: 18px;"></i>
+                <small class="font-monospace text-truncate" :title="pipeline.git_url" style="font-size: 0.9rem;">
+                  {{ formatGitUrl(pipeline.git_url) }}
+                </small>
               </div>
-              <small class="text-muted text-truncate d-block" :title="pipeline.description">
-                {{ pipeline.description || '-' }}
-              </small>
-            </td>
-            <td>
-              <small class="font-monospace text-truncate d-block" :title="pipeline.git_url">
-                {{ formatGitUrl(pipeline.git_url) }}
-              </small>
-            </td>
-            <td>
-              <span class="badge bg-secondary">{{ pipeline.branch || '默认' }}</span>
-            </td>
-            <td>
-              <small class="font-monospace text-truncate d-block" :title="`${pipeline.image_name}:${pipeline.tag}`">
-                {{ pipeline.image_name }}:{{ pipeline.tag }}
-              </small>
-            </td>
-            <td>
-              <span v-if="pipeline.enabled" class="badge bg-success">
-                <i class="fas fa-check-circle"></i> 已启用
-              </span>
-              <span v-else class="badge bg-secondary">
-                <i class="fas fa-times-circle"></i> 已禁用
-              </span>
-            </td>
-            <td>
-              <span v-if="pipeline.current_task_info">
+              <div class="d-flex align-items-center gap-2 ms-4">
+                <span class="badge bg-secondary">
+                  <i class="fas fa-code-branch"></i> {{ pipeline.branch || '默认' }}
+                </span>
+                <span v-if="pipeline.cron_expression" class="badge bg-info" :title="pipeline.cron_expression">
+                  <i class="fas fa-clock"></i> 定时
+                </span>
+              </div>
+            </div>
+            
+            <!-- 镜像信息 -->
+            <div class="mb-3">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-docker text-muted me-2" style="width: 18px;"></i>
+                <small class="font-monospace text-truncate" :title="`${pipeline.image_name}:${pipeline.tag}`" style="font-size: 0.9rem;">
+                  {{ pipeline.image_name }}:{{ pipeline.tag }}
+                </small>
+              </div>
+            </div>
+            
+            <!-- 当前任务状态 -->
+            <div class="mb-3" v-if="pipeline.current_task_info">
+              <div class="d-flex align-items-center justify-content-between">
+                <span class="text-muted" style="font-size: 0.9rem;">当前任务：</span>
                 <span v-if="pipeline.current_task_status === 'running'" class="badge bg-primary">
-                  <span class="spinner-border spinner-border-sm me-1" style="width: 0.65rem; height: 0.65rem;"></span> 运行中
+                  <span class="spinner-border spinner-border-sm me-1" style="width: 0.7rem; height: 0.7rem;"></span> 运行中
                 </span>
                 <span v-else-if="pipeline.current_task_status === 'pending'" class="badge bg-warning">
                   <i class="fas fa-clock"></i> 等待中
                 </span>
-                <span v-else class="text-muted small">-</span>
-              </span>
-              <span v-else class="text-muted small">-</span>
-            </td>
-            <td>
-              <span v-if="pipeline.last_build">
-                <div class="d-flex align-items-center gap-1 mb-1">
+              </div>
+            </div>
+            
+            <!-- 最后构建 -->
+            <div class="mb-3" v-if="pipeline.last_build">
+              <div class="d-flex align-items-center justify-content-between mb-1">
+                <span class="text-muted" style="font-size: 0.9rem;">最后构建：</span>
+                <div class="d-flex align-items-center gap-2">
                   <span 
                     :class="{
                       'badge': true,
@@ -96,82 +148,47 @@
                   </span>
                   <button 
                     v-if="pipeline.last_build.task_id && pipeline.last_build.status !== 'deleted'"
-                    class="btn btn-sm btn-outline-info p-0" 
-                    style="width: 20px; height: 20px; line-height: 1;"
+                    class="btn btn-sm btn-outline-info p-1" 
+                    style="width: 24px; height: 24px; line-height: 1;"
                     @click="viewTaskLogs(pipeline.last_build.task_id, pipeline.last_build)"
                     title="查看日志"
                   >
-                    <i class="fas fa-terminal" style="font-size: 0.7rem;"></i>
+                    <i class="fas fa-terminal" style="font-size: 0.75rem;"></i>
                   </button>
                 </div>
-                <small class="text-muted d-block" :title="formatDateTime(pipeline.last_build.completed_at || pipeline.last_build.created_at)">
+              </div>
+              <div class="d-flex justify-content-between align-items-center ms-4">
+                <small class="text-muted" :title="formatDateTime(pipeline.last_build.completed_at || pipeline.last_build.created_at)" style="font-size: 0.85rem;">
                   {{ formatDateTime(pipeline.last_build.completed_at || pipeline.last_build.created_at) }}
                 </small>
-                <small class="text-muted d-block">
-                  <code>{{ pipeline.last_build.task_id.substring(0, 8) }}</code>
+                <small class="text-muted">
+                  <code style="font-size: 0.85rem;">{{ pipeline.last_build.task_id.substring(0, 8) }}</code>
                 </small>
-              </span>
-              <span v-else class="text-muted small">-</span>
-            </td>
-            <td>
-              <span v-if="pipeline.cron_expression" class="badge bg-info" :title="pipeline.cron_expression">
-                <i class="fas fa-clock"></i> 已启用
-              </span>
-              <span v-else class="text-muted">
-                -
-              </span>
-            </td>
-            <td class="text-center">{{ pipeline.trigger_count || 0 }}</td>
-            <td>
-              <small v-if="pipeline.last_triggered_at" :title="formatDateTime(pipeline.last_triggered_at)">
-                {{ formatDateTime(pipeline.last_triggered_at) }}
-              </small>
-              <small v-else class="text-muted">-</small>
-            </td>
-            <td>
-              <div class="btn-group btn-group-sm">
-                <button 
-                  class="btn btn-outline-success" 
-                  @click="runPipeline(pipeline)"
-                  :disabled="running === pipeline.pipeline_id"
-                  title="手动运行"
-                >
-                  <i class="fas fa-play"></i>
-                  <span v-if="running === pipeline.pipeline_id" class="spinner-border spinner-border-sm ms-1"></span>
-                </button>
-                <button 
-                  class="btn btn-outline-secondary" 
-                  @click="showHistory(pipeline)"
-                  title="查看历史构建"
-                >
-                  <i class="fas fa-history"></i>
-                </button>
-                <button 
-                  class="btn btn-outline-info" 
-                  @click="showWebhookUrl(pipeline)"
-                  title="查看 Webhook URL"
-                >
-                  <i class="fas fa-link"></i>
-                </button>
-                <button 
-                  class="btn btn-outline-primary" 
-                  @click="editPipeline(pipeline)"
-                  title="编辑"
-                >
-                  <i class="fas fa-edit"></i>
-                </button>
-                <button 
-                  class="btn btn-outline-danger" 
-                  @click="deletePipeline(pipeline)"
-                  title="删除"
-                >
-                  <i class="fas fa-trash"></i>
-                </button>
               </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+            <div v-else class="mb-3">
+              <span class="text-muted" style="font-size: 0.9rem;">最后构建：暂无</span>
+            </div>
+            
+            <!-- 统计信息 -->
+            <div class="border-top pt-2 mt-2">
+              <div class="row text-center">
+                <div class="col-6">
+                  <div class="text-muted mb-1" style="font-size: 0.85rem;">触发次数</div>
+                  <div class="fw-bold" style="font-size: 1.1rem;">{{ pipeline.trigger_count || 0 }}</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-muted mb-1" style="font-size: 0.85rem;">最后触发</div>
+                  <div class="small" v-if="pipeline.last_triggered_at" :title="formatDateTime(pipeline.last_triggered_at)" style="font-size: 0.85rem;">
+                    {{ formatDateTime(pipeline.last_triggered_at) }}
+                  </div>
+                  <div class="small text-muted" v-else style="font-size: 0.85rem;">-</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 创建/编辑流水线模态框 -->
@@ -921,30 +938,32 @@ function closeLogModal() {
   padding: 1rem;
 }
 
-.table {
-  font-size: 0.875rem;
-  table-layout: fixed; /* 固定表格布局，使列宽生效 */
-  width: 100%;
+.card {
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: 1px solid rgba(0, 0, 0, 0.125);
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+}
+
+.card-header {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+  padding: 1rem 1.25rem;
+  background-color: #f8f9fa;
+}
+
+.card-title {
+  font-size: 1.1rem;
   margin: 0;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
-.table th {
-  white-space: nowrap; /* 表头不换行 */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0.5rem;
-}
-
-.table td {
-  word-wrap: break-word; /* 允许单元格内容换行 */
-  overflow-wrap: break-word;
-  padding: 0.5rem;
-  vertical-align: middle;
-}
-
-/* 确保表格容器不出现横向滚动 */
-.table-responsive {
-  overflow-x: hidden !important;
+.card-body {
+  padding: 1.25rem;
+  line-height: 1.6;
 }
 
 .font-monospace {
@@ -955,5 +974,22 @@ function closeLogModal() {
 /* 确保操作按钮组不换行 */
 .btn-group {
   flex-wrap: nowrap;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .card-header {
+    flex-direction: column;
+  }
+  
+  .card-header .btn-group {
+    width: 100%;
+    margin-top: 0.5rem;
+    justify-content: flex-start;
+  }
+  
+  .card-header .btn-group .btn {
+    flex: 1;
+  }
 }
 </style>
