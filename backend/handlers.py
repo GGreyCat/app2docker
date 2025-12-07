@@ -23,6 +23,7 @@ from backend.config import (
     get_git_config,
     get_registry_by_name,
     get_active_registry,
+    get_all_registries,
 )
 from backend.utils import generate_image_name, get_safe_filename
 from backend.auth import authenticate, verify_token, require_auth
@@ -1478,14 +1479,42 @@ class BuildManager:
             log(f"\n✅ 镜像构建成功: {full_tag}\n")
 
             if should_push:
-                # 推送时直接使用构建好的镜像名，从激活的registry获取认证信息
-                from backend.config import get_active_registry
+                # 推送时直接使用构建好的镜像名，根据镜像名找到对应的registry获取认证信息
+                from backend.config import get_active_registry, get_all_registries
 
-                push_registry_config = get_active_registry()
-                log(f"\n📤 开始推送镜像: {full_tag}\n")
-                log(
-                    f"🎯 使用激活仓库配置获取认证信息: {push_registry_config.get('name', 'Unknown')}\n"
-                )
+                # 根据镜像名找到对应的registry配置
+                def find_matching_registry_for_push(image_name):
+                    """根据镜像名找到匹配的registry配置"""
+                    # 如果镜像名包含斜杠，提取registry部分
+                    parts = image_name.split("/")
+                    if len(parts) >= 2 and "." in parts[0]:
+                        # 镜像名格式: registry.com/namespace/image
+                        image_registry = parts[0]
+                        all_registries = get_all_registries()
+                        for reg in all_registries:
+                            reg_address = reg.get("registry", "")
+                            if reg_address and (
+                                image_registry == reg_address
+                                or image_registry.startswith(reg_address)
+                                or reg_address.startswith(image_registry)
+                            ):
+                                return reg
+                    return None
+
+                # 尝试根据镜像名找到匹配的registry
+                push_registry_config = find_matching_registry_for_push(image_name)
+                if not push_registry_config:
+                    # 如果找不到匹配的，使用激活的registry
+                    push_registry_config = get_active_registry()
+                    log(
+                        f"\n⚠️  未找到匹配的registry配置，使用激活仓库: {push_registry_config.get('name', 'Unknown')}\n"
+                    )
+                else:
+                    log(
+                        f"\n🎯 找到匹配的registry配置: {push_registry_config.get('name', 'Unknown')}\n"
+                    )
+
+                log(f"📤 开始推送镜像: {full_tag}\n")
 
                 # 直接使用构建时的镜像名
                 push_repository = image_name
@@ -1499,7 +1528,7 @@ class BuildManager:
                     auth_config = {"username": push_username, "password": push_password}
                     log(f"✅ 已配置认证信息\n")
                 else:
-                    log(f"⚠️  推送仓库未配置认证信息，推送可能失败\n")
+                    log(f"⚠️  registry未配置认证信息，推送可能失败\n")
 
                 try:
                     push_stream = docker_builder.push_image(
@@ -1932,20 +1961,47 @@ logs/
             # 如果需要推送，直接使用构建好的镜像名推送，从激活的registry获取认证信息
             if should_push:
                 log(f"📡 开始推送镜像...\n")
-                # 从激活的registry获取认证信息
-                registry_config = get_active_registry()
 
                 # 直接使用构建时的镜像名和标签进行推送
                 # full_tag 格式: image_name:tag，可能包含registry路径
                 # 例如: registry.cn-shanghai.aliyuncs.com/51jbm/jar2docker:dev
                 push_repository = image_name  # 直接使用构建时的镜像名
 
-                log(
-                    f"🎯 使用激活仓库配置获取认证信息: {registry_config.get('name', 'Unknown')}\n"
-                )
+                # 根据镜像名找到对应的registry配置
+                def find_matching_registry_for_push(image_name):
+                    """根据镜像名找到匹配的registry配置"""
+                    # 如果镜像名包含斜杠，提取registry部分
+                    parts = image_name.split("/")
+                    if len(parts) >= 2 and "." in parts[0]:
+                        # 镜像名格式: registry.com/namespace/image
+                        image_registry = parts[0]
+                        all_registries = get_all_registries()
+                        for reg in all_registries:
+                            reg_address = reg.get("registry", "")
+                            if reg_address and (
+                                image_registry == reg_address
+                                or image_registry.startswith(reg_address)
+                                or reg_address.startswith(image_registry)
+                            ):
+                                return reg
+                    return None
+
+                # 尝试根据镜像名找到匹配的registry
+                registry_config = find_matching_registry_for_push(image_name)
+                if not registry_config:
+                    # 如果找不到匹配的，使用激活的registry
+                    registry_config = get_active_registry()
+                    log(
+                        f"⚠️  未找到匹配的registry配置，使用激活仓库: {registry_config.get('name', 'Unknown')}\n"
+                    )
+                else:
+                    log(
+                        f"🎯 找到匹配的registry配置: {registry_config.get('name', 'Unknown')}\n"
+                    )
+
                 log(f"📦 推送镜像: {full_tag}\n")
 
-                # 从激活的registry配置中获取认证信息
+                # 从registry配置中获取认证信息
                 username = registry_config.get("username")
                 password = registry_config.get("password")
                 auth_config = None
@@ -1953,7 +2009,7 @@ logs/
                     auth_config = {"username": username, "password": password}
                     log(f"✅ 已配置认证信息\n")
                 else:
-                    log(f"⚠️  推送仓库未配置认证信息，推送可能失败\n")
+                    log(f"⚠️  registry未配置认证信息，推送可能失败\n")
 
                 try:
                     # 直接推送构建好的镜像
