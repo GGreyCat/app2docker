@@ -276,9 +276,19 @@
           <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
             <div class="d-flex justify-content-between align-items-center mb-3">
               <span class="text-muted">共 {{ dockerfileList.length }} 个 Dockerfile</span>
-              <button class="btn btn-primary btn-sm" @click="showCreateDockerfile">
-                <i class="fas fa-plus"></i> 新建 Dockerfile
-              </button>
+              <div class="btn-group btn-group-sm">
+                <button 
+                  class="btn btn-outline-info" 
+                  @click="scanDockerfiles"
+                  :disabled="scanningDockerfiles"
+                  title="扫描 Dockerfile"
+                >
+                  <i class="fas fa-search" :class="{ 'fa-spin': scanningDockerfiles }"></i> 扫描
+                </button>
+                <button class="btn btn-primary" @click="showCreateDockerfile">
+                  <i class="fas fa-plus"></i> 新建
+                </button>
+              </div>
             </div>
 
             <!-- Dockerfile 列表 -->
@@ -387,6 +397,7 @@ const showDockerfileEditor = ref(false)
 const currentSource = ref(null)
 const dockerfileList = ref([])
 const loadingDockerfiles = ref(false)
+const scanningDockerfiles = ref(false)
 const editingDockerfilePath = ref(null)
 const dockerfileForm = ref({
   path: '',
@@ -778,6 +789,53 @@ async function deleteDockerfile(path) {
   } catch (error) {
     console.error('删除 Dockerfile 失败:', error)
     alert(error.response?.data?.detail || '删除 Dockerfile 失败')
+  }
+}
+
+async function scanDockerfiles() {
+  if (!currentSource.value) {
+    return
+  }
+  
+  if (!confirm(`确定要扫描数据源 "${currentSource.value.name}" 的 Dockerfile 吗？\n\n这将从 Git 仓库的默认分支扫描所有 Dockerfile。`)) {
+    return
+  }
+  
+  scanningDockerfiles.value = true
+  try {
+    // 调用验证接口，使用数据源的认证信息扫描 Dockerfile
+    const res = await axios.post('/api/verify-git-repo', {
+      git_url: currentSource.value.git_url,
+      save_as_source: false,
+      source_id: currentSource.value.source_id  // 使用数据源的认证信息
+    })
+    
+    if (res.data.success && res.data.dockerfiles) {
+      // 更新扫描到的 Dockerfile
+      const dockerfileCount = Object.keys(res.data.dockerfiles).length
+      if (dockerfileCount > 0) {
+        for (const [dockerfile_path, content] of Object.entries(res.data.dockerfiles)) {
+          await axios.put(
+            `/api/git-sources/${currentSource.value.source_id}/dockerfiles/${encodeURIComponent(dockerfile_path)}`,
+            { content: content }
+          )
+        }
+        alert(`扫描完成！发现 ${dockerfileCount} 个 Dockerfile`)
+      } else {
+        alert('扫描完成，但未发现 Dockerfile')
+      }
+      // 刷新 Dockerfile 列表
+      await loadDockerfiles(currentSource.value.source_id)
+      // 刷新数据源列表以更新 Dockerfile 数量
+      loadSources()
+    } else {
+      alert('扫描失败：' + (res.data.detail || '未知错误'))
+    }
+  } catch (error) {
+    console.error('扫描 Dockerfile 失败:', error)
+    alert(error.response?.data?.detail || '扫描 Dockerfile 失败')
+  } finally {
+    scanningDockerfiles.value = false
   }
 }
 </script>
