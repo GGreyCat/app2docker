@@ -662,20 +662,6 @@
                               </button>
                             </div>
                           </div>
-                          <!-- 推送仓库：每个服务可以单独配置 -->
-                          <div class="mb-2">
-                            <label class="form-label small mb-1">推送仓库 <span class="text-muted small">(可选)</span></label>
-                            <select 
-                              v-model="getServiceConfig(service.name).registry"
-                              :disabled="!getServiceConfig(service.name).push"
-                              class="form-select form-select-sm"
-                            >
-                              <option value="">使用全局设置</option>
-                              <option v-for="reg in registries" :key="reg.name" :value="reg.name">
-                                {{ reg.name }}
-                              </option>
-                            </select>
-                          </div>
                           <!-- 是否推送：每个服务单独配置 -->
                           <div class="form-check">
                             <input 
@@ -1559,8 +1545,19 @@ function onServiceSelectionChange(serviceName) {
     // 取消选中时，清空推送配置
     const config = getServiceConfig(serviceName)
     config.push = false
-    config.registry = ''
+    // 不清空 registry，因为它是全局批量设置的
   }
+}
+
+// 从镜像前缀推断推送仓库名称
+function getRegistryNameFromPrefix(prefix) {
+  if (!prefix) return ''
+  // 查找匹配的仓库
+  const registry = registries.value.find(reg => {
+    const regPrefix = reg.registry_prefix || reg.registry || ''
+    return prefix === regPrefix || prefix.startsWith(regPrefix + '/')
+  })
+  return registry ? registry.name : ''
 }
 
 // 批量设置镜像前缀
@@ -1572,11 +1569,19 @@ function batchSetImagePrefix() {
   const newPrefix = batchImagePrefix.value.trim()
   // 更新全局配置
   buildConfig.value.imagePrefix = newPrefix
-  // 直接将完整镜像名填入到每个服务的输入框
+  
+  // 从前缀推断推送仓库
+  const registryName = getRegistryNameFromPrefix(newPrefix)
+  
+  // 直接将完整镜像名填入到每个服务的输入框，并设置推送仓库
   selectedServices.value.forEach(serviceName => {
     const config = getServiceConfig(serviceName)
     // 直接设置完整镜像名：前缀/服务名
     config.customImageName = `${newPrefix}/${serviceName}`
+    // 如果从前缀推断出仓库，自动设置推送仓库
+    if (registryName) {
+      config.registry = registryName
+    }
   })
   // 清空批量设置输入框
   batchImagePrefix.value = ''
