@@ -147,7 +147,6 @@
                     :readonly="editingSource"
                   >
                   <button 
-                    v-if="!editingSource"
                     type="button" 
                     class="btn btn-outline-primary" 
                     @click="verifyAndSave"
@@ -155,10 +154,16 @@
                   >
                     <span v-if="verifying" class="spinner-border spinner-border-sm me-1"></span>
                     <i v-else class="fas fa-search me-1"></i>
-                    {{ verifying ? '验证中...' : '验证并保存' }}
+                    {{ verifying ? '验证中...' : (editingSource && !isVerified ? '重新验证' : '验证仓库') }}
                   </button>
                 </div>
-                <small class="text-muted">编辑模式下无法修改 Git 地址，请先验证后保存</small>
+                <small class="text-muted">
+                  <span v-if="editingSource">编辑模式下修改 Git 地址或认证信息需要重新验证</span>
+                  <span v-else>新建数据源必须先验证 Git 仓库才能保存</span>
+                </small>
+                <div v-if="isVerified" class="alert alert-success alert-sm mt-2 mb-0">
+                  <i class="fas fa-check-circle"></i> 仓库已验证，可以保存
+                </div>
               </div>
               <div class="mb-3">
                 <div class="card border-info">
@@ -231,7 +236,8 @@
               type="button" 
               class="btn btn-primary btn-sm" 
               @click="saveSource"
-              :disabled="!formData.git_url || verifying"
+              :disabled="!formData.git_url || verifying || (!editingSource && !isVerified)"
+              :title="!editingSource && !isVerified ? '请先验证 Git 仓库' : ''"
             >
               <i class="fas fa-save"></i> 保存
             </button>
@@ -253,6 +259,7 @@ const refreshing = ref(null)
 const showModal = ref(false)
 const editingSource = ref(null)
 const verifying = ref(false)
+const isVerified = ref(false)  // 验证状态标识
 
 const formData = ref({
   name: '',
@@ -264,6 +271,22 @@ const formData = ref({
   username: '',
   password: ''
 })
+
+// 监听 Git URL 或认证信息变化，重置验证状态
+watch(() => [formData.value.git_url, formData.value.username, formData.value.password], () => {
+  // 如果 Git URL 或认证信息变化，重置验证状态（编辑模式下除外）
+  if (!editingSource.value) {
+    isVerified.value = false
+  } else if (editingSource.value) {
+    // 编辑模式下，如果 Git URL 或认证信息变化，需要重新验证
+    const urlChanged = editingSource.value.git_url !== formData.value.git_url
+    const usernameChanged = (editingSource.value.username || '') !== (formData.value.username || '')
+    const passwordChanged = formData.value.password && formData.value.password !== '******'
+    if (urlChanged || usernameChanged || passwordChanged) {
+      isVerified.value = false
+    }
+  }
+}, { deep: true })
 
 // 监听 Git URL 变化，自动填充数据源名称
 watch(() => formData.value.git_url, (newUrl) => {
@@ -296,6 +319,7 @@ async function loadSources() {
 
 function showCreateModal() {
   editingSource.value = null
+  isVerified.value = false
   formData.value = {
     name: '',
     description: '',
@@ -311,6 +335,7 @@ function showCreateModal() {
 
 function editSource(source) {
   editingSource.value = source
+  isVerified.value = true  // 编辑模式下，假设已存在的源是已验证的
   formData.value = {
     name: source.name,
     description: source.description || '',
@@ -331,6 +356,7 @@ async function verifyAndSave() {
   }
   
   verifying.value = true
+  isVerified.value = false
   try {
     const res = await axios.post('/api/verify-git-repo', {
       git_url: formData.value.git_url.trim(),
@@ -345,6 +371,7 @@ async function verifyAndSave() {
       formData.value.branches = res.data.branches || []
       formData.value.tags = res.data.tags || []
       formData.value.default_branch = res.data.default_branch || ''
+      isVerified.value = true  // 标记为已验证
       
       // 如果没有设置名称，使用仓库名作为默认名称
       if (!formData.value.name) {
@@ -353,10 +380,12 @@ async function verifyAndSave() {
       }
     } else {
       alert('验证失败：' + (res.data.detail || '未知错误'))
+      isVerified.value = false
     }
   } catch (error) {
     console.error('验证仓库失败:', error)
     alert(error.response?.data?.detail || '验证仓库失败')
+    isVerified.value = false
   } finally {
     verifying.value = false
   }
@@ -366,6 +395,23 @@ async function saveSource() {
   if (!formData.value.name || !formData.value.git_url) {
     alert('请填写必填字段')
     return
+  }
+  
+  // 检查验证状态
+  const isNewSource = !editingSource.value
+  const gitUrlChanged = editingSource.value && editingSource.value.git_url !== formData.value.git_url
+  const authChanged = editingSource.value && (
+    editingSource.value.username !== formData.value.username || 
+    (formData.value.password && formData.value.password !== '******')
+  )
+  const needsVerification = isNewSource || gitUrlChanged || authChanged || !isVerified.value
+  
+  if (needsVerification) {
+    // 需要验证，检查是否已验证
+    if (!isVerified.value || formData.value.branches.length === 0) {
+      alert('请先验证 Git 仓库后再保存')
+      return
+    }
   }
   
   try {
@@ -387,11 +433,7 @@ async function saveSource() {
       })
       alert('数据源更新成功')
     } else {
-      // 创建 - 如果还没有验证，先验证
-      if (formData.value.branches.length === 0) {
-        await verifyAndSave()
-      }
-      
+      // 创建新数据源
       await axios.post('/api/git-sources', {
         name: formData.value.name,
         description: formData.value.description,
