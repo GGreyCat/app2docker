@@ -129,7 +129,7 @@
             <td class="text-end">
               <div class="btn-group btn-group-sm">
                 <button 
-                  v-if="task.task_category === 'build' && task.status === 'completed' && task.task_type === 'build_from_source'"
+                  v-if="task.task_category === 'build' && task.status === 'completed' && task.task_type === 'build_from_source' && !task.pipeline_id"
                   class="btn btn-sm btn-outline-success"
                   @click="addToPipeline(task)"
                   :title="'加入流水线'"
