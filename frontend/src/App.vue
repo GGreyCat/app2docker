@@ -48,6 +48,11 @@
                 </button>
               </li>
               <li class="nav-item">
+                <button type="button" class="nav-link" :class="{ active: activeTab === 'step-build' }" @click="activeTab = 'step-build'">
+                  <i class="fas fa-list-ol"></i> 分步构建
+                </button>
+              </li>
+              <li class="nav-item">
                 <button type="button" class="nav-link" :class="{ active: activeTab === 'export' }" @click="activeTab = 'export'">
                   <i class="fas fa-file-export"></i> 导出镜像
                 </button>
@@ -89,6 +94,7 @@
           <div class="card-body p-3">
             <BuildPanel v-if="activeTab === 'build'" />
             <SourceBuildPanel v-if="activeTab === 'source-build'" />
+            <StepBuildPanel v-if="activeTab === 'step-build'" />
             <ExportPanel v-if="activeTab === 'export'" />
             <TemplatePanel v-if="activeTab === 'template'" />
             <OperationLogs v-if="activeTab === 'logs'" />
@@ -125,6 +131,7 @@ import LoginPage from './components/LoginPage.vue'
 import OperationLogs from './components/OperationLogs.vue'
 import PipelinePanel from './components/PipelinePanel.vue'
 import SourceBuildPanel from './components/SourceBuildPanel.vue'
+import StepBuildPanel from './components/StepBuildPanel.vue'
 import TaskManager from './components/TaskManager.vue'
 import TemplatePanel from './components/TemplatePanel.vue'
 import UserCenterModal from './components/UserCenterModal.vue'

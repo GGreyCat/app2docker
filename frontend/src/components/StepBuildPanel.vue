@@ -1,0 +1,1900 @@
+<template>
+  <div class="step-build-panel">
+    <!-- 步骤指示器 -->
+    <div class="steps-indicator mb-4">
+      <div class="step-item" :class="{ active: currentStep >= 1, completed: currentStep > 1 }">
+        <div class="step-number">1</div>
+        <div class="step-label">选择数据源</div>
+      </div>
+      <div class="step-connector" :class="{ completed: currentStep > 1 }"></div>
+      <div class="step-item" :class="{ active: currentStep >= 2, completed: currentStep > 2 }">
+        <div class="step-number">2</div>
+        <div class="step-label">确认分支</div>
+      </div>
+      <div class="step-connector" :class="{ completed: currentStep > 2 }"></div>
+      <div class="step-item" :class="{ active: currentStep >= 3, completed: currentStep > 3 }">
+        <div class="step-number">3</div>
+        <div class="step-label">选择模板</div>
+      </div>
+      <div class="step-connector" :class="{ completed: currentStep > 3 }"></div>
+      <div class="step-item" :class="{ active: currentStep >= 4, completed: currentStep > 4 }">
+        <div class="step-number">4</div>
+        <div class="step-label">选择服务</div>
+      </div>
+      <div class="step-connector" :class="{ completed: currentStep > 4 }"></div>
+      <div class="step-item" :class="{ active: currentStep >= 5, completed: currentStep > 5 }">
+        <div class="step-number">5</div>
+        <div class="step-label">开始构建</div>
+      </div>
+    </div>
+
+    <!-- 步骤内容 -->
+    <div class="step-content">
+      <!-- 步骤1: 选择数据源 -->
+      <div v-if="currentStep === 1" class="step-panel">
+        <h5 class="mb-3">
+          <i class="fas fa-database text-primary"></i> 步骤 1：选择数据源
+        </h5>
+        
+        <div class="mb-3">
+          <label class="form-label">
+            数据源类型 <span class="text-danger">*</span>
+          </label>
+          <div class="btn-group w-100" role="group">
+            <button
+              type="button"
+              class="btn"
+              :class="buildConfig.sourceType === 'file' ? 'btn-primary' : 'btn-outline-primary'"
+              @click="buildConfig.sourceType = 'file'"
+            >
+              <i class="fas fa-file-upload"></i> 上传文件
+            </button>
+            <button
+              type="button"
+              class="btn"
+              :class="buildConfig.sourceType === 'git' ? 'btn-primary' : 'btn-outline-primary'"
+              @click="buildConfig.sourceType = 'git'"
+            >
+              <i class="fas fa-code-branch"></i> Git 数据源
+            </button>
+          </div>
+        </div>
+
+        <!-- 文件上传 -->
+        <div v-if="buildConfig.sourceType === 'file'" class="mb-3">
+          <label class="form-label">
+            选择文件 <span class="text-danger">*</span>
+          </label>
+          <input 
+            type="file" 
+            class="form-control" 
+            :accept="fileAccept"
+            @change="handleFileChange"
+            required
+          />
+          <div v-if="buildConfig.file" class="alert alert-success mt-2 py-2 px-3 small">
+            <i class="fas fa-check-circle"></i> 已选择: <strong>{{ buildConfig.file.name }}</strong> 
+            ({{ formatFileSize(buildConfig.file.size) }})
+          </div>
+          <div class="form-text small text-muted">
+            <i class="fas fa-info-circle"></i> 支持 .jar 文件或 .zip、.tar、.tar.gz 压缩包
+          </div>
+        </div>
+
+        <!-- Git 数据源 -->
+        <div v-if="buildConfig.sourceType === 'git'" class="mb-3">
+          <label class="form-label">
+            Git 数据源 <span class="text-danger">*</span>
+          </label>
+          <select 
+            v-model="buildConfig.sourceId" 
+            class="form-select"
+            @change="onSourceSelected"
+            required
+          >
+            <option value="">-- 请选择数据源 --</option>
+            <option v-for="source in gitSources" :key="source.source_id" :value="source.source_id">
+              {{ source.name }} ({{ formatGitUrl(source.git_url) }})
+            </option>
+          </select>
+          <div v-if="buildConfig.sourceId && repoVerified" class="alert alert-success alert-sm mt-2 mb-0">
+            <i class="fas fa-check-circle"></i> 
+            数据源已选择：{{ branchesAndTags.branches.length }} 个分支、{{ branchesAndTags.tags.length }} 个标签
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-end mt-4">
+          <button 
+            class="btn btn-primary" 
+            @click="nextStep"
+            :disabled="!canProceedStep1"
+          >
+            下一步 <i class="fas fa-arrow-right ms-1"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 步骤2: 确认分支（仅Git数据源） -->
+      <div v-if="currentStep === 2" class="step-panel">
+        <h5 class="mb-3">
+          <i class="fas fa-code-branch text-primary"></i> 步骤 2：确认分支
+        </h5>
+        
+        <div v-if="buildConfig.sourceType === 'file'" class="alert alert-info">
+          <i class="fas fa-info-circle"></i> 文件上传模式无需选择分支，将直接进入下一步。
+        </div>
+
+        <div v-else class="mb-3">
+          <label class="form-label">分支/标签 <span class="text-danger">*</span></label>
+          <select 
+            v-if="repoVerified"
+            v-model="buildConfig.branch" 
+            class="form-select"
+            @change="onBranchChanged"
+            required
+          >
+            <option value="">使用默认分支 ({{ branchesAndTags.default_branch || 'main' }})</option>
+            <optgroup v-if="branchesAndTags.branches.length > 0" label="分支">
+              <option v-for="branch in branchesAndTags.branches" :key="branch" :value="branch">
+                {{ branch }}
+              </option>
+            </optgroup>
+            <optgroup v-if="branchesAndTags.tags.length > 0" label="标签">
+              <option v-for="tag in branchesAndTags.tags" :key="tag" :value="tag">
+                {{ tag }}
+              </option>
+            </optgroup>
+          </select>
+          <input 
+            v-else
+            type="text" 
+            class="form-control" 
+            placeholder="请先选择数据源"
+            disabled
+          />
+          <div class="form-text small text-muted">
+            <i class="fas fa-info-circle"></i> 选择要构建的分支或标签
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between mt-4">
+          <button class="btn btn-outline-secondary" @click="prevStep">
+            <i class="fas fa-arrow-left me-1"></i> 上一步
+          </button>
+          <button 
+            class="btn btn-primary" 
+            @click="nextStep"
+            :disabled="buildConfig.sourceType === 'git' && !buildConfig.branch && !branchesAndTags.default_branch"
+          >
+            下一步 <i class="fas fa-arrow-right ms-1"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 步骤3: 选择模板 -->
+      <div v-if="currentStep === 3" class="step-panel">
+        <h5 class="mb-3">
+          <i class="fas fa-layer-group text-primary"></i> 步骤 3：选择模板
+        </h5>
+        
+        <div class="mb-3">
+          <label class="form-label">
+            项目类型 <span class="text-danger">*</span>
+          </label>
+          <div class="btn-group w-100" role="group">
+            <button
+              v-for="type in projectTypes"
+              :key="type.value"
+              type="button"
+              class="btn"
+              :class="buildConfig.projectType === type.value ? 'btn-primary' : 'btn-outline-primary'"
+              @click="changeProjectType(type.value)"
+            >
+              <i :class="getProjectTypeIcon(type.value)"></i>
+              {{ type.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">模板</label>
+          <div class="input-group input-group-sm mb-1">
+            <span class="input-group-text"><i class="fas fa-search"></i></span>
+            <input
+              v-model="templateSearch"
+              type="text"
+              class="form-control"
+              placeholder="搜索模板..."
+              :disabled="buildConfig.useProjectDockerfile"
+            />
+          </div>
+          <select 
+            v-model="buildConfig.template" 
+            class="form-select" 
+            @change="loadTemplateParams"
+            :disabled="buildConfig.useProjectDockerfile"
+          >
+            <option value="">-- 请选择模板 --</option>
+            <option v-for="tpl in filteredTemplates" :key="tpl.name" :value="tpl.name">
+              {{ tpl.name }} ({{ getProjectTypeLabel(tpl.project_type) }}{{ tpl.type === 'builtin' ? ' · 内置' : '' }})
+            </option>
+          </select>
+          <div class="form-text small text-muted">
+            <i class="fas fa-info-circle"></i> 
+            <span v-if="buildConfig.useProjectDockerfile">
+              将使用项目中的 Dockerfile，模板选项已禁用
+            </span>
+            <span v-else>
+              已按项目类型过滤，可在模板管理中维护
+            </span>
+          </div>
+        </div>
+
+        <!-- Dockerfile 选择选项（仅Git数据源且非文件上传） -->
+        <div v-if="buildConfig.sourceType === 'git'" class="mb-3">
+          <div class="form-check">
+            <input 
+              v-model="buildConfig.useProjectDockerfile" 
+              type="checkbox" 
+              class="form-check-input" 
+              id="useProjectDockerfile"
+              @change="onUseProjectDockerfileChange"
+            />
+            <label class="form-check-label" for="useProjectDockerfile">
+              <i class="fas fa-file-code"></i> 优先使用项目中的 Dockerfile
+            </label>
+          </div>
+          <div v-if="buildConfig.useProjectDockerfile" class="mt-2">
+            <label class="form-label">Dockerfile 文件名</label>
+            <select 
+              v-model="buildConfig.dockerfileName" 
+              class="form-select form-select-sm"
+            >
+              <option value="Dockerfile">Dockerfile（默认）</option>
+              <option v-for="dockerfile in availableDockerfiles" :key="dockerfile" :value="dockerfile">
+                {{ dockerfile }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between mt-4">
+          <button class="btn btn-outline-secondary" @click="prevStep">
+            <i class="fas fa-arrow-left me-1"></i> 上一步
+          </button>
+          <button 
+            class="btn btn-primary" 
+            @click="nextStep"
+            :disabled="!buildConfig.projectType || (!buildConfig.template && !buildConfig.useProjectDockerfile)"
+          >
+            下一步 <i class="fas fa-arrow-right ms-1"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 步骤4: 选择服务（单应用/多服务） -->
+      <div v-if="currentStep === 4" class="step-panel">
+        <h5 class="mb-3">
+          <i class="fas fa-server text-primary"></i> 步骤 4：选择服务
+        </h5>
+        
+        <div v-if="parsingServices" class="text-center py-4">
+          <span class="spinner-border spinner-border-sm me-2"></span>
+          正在分析模板...
+        </div>
+
+        <div v-else-if="servicesError" class="alert alert-warning">
+          <i class="fas fa-exclamation-triangle"></i> {{ servicesError }}
+        </div>
+
+        <div v-else-if="services.length === 0" class="alert alert-info">
+          <i class="fas fa-info-circle"></i> 当前模板为单应用模式，无需选择服务。
+        </div>
+
+        <!-- 多服务模式 -->
+        <div v-else class="mb-3">
+          <!-- 推送模式选择（仅模板模式且非文件上传，项目 Dockerfile 总是多阶段推送） -->
+          <div v-if="!buildConfig.useProjectDockerfile && buildConfig.sourceType === 'git'" class="mb-3">
+            <label class="form-label">推送模式 <span class="text-danger">*</span></label>
+            <div class="btn-group w-100" role="group">
+              <button
+                type="button"
+                class="btn"
+                :class="buildConfig.pushMode === 'single' ? 'btn-primary' : 'btn-outline-primary'"
+                @click="onPushModeChange('single')"
+              >
+                <i class="fas fa-box"></i> 单服务推送
+              </button>
+              <button
+                type="button"
+                class="btn"
+                :class="buildConfig.pushMode === 'multi' ? 'btn-primary' : 'btn-outline-primary'"
+                @click="onPushModeChange('multi')"
+              >
+                <i class="fas fa-boxes"></i> 多服务推送
+              </button>
+            </div>
+            <div class="form-text small text-muted">
+              <i class="fas fa-info-circle"></i> 
+              <span v-if="buildConfig.pushMode === 'single'">
+                单服务推送：只能选择一个服务，定义镜像名和标签
+              </span>
+              <span v-else>
+                多服务推送：可以批量设置推送、镜像名和标签
+              </span>
+            </div>
+            <div v-if="buildConfig.pushMode === 'single'" class="alert alert-info alert-sm mt-2 mb-0">
+              <i class="fas fa-info-circle"></i> 
+              单服务推送模式下，请选择一个服务并定义镜像名和标签
+            </div>
+          </div>
+
+          <!-- 单服务推送模式 -->
+          <div v-if="buildConfig.pushMode === 'single' && !buildConfig.useProjectDockerfile && buildConfig.sourceType === 'git'" class="mb-3">
+            <div class="card border-primary">
+              <div class="card-header bg-primary bg-opacity-10">
+                <h6 class="mb-0">
+                  <i class="fas fa-box text-primary"></i> 单服务推送模式
+                </h6>
+              </div>
+              <div class="card-body">
+                <div class="mb-3">
+                  <label class="form-label">选择服务 <span class="text-danger">*</span></label>
+                  <div class="list-group">
+                    <label 
+                      v-for="service in services" 
+                      :key="service.name"
+                      class="list-group-item list-group-item-action"
+                      :class="{ active: buildConfig.selectedService === service.name }"
+                      style="cursor: pointer;"
+                    >
+                      <div class="d-flex align-items-center">
+                        <input 
+                          type="radio" 
+                          :value="service.name"
+                          v-model="buildConfig.selectedService"
+                          class="form-check-input me-3"
+                          @change="onSingleServiceSelected"
+                        />
+                        <div class="flex-grow-1">
+                          <div class="fw-bold"><code>{{ service.name }}</code></div>
+                          <small class="text-muted">
+                            <span v-if="service.port">端口: {{ service.port }}</span>
+                            <span v-if="service.port && service.user"> | </span>
+                            <span v-if="service.user">用户: {{ service.user }}</span>
+                          </small>
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+                
+                <div v-if="buildConfig.selectedService" class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">
+                      镜像前缀 <span class="text-danger">*</span>
+                    </label>
+                    <select 
+                      v-model="buildConfig.imagePrefix" 
+                      class="form-select mb-2"
+                      @change="onImagePrefixChange"
+                    >
+                      <option value="">-- 选择仓库或手动输入 --</option>
+                      <option v-for="reg in registries" :key="reg.name" :value="reg.registry_prefix || reg.registry">
+                        {{ reg.name }} ({{ reg.registry_prefix || reg.registry }})
+                      </option>
+                    </select>
+                    <input 
+                      v-if="!isRegistrySelected(buildConfig.imagePrefix)"
+                      v-model="buildConfig.imagePrefix" 
+                      type="text" 
+                      class="form-control mb-2" 
+                      placeholder="myapp/demo"
+                      required
+                    />
+                    <label class="form-label">
+                      完整镜像名 <small class="text-muted">(可编辑)</small>
+                    </label>
+                    <input 
+                      :value="getSingleServiceImageNameDisplay()"
+                      @input="onSingleServiceImageNameInput($event)"
+                      type="text" 
+                      class="form-control" 
+                    />
+                    <div class="form-text small text-muted">
+                      <i class="fas fa-info-circle"></i> 
+                      格式: 前缀/服务名 或 完整镜像名
+                      <button 
+                        v-if="buildConfig.customImageName"
+                        type="button"
+                        class="btn btn-link btn-sm p-0 ms-2"
+                        style="font-size: 0.75rem; vertical-align: baseline;"
+                        @click="buildConfig.customImageName = ''"
+                        title="恢复默认"
+                      >
+                        <i class="fas fa-undo"></i> 恢复默认
+                      </button>
+                    </div>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">标签</label>
+                    <input v-model="buildConfig.tag" type="text" class="form-control" placeholder="latest" />
+                  </div>
+                </div>
+                
+                <div v-if="buildConfig.selectedService" class="mt-3">
+                  <div class="form-check">
+                    <input 
+                      v-model="buildConfig.push" 
+                      type="checkbox" 
+                      class="form-check-input" 
+                      id="pushImageSingle"
+                    />
+                    <label class="form-check-label" for="pushImageSingle">
+                      <i class="fas fa-cloud-upload-alt"></i> 构建后推送到仓库
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 多服务推送模式 -->
+          <div v-else class="mb-3">
+            <div class="card border-info">
+              <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                <div>
+                  <i class="fas fa-server"></i> 服务选择
+                  <span class="badge bg-info ms-2">{{ services.length }} 个服务</span>
+                  <small class="text-muted ms-2">
+                    <i v-if="buildConfig.useProjectDockerfile" class="fas fa-file-code"></i>
+                    <i v-else class="fas fa-layer-group"></i>
+                    {{ buildConfig.useProjectDockerfile ? '来自项目 Dockerfile' : '来自模板' }}
+                  </small>
+                </div>
+                <div>
+                  <button 
+                    type="button"
+                    class="btn btn-sm btn-outline-info me-2"
+                    @click="selectAllServices"
+                  >
+                    <i class="fas fa-check-square"></i> 全选
+                  </button>
+                  <button 
+                    type="button"
+                    class="btn btn-sm btn-outline-info"
+                    @click="deselectAllServices"
+                  >
+                    <i class="fas fa-square"></i> 全不选
+                  </button>
+                </div>
+              </div>
+              <div class="card-body">
+                <!-- 批量设置 -->
+                <div v-if="selectedServices.length > 0" class="mb-3 p-3 bg-light rounded">
+                  <h6 class="mb-3">
+                    <i class="fas fa-magic"></i> 批量设置（应用于已选中的 {{ selectedServices.length }} 个服务）
+                  </h6>
+                  <div class="row g-3">
+                    <div class="col-md-4">
+                      <label class="form-label">批量设置镜像前缀</label>
+                      <select 
+                        v-model="batchImagePrefix" 
+                        class="form-select form-select-sm mb-2"
+                        @change="onBatchPrefixChange"
+                      >
+                        <option value="">-- 选择仓库或手动输入 --</option>
+                        <option v-for="reg in registries" :key="reg.name" :value="reg.registry_prefix || reg.registry">
+                          {{ reg.name }} ({{ reg.registry_prefix || reg.registry }})
+                        </option>
+                      </select>
+                      <div class="input-group input-group-sm">
+                        <input 
+                          v-if="!isRegistrySelected(batchImagePrefix)"
+                          v-model="batchImagePrefix" 
+                          type="text" 
+                          class="form-control" 
+                          placeholder="myapp/demo"
+                          @input="onBatchPrefixInput"
+                        />
+                        <button 
+                          class="btn btn-outline-secondary" 
+                          type="button"
+                          @click="batchSetImagePrefix"
+                          :disabled="!batchImagePrefix.trim()"
+                        >
+                          <i class="fas fa-check"></i> 应用
+                        </button>
+                      </div>
+                      <small class="text-muted d-block mt-1">
+                        <i class="fas fa-info-circle"></i> 前缀会自动与服务名称拼接，如：前缀/service-name
+                      </small>
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">批量设置标签</label>
+                      <div class="input-group input-group-sm">
+                        <input 
+                          v-model="batchTag" 
+                          type="text" 
+                          class="form-control" 
+                          placeholder="latest"
+                        />
+                        <button 
+                          class="btn btn-outline-secondary" 
+                          type="button"
+                          @click="batchSetTag"
+                        >
+                          <i class="fas fa-check"></i> 应用
+                        </button>
+                      </div>
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">批量设置推送</label>
+                      <div class="btn-group w-100" role="group">
+                        <button 
+                          class="btn btn-sm btn-outline-success" 
+                          type="button"
+                          @click="batchSetPush(true)"
+                        >
+                          <i class="fas fa-check"></i> 全部推送
+                        </button>
+                        <button 
+                          class="btn btn-sm btn-outline-danger" 
+                          type="button"
+                          @click="batchSetPush(false)"
+                        >
+                          <i class="fas fa-times"></i> 全部不推送
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover mb-0">
+                    <thead>
+                      <tr>
+                        <th style="width: 40px;">
+                          <input 
+                            type="checkbox" 
+                            :checked="selectedServices.length === services.length && services.length > 0"
+                            @change="toggleAllServices"
+                            class="form-check-input"
+                          />
+                        </th>
+                        <th>服务名称</th>
+                        <th v-if="buildConfig.sourceType === 'git'">镜像名</th>
+                        <th v-if="buildConfig.sourceType === 'git'">标签</th>
+                        <th v-if="buildConfig.sourceType === 'git'">推送仓库</th>
+                        <th>端口</th>
+                        <th>用户</th>
+                        <th>构建</th>
+                        <th v-if="buildConfig.sourceType === 'git'">推送</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="service in services" :key="service.name">
+                        <td>
+                          <input 
+                            type="checkbox" 
+                            :value="service.name"
+                            v-model="selectedServices"
+                            class="form-check-input"
+                            @change="onServiceSelectionChange(service.name)"
+                          />
+                        </td>
+                        <td><code>{{ service.name }}</code></td>
+                        <td v-if="buildConfig.sourceType === 'git'">
+                          <input 
+                            type="text" 
+                            :value="getServiceImageNameDisplay(service.name)"
+                            @input="onServiceImageNameInput(service.name, $event)"
+                            :disabled="!selectedServices.includes(service.name)"
+                            class="form-control form-control-sm"
+                            @blur="onServiceImageNameBlur(service.name)"
+                          />
+                          <small class="text-muted d-block mt-1">
+                            <i class="fas fa-info-circle"></i> 
+                            格式: 前缀/服务名 或 完整镜像名
+                            <button 
+                              v-if="getServiceConfig(service.name).customImageName"
+                              type="button"
+                              class="btn btn-link btn-sm p-0 ms-2"
+                              style="font-size: 0.75rem; vertical-align: baseline;"
+                              @click="resetServiceImageName(service.name)"
+                              title="恢复默认"
+                            >
+                              <i class="fas fa-undo"></i> 恢复默认
+                            </button>
+                          </small>
+                        </td>
+                        <td v-if="buildConfig.sourceType === 'git'">
+                          <input 
+                            type="text" 
+                            v-model="getServiceConfig(service.name).tag"
+                            :disabled="!selectedServices.includes(service.name)"
+                            class="form-control form-control-sm"
+                            :placeholder="buildConfig.tag || 'latest'"
+                            @blur="normalizeServiceConfig(service.name)"
+                          />
+                        </td>
+                        <td v-if="buildConfig.sourceType === 'git'">
+                          <select 
+                            v-model="getServiceConfig(service.name).registry"
+                            :disabled="!selectedServices.includes(service.name) || !getServiceConfig(service.name).push"
+                            class="form-select form-select-sm"
+                          >
+                            <option value="">使用默认仓库</option>
+                            <option v-for="reg in registries" :key="reg.name" :value="reg.name">
+                              {{ reg.name }}
+                            </option>
+                          </select>
+                        </td>
+                        <td>
+                          <span v-if="service.port" class="badge bg-secondary">{{ service.port }}</span>
+                          <span v-else class="text-muted">-</span>
+                        </td>
+                        <td>
+                          <span v-if="service.user" class="badge bg-secondary">{{ service.user }}</span>
+                          <span v-else class="text-muted">-</span>
+                        </td>
+                        <td>
+                          <span v-if="selectedServices.includes(service.name)" class="badge bg-success">
+                            <i class="fas fa-check"></i> 是
+                          </span>
+                          <span v-else class="badge bg-secondary">
+                            <i class="fas fa-times"></i> 否
+                          </span>
+                        </td>
+                        <td v-if="buildConfig.sourceType === 'git'">
+                          <input 
+                            type="checkbox" 
+                            v-model="getServiceConfig(service.name).push"
+                            :disabled="!selectedServices.includes(service.name)"
+                            class="form-check-input"
+                            :title="selectedServices.includes(service.name) ? '选择是否推送此服务镜像' : '请先选择构建此服务'"
+                          />
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-if="selectedServices.length > 0" class="mt-3 text-muted small">
+                  <i class="fas fa-info-circle"></i> 
+                  已选择 {{ selectedServices.length }} 个服务进行构建
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 镜像配置（单应用模式或文件上传模式，排除单服务推送模式） -->
+        <div v-if="(services.length === 0 || buildConfig.sourceType === 'file') && !(buildConfig.pushMode === 'single' && !buildConfig.useProjectDockerfile && buildConfig.sourceType === 'git')" class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label">
+              镜像名称 <span class="text-danger">*</span>
+            </label>
+            <input 
+              v-model="buildConfig.imageName" 
+              type="text" 
+              class="form-control" 
+              placeholder="myapp/demo"
+              required
+            />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">标签</label>
+            <input v-model="buildConfig.tag" type="text" class="form-control" placeholder="latest" />
+          </div>
+        </div>
+
+        <!-- 推送选项（单应用模式或文件上传模式，排除单服务推送模式） -->
+        <div v-if="(services.length === 0 || buildConfig.sourceType === 'file') && !(buildConfig.pushMode === 'single' && !buildConfig.useProjectDockerfile && buildConfig.sourceType === 'git')" class="mb-3">
+          <div class="form-check">
+            <input 
+              v-model="buildConfig.push" 
+              type="checkbox" 
+              class="form-check-input" 
+              id="pushImage"
+            />
+            <label class="form-check-label" for="pushImage">
+              <i class="fas fa-cloud-upload-alt"></i> 构建后推送到仓库
+            </label>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between mt-4">
+          <button class="btn btn-outline-secondary" @click="prevStep">
+            <i class="fas fa-arrow-left me-1"></i> 上一步
+          </button>
+          <button 
+            class="btn btn-primary" 
+            @click="nextStep"
+            :disabled="!buildConfig.imageName || (services.length > 0 && buildConfig.pushMode === 'single' && !buildConfig.selectedService) || (services.length > 0 && buildConfig.pushMode === 'multi' && selectedServices.length === 0)"
+          >
+            下一步 <i class="fas fa-arrow-right ms-1"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 步骤5: 开始构建 -->
+      <div v-if="currentStep === 5" class="step-panel">
+        <h5 class="mb-3">
+          <i class="fas fa-play-circle text-primary"></i> 步骤 5：开始构建
+        </h5>
+        
+        <!-- 构建配置摘要 -->
+        <div class="card mb-3">
+          <div class="card-header bg-light">
+            <h6 class="mb-0"><i class="fas fa-list-check"></i> 构建配置摘要</h6>
+          </div>
+          <div class="card-body">
+            <dl class="row mb-0">
+              <dt class="col-sm-3">数据源类型:</dt>
+              <dd class="col-sm-9">{{ buildConfig.sourceType === 'file' ? '文件上传' : 'Git 数据源' }}</dd>
+              
+              <dt class="col-sm-3" v-if="buildConfig.sourceType === 'file'">文件名:</dt>
+              <dd class="col-sm-9" v-if="buildConfig.sourceType === 'file'">{{ buildConfig.file?.name }}</dd>
+              
+              <dt class="col-sm-3" v-if="buildConfig.sourceType === 'git'">数据源:</dt>
+              <dd class="col-sm-9" v-if="buildConfig.sourceType === 'git'">
+                {{ getSourceName(buildConfig.sourceId) }}
+              </dd>
+              
+              <dt class="col-sm-3" v-if="buildConfig.sourceType === 'git'">分支:</dt>
+              <dd class="col-sm-9" v-if="buildConfig.sourceType === 'git'">
+                {{ buildConfig.branch || branchesAndTags.default_branch || '默认分支' }}
+              </dd>
+              
+              <dt class="col-sm-3">项目类型:</dt>
+              <dd class="col-sm-9">{{ getProjectTypeLabel(buildConfig.projectType) }}</dd>
+              
+              <dt class="col-sm-3">模板:</dt>
+              <dd class="col-sm-9">
+                {{ buildConfig.useProjectDockerfile ? '项目 Dockerfile' : (buildConfig.template || '未选择') }}
+              </dd>
+              
+              <dt class="col-sm-3" v-if="services.length > 0">服务:</dt>
+              <dd class="col-sm-9" v-if="services.length > 0">
+                <span v-if="buildConfig.pushMode === 'single' && buildConfig.selectedService">
+                  {{ buildConfig.selectedService }}（单服务推送）
+                </span>
+                <span v-else-if="selectedServices.length > 0">
+                  {{ selectedServices.join(', ') }}（{{ selectedServices.length }}个服务，多服务推送）
+                </span>
+                <span v-else>
+                  未选择
+                </span>
+              </dd>
+              
+              <dt class="col-sm-3">镜像:</dt>
+              <dd class="col-sm-9">{{ buildConfig.imageName }}:{{ buildConfig.tag || 'latest' }}</dd>
+              
+              <dt class="col-sm-3">推送:</dt>
+              <dd class="col-sm-9">{{ buildConfig.push ? '是' : '否' }}</dd>
+            </dl>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between mt-4">
+          <button class="btn btn-outline-secondary" @click="prevStep" :disabled="building">
+            <i class="fas fa-arrow-left me-1"></i> 上一步
+          </button>
+          <button 
+            class="btn btn-success btn-lg" 
+            @click="startBuild"
+            :disabled="building"
+          >
+            <i class="fas fa-play"></i> 
+            {{ building ? '构建中...' : '开始构建' }}
+            <span v-if="building" class="spinner-border spinner-border-sm ms-2"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import axios from 'axios'
+import { computed, onMounted, ref, watch } from 'vue'
+
+const currentStep = ref(1)
+const building = ref(false)
+
+// 构建配置
+const buildConfig = ref({
+  sourceType: 'git', // 'file' 或 'git'
+  file: null,
+  sourceId: '',
+  branch: '',
+  projectType: 'jar',
+  template: '',
+  useProjectDockerfile: true,
+  dockerfileName: 'Dockerfile',
+  imageName: 'myapp/demo',
+  tag: 'latest',
+  push: false,
+  pushMode: 'multi',  // 推送模式：'single' 单一推送，'multi' 多阶段推送
+  imagePrefix: '',  // 镜像前缀（可以选择仓库或手动输入）
+  customImageName: '',  // 自定义完整镜像名（单服务推送模式，如果为空则使用拼接结果）
+  templateParams: {},
+  selectedServices: [],
+  selectedService: '',  // 单服务推送模式选中的服务（单选）
+  servicePushConfig: {}
+})
+
+// 数据源相关
+const gitSources = ref([])
+const repoVerified = ref(false)
+const branchesAndTags = ref({
+  branches: [],
+  tags: [],
+  default_branch: null
+})
+const availableDockerfiles = ref([])
+
+// 模板相关
+const templates = ref([])
+const templateSearch = ref('')
+const templateParams = ref([])
+const services = ref([])
+const selectedServices = ref([])
+const servicePushConfig = ref({})  // 每个服务的推送配置
+const parsingServices = ref(false)
+const servicesError = ref('')
+const registries = ref([])  // 仓库列表
+const batchImagePrefix = ref('')  // 批量设置镜像前缀
+const batchTag = ref('')  // 批量设置标签
+
+const projectTypes = computed(() => {
+  const types = new Set()
+  templates.value.forEach(t => types.add(t.project_type))
+  
+  const labelMap = {
+    'jar': 'Java 应用（JAR）',
+    'nodejs': 'Node.js 应用',
+    'python': 'Python 应用',
+    'go': 'Go 应用',
+    'rust': 'Rust 应用'
+  }
+  
+  const orderMap = {
+    'jar': 1,
+    'nodejs': 2,
+    'python': 3,
+    'rust': 4,
+    'go': 5
+  }
+  
+  const result = []
+  types.forEach(type => {
+    result.push({
+      value: type,
+      label: labelMap[type] || `${type.charAt(0).toUpperCase()}${type.slice(1)} 应用`,
+      order: orderMap[type] || 999
+    })
+  })
+  
+  if (result.length === 0) {
+    return [
+      { value: 'jar', label: 'Java 应用（JAR）', order: 1 },
+      { value: 'nodejs', label: 'Node.js 应用', order: 2 },
+      { value: 'python', label: 'Python 应用', order: 3 },
+      { value: 'rust', label: 'Rust 应用', order: 4 },
+      { value: 'go', label: 'Go 应用', order: 5 }
+    ]
+  }
+  
+  return result.sort((a, b) => a.order - b.order)
+})
+
+const filteredTemplates = computed(() => {
+  let list = templates.value.filter(t => t.project_type === buildConfig.value.projectType)
+  if (templateSearch.value) {
+    const kw = templateSearch.value.toLowerCase()
+    list = list.filter(t => t.name.toLowerCase().includes(kw))
+  }
+  return list
+})
+
+const fileAccept = computed(() => {
+  if (buildConfig.value.projectType === 'jar') {
+    return '.jar,.zip,.tar,.tar.gz,.tgz'
+  }
+  return '.zip,.tar,.tar.gz,.tgz'
+})
+
+const canProceedStep1 = computed(() => {
+  if (buildConfig.value.sourceType === 'file') {
+    return buildConfig.value.file !== null
+  } else {
+    return buildConfig.value.sourceId !== '' && repoVerified.value
+  }
+})
+
+// 步骤导航
+function nextStep() {
+  if (currentStep.value < 5) {
+    currentStep.value++
+    
+    // 如果是文件上传模式，跳过步骤2（分支确认）
+    if (currentStep.value === 2 && buildConfig.value.sourceType === 'file') {
+      currentStep.value = 3
+    }
+    
+    // 步骤3完成后，自动分析模板
+    if (currentStep.value === 4) {
+      analyzeTemplate()
+    }
+  }
+}
+
+function prevStep() {
+  if (currentStep.value > 1) {
+    currentStep.value--
+  }
+}
+
+// 文件处理
+function handleFileChange(e) {
+  buildConfig.value.file = e.target.files[0]
+  if (buildConfig.value.file) {
+    // 自动建议镜像名
+    const fileName = buildConfig.value.file.name.replace(/\.[^/.]+$/, '')
+    buildConfig.value.imageName = fileName.toLowerCase().replace(/[^a-z0-9]/g, '-')
+    // 文件上传模式不支持项目 Dockerfile
+    buildConfig.value.useProjectDockerfile = false
+  }
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+}
+
+// Git 数据源处理
+async function loadGitSources() {
+  try {
+    const res = await axios.get('/api/git-sources')
+    gitSources.value = res.data.sources || []
+  } catch (error) {
+    console.error('加载数据源列表失败:', error)
+  }
+}
+
+async function onSourceSelected() {
+  if (!buildConfig.value.sourceId) {
+    repoVerified.value = false
+    branchesAndTags.value = { branches: [], tags: [], default_branch: null }
+    buildConfig.value.branch = ''
+    return
+  }
+  
+  const source = gitSources.value.find(s => s.source_id === buildConfig.value.sourceId)
+  if (source) {
+    branchesAndTags.value = {
+      branches: source.branches || [],
+      tags: source.tags || [],
+      default_branch: source.default_branch || null
+    }
+    repoVerified.value = true
+    buildConfig.value.branch = source.default_branch || ''
+  }
+}
+
+function onBranchChanged() {
+  // 分支变化时的处理
+}
+
+function formatGitUrl(url) {
+  if (!url) return ''
+  return url.replace('https://', '').replace('http://', '').replace('.git', '')
+}
+
+function getSourceName(sourceId) {
+  const source = gitSources.value.find(s => s.source_id === sourceId)
+  return source ? source.name : ''
+}
+
+// 镜像前缀选择变化
+function onImagePrefixChange() {
+  // 选择仓库时自动更新
+  // 如果单服务推送模式且没有自定义镜像名，自动更新默认值
+  if (buildConfig.value.pushMode === 'single' && buildConfig.value.selectedService) {
+    if (!buildConfig.value.customImageName || !buildConfig.value.customImageName.trim()) {
+      buildConfig.value.customImageName = ''
+    }
+  }
+  // 多服务推送模式：更新所有已选服务的默认值
+  if (buildConfig.value.pushMode === 'multi') {
+    selectedServices.value.forEach(serviceName => {
+      const config = getServiceConfig(serviceName)
+      if (!config.customImageName || !config.customImageName.trim()) {
+        config.imagePrefix = buildConfig.value.imagePrefix || getDefaultImagePrefix()
+      }
+    })
+  }
+}
+
+// 模板处理
+async function loadTemplates() {
+  try {
+    const res = await axios.get('/api/templates')
+    templates.value = res.data.items || []
+    if (filteredTemplates.value.length > 0) {
+      buildConfig.value.template = filteredTemplates.value[0].name
+    }
+  } catch (error) {
+    console.error('加载模板失败:', error)
+  }
+}
+
+function changeProjectType(type) {
+  buildConfig.value.projectType = type
+  templateSearch.value = ''
+  if (filteredTemplates.value.length > 0) {
+    buildConfig.value.template = filteredTemplates.value[0].name
+    loadTemplateParams()
+  }
+}
+
+function getProjectTypeIcon(type) {
+  const iconMap = {
+    'jar': 'fab fa-java',
+    'nodejs': 'fab fa-node-js',
+    'python': 'fab fa-python',
+    'go': 'fas fa-code',
+    'rust': 'fas fa-cog'
+  }
+  return iconMap[type] || 'fas fa-cube'
+}
+
+function getProjectTypeLabel(type) {
+  const labelMap = {
+    'jar': 'Java',
+    'nodejs': 'Node.js',
+    'python': 'Python',
+    'go': 'Go',
+    'rust': 'Rust'
+  }
+  return labelMap[type] || type
+}
+
+async function loadTemplateParams() {
+  templateParams.value = []
+  buildConfig.value.templateParams = {}
+  
+  if (buildConfig.value.useProjectDockerfile) {
+    return
+  }
+  
+  if (!buildConfig.value.template || !buildConfig.value.projectType) {
+    return
+  }
+  
+  try {
+    const res = await axios.get('/api/template-params', {
+      params: {
+        template: buildConfig.value.template,
+        project_type: buildConfig.value.projectType
+      }
+    })
+    
+    templateParams.value = res.data.params || []
+    templateParams.value.forEach(param => {
+      if (param.default) {
+        buildConfig.value.templateParams[param.name] = param.default
+      }
+    })
+  } catch (error) {
+    console.error('加载模板参数失败:', error)
+  }
+}
+
+function onUseProjectDockerfileChange() {
+  if (!buildConfig.value.useProjectDockerfile) {
+    loadTemplateParams()
+  } else {
+    templateParams.value = []
+    buildConfig.value.templateParams = {}
+  }
+}
+
+// 分析模板，判断单应用/多服务
+async function analyzeTemplate() {
+  parsingServices.value = true
+  servicesError.value = ''
+  services.value = []
+  selectedServices.value = []
+  buildConfig.value.selectedService = ''
+  servicePushConfig.value = {}
+  
+  try {
+    // 如果是文件上传，不需要分析服务，默认为单服务推送
+    if (buildConfig.value.sourceType === 'file') {
+      services.value = []
+      selectedServices.value = []
+      buildConfig.value.selectedService = ''
+      servicePushConfig.value = {}
+      buildConfig.value.pushMode = 'single'
+      parsingServices.value = false
+      return
+    }
+    
+    // 如果使用项目 Dockerfile，解析项目 Dockerfile
+    if (buildConfig.value.useProjectDockerfile) {
+      await parseDockerfileServices()
+    } else {
+      // 解析模板服务
+      await parseTemplateServices()
+    }
+  } catch (error) {
+    console.error('分析模板失败:', error)
+    servicesError.value = error.response?.data?.detail || '分析模板失败'
+  } finally {
+    parsingServices.value = false
+  }
+}
+
+async function parseDockerfileServices() {
+  if (!repoVerified.value || !buildConfig.value.sourceId) {
+    services.value = []
+    selectedServices.value = []
+    return
+  }
+  
+  try {
+    const source = gitSources.value.find(s => s.source_id === buildConfig.value.sourceId)
+    if (!source) return
+    
+    const payload = {
+      git_url: source.git_url,
+      branch: buildConfig.value.branch || undefined,
+      dockerfile_name: buildConfig.value.dockerfileName || 'Dockerfile',
+      source_id: buildConfig.value.sourceId
+    }
+    
+    const res = await axios.post('/api/parse-dockerfile-services', payload)
+    
+    if (res.data.services && res.data.services.length > 0) {
+      services.value = res.data.services
+      // 项目 Dockerfile 模式总是多服务推送
+      selectedServices.value = services.value.map(s => s.name)
+      buildConfig.value.selectedService = ''
+      // 初始化推送配置（默认都不推送）
+      servicePushConfig.value = {}
+      services.value.forEach(s => {
+        const config = getServiceConfig(s.name)
+        config.push = false
+        config.imagePrefix = getDefaultImagePrefix()
+        config.tag = buildConfig.value.tag.trim() || 'latest'
+        config.registry = ''
+      })
+    } else {
+      services.value = []
+      selectedServices.value = []
+      buildConfig.value.selectedService = ''
+      servicePushConfig.value = {}
+    }
+  } catch (error) {
+    console.error('解析 Dockerfile 服务失败:', error)
+    servicesError.value = error.response?.data?.detail || '解析 Dockerfile 失败'
+    services.value = []
+    selectedServices.value = []
+  }
+}
+
+async function parseTemplateServices() {
+  if (!buildConfig.value.template || !buildConfig.value.projectType) {
+    services.value = []
+    selectedServices.value = []
+    return
+  }
+  
+  try {
+    const res = await axios.get('/api/template-params', {
+      params: {
+        template: buildConfig.value.template,
+        project_type: buildConfig.value.projectType
+      }
+    })
+    
+    const templateServices = res.data.services || []
+    if (templateServices.length > 0) {
+      services.value = templateServices
+      // 根据推送模式初始化选择
+      if (buildConfig.value.pushMode === 'single') {
+        selectedServices.value = []
+        buildConfig.value.selectedService = ''
+      } else {
+        selectedServices.value = services.value.map(s => s.name)
+      }
+      // 初始化推送配置（默认都不推送）
+      servicePushConfig.value = {}
+      services.value.forEach(s => {
+        const config = getServiceConfig(s.name)
+        config.push = false
+        config.imagePrefix = getDefaultImagePrefix()
+        config.tag = buildConfig.value.tag.trim() || 'latest'
+        config.registry = ''
+      })
+    } else {
+      services.value = []
+      selectedServices.value = []
+      buildConfig.value.selectedService = ''
+      servicePushConfig.value = {}
+    }
+  } catch (error) {
+    console.error('解析模板服务失败:', error)
+    servicesError.value = error.response?.data?.detail || '解析模板失败'
+    services.value = []
+    selectedServices.value = []
+  }
+}
+
+// 获取服务的配置对象（如果不存在则创建默认配置）
+function getServiceConfig(serviceName) {
+  if (!servicePushConfig.value[serviceName]) {
+    servicePushConfig.value[serviceName] = {
+      push: false,
+      imagePrefix: '',  // 镜像前缀
+      customImageName: '',  // 自定义完整镜像名（如果为空则使用拼接结果）
+      tag: '',
+      registry: ''
+    }
+  }
+  return servicePushConfig.value[serviceName]
+}
+
+// 获取默认镜像前缀
+function getDefaultImagePrefix() {
+  return buildConfig.value.imagePrefix.trim() || buildConfig.value.imageName.trim() || 'myapp/demo'
+}
+
+// 获取服务的完整镜像名（自定义或前缀 + 服务名称）
+function getServiceFullImageName(serviceName) {
+  const config = getServiceConfig(serviceName)
+  // 如果用户自定义了镜像名，使用自定义的
+  if (config.customImageName && config.customImageName.trim()) {
+    return config.customImageName.trim()
+  }
+  // 否则使用前缀+服务名称拼接
+  const prefix = config.imagePrefix.trim() || getDefaultImagePrefix()
+  return `${prefix}/${serviceName}`
+}
+
+// 获取服务镜像名的默认值（拼接结果）
+function getServiceDefaultImageName(serviceName) {
+  const config = getServiceConfig(serviceName)
+  const prefix = config.imagePrefix.trim() || getDefaultImagePrefix()
+  return `${prefix}/${serviceName}`
+}
+
+// 获取服务镜像名的显示值（用于输入框）
+function getServiceImageNameDisplay(serviceName) {
+  const config = getServiceConfig(serviceName)
+  // 如果用户自定义了镜像名，显示自定义的
+  if (config.customImageName && config.customImageName.trim()) {
+    return config.customImageName.trim()
+  }
+  // 否则显示拼接结果
+  const prefix = config.imagePrefix.trim() || getDefaultImagePrefix()
+  return `${prefix}/${serviceName}`
+}
+
+// 服务镜像名输入框输入处理
+function onServiceImageNameInput(serviceName, event) {
+  const config = getServiceConfig(serviceName)
+  const value = event.target.value.trim()
+  const defaultName = getServiceDefaultImageName(serviceName)
+  
+  // 如果输入的值与默认值相同，清空自定义值（使用默认）
+  if (value === defaultName || !value) {
+    config.customImageName = ''
+  } else {
+    // 否则保存为用户自定义值
+    config.customImageName = value
+  }
+}
+
+// 服务镜像名输入框失焦处理
+function onServiceImageNameBlur(serviceName) {
+  const config = getServiceConfig(serviceName)
+  // 如果用户清空了自定义镜像名，确保使用拼接结果
+  if (!config.customImageName || !config.customImageName.trim()) {
+    config.customImageName = ''
+  }
+}
+
+// 恢复默认镜像名（使用拼接结果）
+function resetServiceImageName(serviceName) {
+  const config = getServiceConfig(serviceName)
+  config.customImageName = ''
+}
+
+// 获取单服务推送模式的镜像名显示值
+function getSingleServiceImageNameDisplay() {
+  if (buildConfig.value.customImageName && buildConfig.value.customImageName.trim()) {
+    return buildConfig.value.customImageName.trim()
+  }
+  const prefix = buildConfig.value.imagePrefix || buildConfig.value.imageName || 'myapp/demo'
+  return `${prefix}/${buildConfig.value.selectedService}`
+}
+
+// 单服务推送模式镜像名输入处理
+function onSingleServiceImageNameInput(event) {
+  const value = event.target.value.trim()
+  const prefix = buildConfig.value.imagePrefix || buildConfig.value.imageName || 'myapp/demo'
+  const defaultName = `${prefix}/${buildConfig.value.selectedService}`
+  
+  // 如果输入的值与默认值相同，清空自定义值（使用默认）
+  if (value === defaultName || !value) {
+    buildConfig.value.customImageName = ''
+  } else {
+    // 否则保存为用户自定义值
+    buildConfig.value.customImageName = value
+  }
+}
+
+// 检查是否是仓库选择
+function isRegistrySelected(value) {
+  if (!value) return false
+  return registries.value.some(reg => 
+    (reg.registry_prefix || reg.registry) === value
+  )
+}
+
+// 批量前缀选择变化
+function onBatchPrefixChange() {
+  // 选择仓库时，自动应用
+  if (isRegistrySelected(batchImagePrefix.value)) {
+    batchSetImagePrefix()
+  }
+}
+
+// 批量前缀输入变化
+function onBatchPrefixInput() {
+  // 手动输入时不做自动应用
+}
+
+// 规范化服务配置（填充默认值）
+function normalizeServiceConfig(serviceName) {
+  const config = getServiceConfig(serviceName)
+  if (!config.imagePrefix.trim()) {
+    config.imagePrefix = getDefaultImagePrefix()
+  }
+  if (!config.tag.trim()) {
+    config.tag = buildConfig.value.tag.trim() || 'latest'
+  }
+}
+
+// 推送模式切换
+function onPushModeChange(mode) {
+  buildConfig.value.pushMode = mode
+  // 重置选择状态
+  if (mode === 'single') {
+    buildConfig.value.selectedService = ''
+    selectedServices.value = []
+  } else {
+    buildConfig.value.selectedService = ''
+    // 多服务模式默认全选
+    selectedServices.value = services.value.map(s => s.name)
+    // 初始化所有服务的配置
+    services.value.forEach(service => {
+      normalizeServiceConfig(service.name)
+    })
+  }
+}
+
+// 单服务推送模式：服务选择变化
+function onSingleServiceSelected() {
+  if (buildConfig.value.selectedService) {
+    // 更新 selectedServices 为单选结果
+    selectedServices.value = [buildConfig.value.selectedService]
+    // 确保镜像前缀有默认值
+    if (!buildConfig.value.imagePrefix.trim()) {
+      buildConfig.value.imagePrefix = buildConfig.value.imageName || 'myapp/demo'
+    }
+    // 如果没有自定义镜像名，清空（使用默认拼接）
+    if (!buildConfig.value.customImageName || !buildConfig.value.customImageName.trim()) {
+      buildConfig.value.customImageName = ''
+    }
+  } else {
+    selectedServices.value = []
+  }
+}
+
+// 服务选择变化时的处理
+function onServiceSelectionChange(serviceName) {
+  if (selectedServices.value.includes(serviceName)) {
+    // 选中时，初始化配置
+    normalizeServiceConfig(serviceName)
+    // 确保镜像名有默认值（如果用户没有自定义）
+    const config = getServiceConfig(serviceName)
+    if (!config.customImageName || !config.customImageName.trim()) {
+      // 确保前缀有值
+      if (!config.imagePrefix.trim()) {
+        config.imagePrefix = getDefaultImagePrefix()
+      }
+    }
+  } else {
+    // 取消选中时，清空推送配置
+    const config = getServiceConfig(serviceName)
+    config.push = false
+    config.registry = ''
+  }
+}
+
+// 批量设置镜像前缀
+function batchSetImagePrefix() {
+  if (!batchImagePrefix.value.trim()) {
+    alert('请输入镜像前缀或选择仓库')
+    return
+  }
+  selectedServices.value.forEach(serviceName => {
+    const config = getServiceConfig(serviceName)
+    const oldPrefix = config.imagePrefix.trim()
+    config.imagePrefix = batchImagePrefix.value.trim()
+    
+    // 如果用户自定义了镜像名，检查是否需要更新
+    if (config.customImageName && config.customImageName.trim()) {
+      // 如果自定义镜像名是旧前缀+服务名的格式，自动更新为新前缀+服务名
+      const oldDefaultName = `${oldPrefix || getDefaultImagePrefix()}/${serviceName}`
+      if (config.customImageName.trim() === oldDefaultName) {
+        // 用户之前没有修改，只是使用了默认值，现在更新为新默认值
+        config.customImageName = ''
+      }
+      // 否则保留用户的自定义值
+    } else {
+      // 没有自定义，确保使用拼接结果（清空自定义值）
+      config.customImageName = ''
+    }
+  })
+  // 清空批量设置输入框
+  batchImagePrefix.value = ''
+}
+
+// 批量设置标签
+function batchSetTag() {
+  if (!batchTag.value.trim()) {
+    alert('请输入标签')
+    return
+  }
+  selectedServices.value.forEach(serviceName => {
+    const config = getServiceConfig(serviceName)
+    config.tag = batchTag.value.trim()
+  })
+}
+
+// 批量设置推送
+function batchSetPush(push) {
+  selectedServices.value.forEach(serviceName => {
+    const config = getServiceConfig(serviceName)
+    config.push = push
+  })
+}
+
+// 服务选择
+function selectAllServices() {
+  selectedServices.value = services.value.map(s => s.name)
+  // 全选时，初始化所有服务的配置
+  services.value.forEach(service => {
+    normalizeServiceConfig(service.name)
+  })
+}
+
+function deselectAllServices() {
+  selectedServices.value = []
+  // 全不选时，清空所有推送配置
+  services.value.forEach(service => {
+    const config = getServiceConfig(service.name)
+    config.push = false
+    config.registry = ''
+  })
+}
+
+function toggleAllServices(event) {
+  if (event.target.checked) {
+    selectAllServices()
+  } else {
+    deselectAllServices()
+  }
+}
+
+// 开始构建
+async function startBuild() {
+  building.value = true
+  
+  try {
+    let taskId = null
+    
+    if (buildConfig.value.sourceType === 'file') {
+      // 文件上传构建
+      // 构建步骤信息
+      const buildSteps = {
+        step1: {
+          name: '选择数据源',
+          completed: true,
+          sourceType: buildConfig.value.sourceType,
+          fileName: buildConfig.value.file?.name
+        },
+        step2: {
+          name: '确认分支',
+          completed: true,
+          skipped: true  // 文件上传模式跳过分支选择
+        },
+        step3: {
+          name: '选择模板',
+          completed: true,
+          projectType: buildConfig.value.projectType,
+          template: buildConfig.value.template
+        },
+        step4: {
+          name: '选择服务',
+          completed: true,
+          serviceCount: 0,
+          selectedServices: [],
+          isMultiService: false
+        },
+        step5: {
+          name: '开始构建',
+          completed: false,
+          imageName: buildConfig.value.imageName,
+          tag: buildConfig.value.tag,
+          push: buildConfig.value.push
+        }
+      }
+      
+      const formData = new FormData()
+      formData.append('app_file', buildConfig.value.file)
+      formData.append('project_type', buildConfig.value.projectType)
+      formData.append('template', buildConfig.value.template)
+      formData.append('imagename', buildConfig.value.imageName)
+      formData.append('tag', buildConfig.value.tag || 'latest')
+      if (buildConfig.value.push) {
+        formData.append('push', 'on')
+      }
+      if (Object.keys(buildConfig.value.templateParams).length > 0) {
+        formData.append('template_params', JSON.stringify(buildConfig.value.templateParams))
+      }
+      formData.append('build_steps', JSON.stringify(buildSteps))  // 添加步骤信息
+      
+      const res = await axios.post('/api/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      taskId = res.data.build_id || res.data.task_id
+    } else {
+      // Git 源码构建
+      const source = gitSources.value.find(s => s.source_id === buildConfig.value.sourceId)
+      if (!source) {
+        throw new Error('数据源不存在')
+      }
+      
+      // 构建步骤信息
+      const buildSteps = {
+        step1: {
+          name: '选择数据源',
+          completed: true,
+          sourceType: buildConfig.value.sourceType,
+          sourceId: buildConfig.value.sourceId,
+          fileName: buildConfig.value.file?.name
+        },
+        step2: {
+          name: '确认分支',
+          completed: true,
+          branch: buildConfig.value.branch || branchesAndTags.value.default_branch || '默认分支',
+          skipped: buildConfig.value.sourceType === 'file'
+        },
+        step3: {
+          name: '选择模板',
+          completed: true,
+          projectType: buildConfig.value.projectType,
+          template: buildConfig.value.useProjectDockerfile ? '项目 Dockerfile' : buildConfig.value.template,
+          useProjectDockerfile: buildConfig.value.useProjectDockerfile,
+          dockerfileName: buildConfig.value.dockerfileName
+        },
+        step4: {
+          name: '选择服务',
+          completed: true,
+          serviceCount: services.value.length,
+          selectedServices: selectedServices.value,
+          isMultiService: services.value.length > 0
+        },
+        step5: {
+          name: '开始构建',
+          completed: false,
+          imageName: buildConfig.value.imageName,
+          tag: buildConfig.value.tag,
+          push: buildConfig.value.push
+        }
+      }
+      
+      const payload = {
+        project_type: buildConfig.value.projectType,
+        template: buildConfig.value.template,
+        git_url: source.git_url,
+        branch: buildConfig.value.branch || undefined,
+        imagename: (buildConfig.value.pushMode === 'single' && buildConfig.value.selectedService)
+          ? (buildConfig.value.customImageName && buildConfig.value.customImageName.trim()
+              ? buildConfig.value.customImageName.trim()
+              : `${buildConfig.value.imagePrefix || buildConfig.value.imageName || 'myapp/demo'}/${buildConfig.value.selectedService}`)
+          : buildConfig.value.imageName,
+        tag: buildConfig.value.tag || 'latest',
+        push: buildConfig.value.push ? 'on' : 'off',
+        template_params: Object.keys(buildConfig.value.templateParams).length > 0 
+          ? JSON.stringify(buildConfig.value.templateParams) 
+          : undefined,
+        use_project_dockerfile: buildConfig.value.useProjectDockerfile,
+        dockerfile_name: buildConfig.value.dockerfileName || 'Dockerfile',
+        source_id: buildConfig.value.sourceId,
+        selected_services: (buildConfig.value.pushMode === 'single' && buildConfig.value.selectedService) 
+          ? [buildConfig.value.selectedService]
+          : (selectedServices.value.length > 0 ? selectedServices.value : undefined),
+        service_push_config: (selectedServices.value.length > 0 && (buildConfig.value.pushMode === 'multi' || buildConfig.value.useProjectDockerfile))
+          ? Object.fromEntries(
+              selectedServices.value.map(serviceName => {
+                const config = getServiceConfig(serviceName)
+                normalizeServiceConfig(serviceName)
+                // 使用完整镜像名（自定义或拼接）
+                const fullImageName = getServiceFullImageName(serviceName)
+                return [serviceName, {
+                  push: config.push || false,
+                  imageName: fullImageName,  // 完整镜像名（自定义或前缀/服务名）
+                  tag: config.tag || buildConfig.value.tag.trim() || 'latest',
+                  registry: config.registry || ''
+                }]
+              })
+            )
+          : undefined,
+        push_mode: (buildConfig.value.sourceType === 'file' || buildConfig.value.useProjectDockerfile) ? 'multi' : (buildConfig.value.pushMode || 'multi'),
+        build_steps: buildSteps  // 添加步骤信息
+      }
+      
+      const res = await axios.post('/api/build-from-source', payload)
+      taskId = res.data.task_id
+    }
+    
+    if (taskId) {
+      console.log('✅ 构建任务已启动, task_id:', taskId)
+      
+      // 保存构建配置到任务（通过更新任务信息）
+      try {
+        // 任务信息会自动保存，这里可以添加额外的配置保存逻辑
+        await saveBuildConfigToTask(taskId)
+      } catch (saveError) {
+        console.warn('⚠️ 保存构建配置失败:', saveError)
+      }
+      
+      window.dispatchEvent(new CustomEvent('show-build-log'))
+      
+      setTimeout(() => {
+        pollBuildLogs(taskId)
+      }, 100)
+    } else {
+      throw new Error('未返回 task_id')
+    }
+  } catch (error) {
+    console.error('❌ 构建请求失败:', error)
+    alert(error.response?.data?.error || error.response?.data?.detail || '构建失败')
+    building.value = false
+  }
+}
+
+// 保存构建配置到任务
+async function saveBuildConfigToTask(taskId) {
+  // 构建配置信息
+  const configInfo = {
+    sourceType: buildConfig.value.sourceType,
+    sourceId: buildConfig.value.sourceId,
+    branch: buildConfig.value.branch,
+    projectType: buildConfig.value.projectType,
+    template: buildConfig.value.template,
+    useProjectDockerfile: buildConfig.value.useProjectDockerfile,
+    dockerfileName: buildConfig.value.dockerfileName,
+    imageName: buildConfig.value.imageName,
+    tag: buildConfig.value.tag,
+    push: buildConfig.value.push,
+    templateParams: buildConfig.value.templateParams,
+    selectedServices: selectedServices.value,
+    buildSteps: {
+      step1: '数据源选择完成',
+      step2: buildConfig.value.sourceType === 'git' ? '分支确认完成' : '跳过（文件上传）',
+      step3: '模板选择完成',
+      step4: services.value.length > 0 ? `服务选择完成（${selectedServices.value.length}个服务）` : '单应用模式',
+      step5: '构建任务已提交'
+    }
+  }
+  
+  // 注意：任务信息已经在创建任务时保存，这里可以记录额外的配置信息
+  // 如果需要，可以通过 API 更新任务信息
+  console.log('📋 构建配置信息:', configInfo)
+}
+
+// 轮询构建日志
+let pollInterval = null
+async function pollBuildLogs(buildId) {
+  let lastLogLength = 0
+  let taskCompleted = false
+  
+  const poll = async () => {
+    try {
+      const taskRes = await axios.get(`/api/build-tasks/${buildId}`)
+      const taskStatus = taskRes.data.status
+      
+      let logs = ''
+      try {
+        const res = await axios.get(`/api/build-tasks/${buildId}/logs`)
+        logs = typeof res.data === 'string' ? res.data : String(res.data)
+      } catch (e) {
+        const res = await axios.get('/api/get-logs', {
+          params: { build_id: buildId }
+        })
+        logs = typeof res.data === 'string' ? res.data : String(res.data)
+      }
+      
+      const logLines = logs
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+      
+      if (logLines.length > lastLogLength) {
+        for (let i = lastLogLength; i < logLines.length; i++) {
+          window.dispatchEvent(new CustomEvent('add-log', {
+            detail: { text: logLines[i] }
+          }))
+        }
+        lastLogLength = logLines.length
+      }
+      
+      if (taskStatus === 'completed' || taskStatus === 'failed') {
+        taskCompleted = true
+        clearInterval(pollInterval)
+        building.value = false
+        window.dispatchEvent(new CustomEvent('add-log', {
+          detail: { text: taskStatus === 'completed' ? '✅ 构建已完成' : '❌ 构建已失败' }
+        }))
+      }
+    } catch (error) {
+      console.error('❌ 获取日志失败:', error)
+      if (error.response?.status === 404) {
+        clearInterval(pollInterval)
+        building.value = false
+        window.dispatchEvent(new CustomEvent('add-log', {
+          detail: { text: '❌ 任务不存在' }
+        }))
+      }
+    }
+  }
+  
+  window.dispatchEvent(new CustomEvent('add-log', {
+    detail: { text: `🚀 开始构建，Task ID: ${buildId}` }
+  }))
+  
+  await poll()
+  
+  let pollCount = 0
+  pollInterval = setInterval(() => {
+    if (taskCompleted) {
+      clearInterval(pollInterval)
+      return
+    }
+    
+    pollCount++
+    if (pollCount > 300) {
+      clearInterval(pollInterval)
+      building.value = false
+      window.dispatchEvent(new CustomEvent('add-log', {
+        detail: { text: '⏰ 构建日志轮询超时（5分钟）' }
+      }))
+    } else {
+      poll()
+    }
+  }, 1000)
+}
+
+async function loadRegistries() {
+  try {
+    const res = await axios.get('/api/registries')
+    registries.value = res.data.registries || []
+  } catch (error) {
+    console.error('加载仓库列表失败:', error)
+  }
+}
+
+onMounted(() => {
+  loadTemplates()
+  loadGitSources()
+  loadRegistries()
+})
+</script>
+
+<style scoped>
+.step-build-panel {
+  animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.steps-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 0;
+}
+
+.step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.step-number {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #e9ecef;
+  color: #6c757d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  transition: all 0.3s;
+}
+
+.step-item.active .step-number {
+  background-color: #0d6efd;
+  color: white;
+}
+
+.step-item.completed .step-number {
+  background-color: #198754;
+  color: white;
+}
+
+.step-label {
+  margin-top: 8px;
+  font-size: 0.875rem;
+  color: #6c757d;
+  transition: all 0.3s;
+}
+
+.step-item.active .step-label {
+  color: #0d6efd;
+  font-weight: 500;
+}
+
+.step-item.completed .step-label {
+  color: #198754;
+}
+
+.step-connector {
+  width: 60px;
+  height: 2px;
+  background-color: #e9ecef;
+  margin: 0 10px;
+  transition: all 0.3s;
+}
+
+.step-connector.completed {
+  background-color: #198754;
+}
+
+.step-panel {
+  min-height: 400px;
+  padding: 20px;
+}
+
+.alert-sm {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+}
+</style>
+

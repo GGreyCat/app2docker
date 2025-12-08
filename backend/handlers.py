@@ -1195,6 +1195,7 @@ class BuildManager:
         template_params: dict = None,
         push_registry: str = None,  # 已废弃，保留以兼容旧代码，实际不再使用
         extract_archive: bool = True,  # 是否解压压缩包（默认解压）
+        build_steps: dict = None,  # 构建步骤信息
     ):
         # 创建任务
         task_id = self.task_manager.create_task(
@@ -1208,6 +1209,7 @@ class BuildManager:
             template_params=template_params or {},
             push_registry=push_registry,
             extract_archive=extract_archive,
+            build_steps=build_steps or {},  # 传递构建步骤信息
         )
 
         thread = threading.Thread(
@@ -1783,6 +1785,7 @@ class BuildManager:
         selected_services: list = None,  # 选中的服务列表（多服务构建时使用）
         service_push_config: dict = None,  # 每个服务的推送配置（key为服务名，value为是否推送）
         push_mode: str = "multi",  # 推送模式：'single' 单一推送，'multi' 多阶段推送（仅模板模式）
+        build_steps: dict = None,  # 构建步骤信息
     ):
         """从 Git 源码开始构建"""
         try:
@@ -1804,6 +1807,10 @@ class BuildManager:
                 dockerfile_name=dockerfile_name,
                 pipeline_id=pipeline_id,  # 传递流水线ID
                 source_id=source_id,  # 传递数据源ID
+                selected_services=selected_services,  # 传递选中的服务列表
+                service_push_config=service_push_config,  # 传递服务推送配置
+                push_mode=push_mode,  # 传递推送模式
+                build_steps=build_steps or {},  # 传递构建步骤信息
             )
             print(f"✅ 任务创建成功: task_id={task_id}")
         except Exception as e:

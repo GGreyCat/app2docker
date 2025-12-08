@@ -317,7 +317,8 @@
                 单一推送模式：选中的 {{ selectedServices.length }} 个服务将构建到一个镜像中，使用统一的镜像名和标签。
               </span>
               <span v-else>
-              已选择 {{ selectedServices.length }} 个服务进行构建
+                已选择 {{ selectedServices.length }} 个服务进行构建
+              </span>
             </div>
           </div>
         </div>

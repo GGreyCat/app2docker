@@ -567,6 +567,7 @@ async def upload_file(
     template_params: Optional[str] = Form(None),  # JSON 字符串格式的模板参数
     push_registry: Optional[str] = Form(None),  # 已废弃，保留以兼容旧代码，实际不再使用
     extract_archive: str = Form("on"),  # 是否解压压缩包（默认解压）
+    build_steps: Optional[str] = Form(None),  # JSON 字符串格式的构建步骤信息
 ):
     """上传文件并开始构建"""
     try:
@@ -585,6 +586,14 @@ async def upload_file(
             except json.JSONDecodeError:
                 raise HTTPException(status_code=400, detail="模板参数格式错误")
 
+        # 解析构建步骤信息
+        build_steps_dict = {}
+        if build_steps:
+            try:
+                build_steps_dict = json.loads(build_steps)
+            except json.JSONDecodeError:
+                print(f"⚠️ 构建步骤信息格式错误，忽略: {build_steps}")
+
         # 调用构建管理器
         manager = BuildManager()
         task_id = manager.start_build(
@@ -598,6 +607,7 @@ async def upload_file(
             template_params=params_dict,  # 传递模板参数
             push_registry=None,  # 已废弃，统一使用激活的registry
             extract_archive=(extract_archive == "on"),  # 传递解压选项
+            build_steps=build_steps_dict,  # 传递构建步骤信息
         )
 
         # 记录操作日志
@@ -993,6 +1003,7 @@ async def build_from_source(
     selected_services: Optional[list] = Body(None, description="选中的服务列表（多服务构建时使用）"),
     service_push_config: Optional[dict] = Body(None, description="每个服务的推送配置（key为服务名，value为是否推送）"),
     push_mode: Optional[str] = Body("multi", description="推送模式：'single' 单一推送，'multi' 多阶段推送（仅模板模式）"),
+    build_steps: Optional[dict] = Body(None, description="构建步骤信息（JSON对象）"),
 ):
     """从 Git 源码构建镜像"""
     try:
@@ -1040,6 +1051,7 @@ async def build_from_source(
                     selected_services=selected_services,
                     service_push_config=service_push_config,
                     push_mode=push_mode or "multi",
+                    build_steps=build_steps,  # 传递构建步骤信息
                 )
                 if not task_id:
                     raise RuntimeError("任务创建失败：未返回 task_id")
