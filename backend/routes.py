@@ -716,11 +716,63 @@ async def verify_git_repo(
                 if not tag_name.endswith('^{}'):
                     tags.append(tag_name)
         
+        # 扫描 Dockerfile（需要克隆仓库的默认分支）
+        dockerfiles = {}
+        default_branch = next((b for b in branches if b in ['main', 'master']), branches[0] if branches else None)
+        
+        if default_branch:
+            try:
+                # 临时克隆仓库以扫描 Dockerfile
+                import tempfile
+                temp_dir = tempfile.mkdtemp()
+                clone_url = verify_url
+                
+                # 准备克隆命令
+                clone_cmd = ["git", "clone", "--depth", "1", "--branch", default_branch, clone_url, temp_dir]
+                
+                clone_result = subprocess.run(
+                    clone_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                
+                if clone_result.returncode == 0:
+                    # 扫描 Dockerfile（递归查找）
+                    for root, dirs, files in os.walk(temp_dir):
+                        # 跳过 .git 目录
+                        if '.git' in root.split(os.sep):
+                            continue
+                        
+                        for file in files:
+                            # 检查是否是 Dockerfile（不区分大小写，支持多种命名）
+                            file_lower = file.lower()
+                            if file_lower.startswith('dockerfile') or file_lower.endswith('.dockerfile'):
+                                file_path = os.path.join(root, file)
+                                relative_path = os.path.relpath(file_path, temp_dir)
+                                
+                                try:
+                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                        content = f.read()
+                                        dockerfiles[relative_path] = content
+                                        print(f"✅ 扫描到 Dockerfile: {relative_path}")
+                                except Exception as e:
+                                    print(f"⚠️ 读取 Dockerfile 失败 {relative_path}: {e}")
+                    
+                    # 清理临时目录
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception as e:
+                print(f"⚠️ 扫描 Dockerfile 失败: {e}")
+                # 清理临时目录（如果存在）
+                if 'temp_dir' in locals():
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+        
         result = {
             "success": True,
             "branches": sorted(branches, key=lambda x: (x != 'main', x != 'master', x)),
             "tags": sorted(tags, reverse=True),  # 标签按降序排列，最新的在前
-            "default_branch": next((b for b in branches if b in ['main', 'master']), branches[0] if branches else None)
+            "default_branch": default_branch,
+            "dockerfiles": dockerfiles  # 扫描到的 Dockerfile 列表
         }
         
         # 如果需要保存为数据源
@@ -744,6 +796,10 @@ async def verify_git_repo(
                         username=username if username is not None else None,
                         password=password if password is not None else None
                     )
+                    # 更新扫描到的 Dockerfile
+                    if result.get("dockerfiles"):
+                        for dockerfile_path, content in result["dockerfiles"].items():
+                            source_manager.update_dockerfile(existing_source["source_id"], dockerfile_path, content)
                     result["source_id"] = existing_source["source_id"]
                     result["source_saved"] = True
                     result["source_updated"] = True
@@ -759,6 +815,10 @@ async def verify_git_repo(
                         username=username,
                         password=password
                     )
+                    # 保存扫描到的 Dockerfile
+                    if result.get("dockerfiles"):
+                        for dockerfile_path, content in result["dockerfiles"].items():
+                            source_manager.update_dockerfile(source_id, dockerfile_path, content)
                     result["source_id"] = source_id
                     result["source_saved"] = True
                     result["source_updated"] = False
@@ -2682,6 +2742,7 @@ class CreateGitSourceRequest(BaseModel):
     default_branch: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    dockerfiles: Optional[dict] = None  # Dockerfile 字典
 
 
 class UpdateGitSourceRequest(BaseModel):
@@ -2693,6 +2754,7 @@ class UpdateGitSourceRequest(BaseModel):
     default_branch: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    dockerfiles: Optional[dict] = None  # Dockerfile 字典
 
 
 @router.get("/git-sources")
@@ -2784,6 +2846,15 @@ async def update_git_source(
         if not success:
             raise HTTPException(status_code=404, detail="数据源不存在")
         
+        # 更新 Dockerfile（如果有）
+        if request.dockerfiles is not None:
+            source = manager.get_source(source_id, include_password=True)
+            if source:
+                # 先清空现有的 Dockerfile（如果需要完全替换）
+                # 这里我们只更新提供的 Dockerfile，不删除其他的
+                for dockerfile_path, content in request.dockerfiles.items():
+                    manager.update_dockerfile(source_id, dockerfile_path, content)
+        
         # 记录操作日志
         OperationLogger.log(username, "git_source_update", {
             "source_id": source_id
@@ -2821,3 +2892,95 @@ async def delete_git_source(source_id: str, http_request: Request):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"删除数据源失败: {str(e)}")
+
+
+@router.get("/git-sources/{source_id}/dockerfiles")
+async def get_dockerfiles(source_id: str, http_request: Request):
+    """获取数据源的所有 Dockerfile"""
+    try:
+        get_current_username(http_request)  # 验证登录
+        manager = GitSourceManager()
+        source = manager.get_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        
+        dockerfiles = source.get("dockerfiles", {})
+        return JSONResponse({
+            "dockerfiles": dockerfiles,
+            "dockerfile_paths": list(dockerfiles.keys())
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取 Dockerfile 列表失败: {str(e)}")
+
+
+@router.get("/git-sources/{source_id}/dockerfiles/{dockerfile_path:path}")
+async def get_dockerfile(source_id: str, dockerfile_path: str, http_request: Request):
+    """获取指定 Dockerfile 的内容"""
+    try:
+        get_current_username(http_request)  # 验证登录
+        manager = GitSourceManager()
+        content = manager.get_dockerfile(source_id, dockerfile_path)
+        if content is None:
+            raise HTTPException(status_code=404, detail="Dockerfile 不存在")
+        
+        return JSONResponse({
+            "dockerfile_path": dockerfile_path,
+            "content": content
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取 Dockerfile 失败: {str(e)}")
+
+
+@router.put("/git-sources/{source_id}/dockerfiles/{dockerfile_path:path}")
+async def update_dockerfile(
+    source_id: str,
+    dockerfile_path: str,
+    content: str = Body(..., embed=True, description="Dockerfile 内容"),
+    http_request: Request = None
+):
+    """更新或创建 Dockerfile"""
+    try:
+        get_current_username(http_request)  # 验证登录
+        manager = GitSourceManager()
+        
+        success = manager.update_dockerfile(source_id, dockerfile_path, content)
+        if not success:
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        
+        return JSONResponse({
+            "message": "Dockerfile 已保存",
+            "dockerfile_path": dockerfile_path
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存 Dockerfile 失败: {str(e)}")
+
+
+@router.delete("/git-sources/{source_id}/dockerfiles/{dockerfile_path:path}")
+async def delete_dockerfile(
+    source_id: str,
+    dockerfile_path: str,
+    http_request: Request
+):
+    """删除 Dockerfile"""
+    try:
+        get_current_username(http_request)  # 验证登录
+        manager = GitSourceManager()
+        
+        success = manager.delete_dockerfile(source_id, dockerfile_path)
+        if not success:
+            raise HTTPException(status_code=404, detail="Dockerfile 不存在")
+        
+        return JSONResponse({
+            "message": "Dockerfile 已删除",
+            "dockerfile_path": dockerfile_path
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除 Dockerfile 失败: {str(e)}")

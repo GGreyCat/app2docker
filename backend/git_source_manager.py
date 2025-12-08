@@ -91,6 +91,7 @@ class GitSourceManager:
             "default_branch": default_branch,
             "username": username or "",  # Git 用户名
             "password": encrypted_password,  # 加密后的密码
+            "dockerfiles": {},  # Dockerfile 字典，key 为文件路径，value 为内容
             # 元数据
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
@@ -189,6 +190,10 @@ class GitSourceManager:
                 else:
                     source["password"] = None
             
+            # 确保有 dockerfiles 字段
+            if "dockerfiles" not in source:
+                source["dockerfiles"] = {}
+            
             # 更新时间
             source["updated_at"] = datetime.now().isoformat()
             
@@ -245,4 +250,46 @@ class GitSourceManager:
                 auth_config["password"] = password
             
             return auth_config
+    
+    def update_dockerfile(self, source_id: str, dockerfile_path: str, content: str) -> bool:
+        """更新或创建 Dockerfile"""
+        with self.lock:
+            if source_id not in self.sources:
+                return False
+            
+            source = self.sources[source_id]
+            if "dockerfiles" not in source:
+                source["dockerfiles"] = {}
+            
+            source["dockerfiles"][dockerfile_path] = content
+            source["updated_at"] = datetime.now().isoformat()
+            self._save_sources()
+            return True
+    
+    def delete_dockerfile(self, source_id: str, dockerfile_path: str) -> bool:
+        """删除 Dockerfile"""
+        with self.lock:
+            if source_id not in self.sources:
+                return False
+            
+            source = self.sources[source_id]
+            if "dockerfiles" not in source:
+                return False
+            
+            if dockerfile_path in source["dockerfiles"]:
+                del source["dockerfiles"][dockerfile_path]
+                source["updated_at"] = datetime.now().isoformat()
+                self._save_sources()
+                return True
+            
+            return False
+    
+    def get_dockerfile(self, source_id: str, dockerfile_path: str) -> Optional[str]:
+        """获取 Dockerfile 内容"""
+        with self.lock:
+            source = self.sources.get(source_id)
+            if not source or "dockerfiles" not in source:
+                return None
+            
+            return source["dockerfiles"].get(dockerfile_path)
 

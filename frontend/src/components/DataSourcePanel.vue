@@ -85,10 +85,26 @@
                 <i class="fas fa-tag text-muted me-2" style="width: 18px;"></i>
                 <small class="text-muted">标签：{{ source.tags?.length || 0 }} 个</small>
               </div>
-              <div v-if="source.default_branch" class="d-flex align-items-center">
+              <div v-if="source.default_branch" class="d-flex align-items-center mb-1">
                 <i class="fas fa-check-circle text-success me-2" style="width: 18px;"></i>
                 <small class="text-muted">默认分支：{{ source.default_branch }}</small>
               </div>
+              <div class="d-flex align-items-center">
+                <i class="fab fa-docker text-info me-2" style="width: 18px;"></i>
+                <small class="text-muted">
+                  Dockerfile：{{ (source.dockerfiles && Object.keys(source.dockerfiles).length) || 0 }} 个
+                </small>
+              </div>
+            </div>
+            
+            <div class="border-top pt-2 mt-2">
+              <button 
+                class="btn btn-sm btn-outline-info w-100" 
+                @click="manageDockerfiles(source)"
+                title="管理 Dockerfile"
+              >
+                <i class="fab fa-docker"></i> 管理 Dockerfile
+              </button>
             </div>
             
             <div class="border-top pt-2 mt-2">
@@ -246,12 +262,116 @@
       </div>
     </div>
     <div v-if="showModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
+
+    <!-- Dockerfile 管理模态框 -->
+    <div v-if="showDockerfileModal && currentSource" class="modal fade show" style="display: block; z-index: 1060;" tabindex="-1" @click.self="closeDockerfileModal">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">
+              <i class="fab fa-docker"></i> Dockerfile 管理 - {{ currentSource.name }}
+            </h5>
+            <button type="button" class="btn-close" @click="closeDockerfileModal"></button>
+          </div>
+          <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <span class="text-muted">共 {{ dockerfileList.length }} 个 Dockerfile</span>
+              <button class="btn btn-primary btn-sm" @click="showCreateDockerfile">
+                <i class="fas fa-plus"></i> 新建 Dockerfile
+              </button>
+            </div>
+
+            <!-- Dockerfile 列表 -->
+            <div v-if="loadingDockerfiles" class="text-center py-3">
+              <span class="spinner-border spinner-border-sm"></span> 加载中...
+            </div>
+            <div v-else-if="dockerfileList.length === 0" class="text-center py-4 text-muted">
+              <i class="fab fa-docker fa-3x mb-3"></i>
+              <p>暂无 Dockerfile</p>
+              <p class="small">验证 Git 仓库时会自动扫描 Dockerfile，您也可以手动添加</p>
+            </div>
+            <div v-else class="list-group">
+              <div v-for="item in dockerfileList" :key="item.path" class="list-group-item">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div class="flex-grow-1">
+                    <h6 class="mb-1">
+                      <i class="fab fa-docker text-info"></i> {{ item.path }}
+                    </h6>
+                    <small class="text-muted">共 {{ item.lineCount }} 行</small>
+                  </div>
+                  <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-primary" @click="editDockerfile(item.path, item.content)" title="编辑">
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-outline-danger" @click="deleteDockerfile(item.path)" title="删除">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-if="showDockerfileModal" class="modal-backdrop fade show" style="z-index: 1055;"></div>
+
+    <!-- Dockerfile 编辑器模态框 -->
+    <div v-if="showDockerfileEditor && currentSource" class="modal fade show" style="display: block; z-index: 1070;" tabindex="-1" @click.self="closeDockerfileEditor">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">
+              <i class="fab fa-docker"></i> {{ editingDockerfilePath ? '编辑' : '新建' }} Dockerfile
+            </h5>
+            <button type="button" class="btn-close" @click="closeDockerfileEditor"></button>
+          </div>
+          <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+            <div class="mb-3">
+              <label class="form-label">Dockerfile 路径 <span class="text-danger">*</span></label>
+              <input 
+                v-model="dockerfileForm.path" 
+                type="text" 
+                class="form-control form-control-sm"
+                :readonly="!!editingDockerfilePath"
+                placeholder="Dockerfile 或 Dockerfile.prod"
+                required
+              >
+              <small class="text-muted">相对路径，如：Dockerfile、Dockerfile.prod、docker/Dockerfile</small>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">内容 <span class="text-danger">*</span></label>
+              <codemirror
+                v-model="dockerfileForm.content"
+                :style="{ height: '400px', fontSize: '13px' }"
+                :autofocus="true"
+                :indent-with-tab="true"
+                :tab-size="2"
+                :extensions="dockerfileExtensions"
+                placeholder="FROM ..."
+              />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" @click="closeDockerfileEditor">取消</button>
+            <button type="button" class="btn btn-primary btn-sm" @click="saveDockerfile">
+              <i class="fas fa-save"></i> 保存
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-if="showDockerfileEditor" class="modal-backdrop fade show" style="z-index: 1065;"></div>
   </div>
 </template>
 
 <script setup>
 import axios from 'axios'
 import { onMounted, ref, watch } from 'vue'
+import { Codemirror } from 'vue-codemirror'
+import { StreamLanguage } from '@codemirror/language'
+import { shell } from '@codemirror/legacy-modes/mode/shell'
+import { oneDark } from '@codemirror/theme-one-dark'
 
 const sources = ref([])
 const loading = ref(false)
@@ -260,6 +380,24 @@ const showModal = ref(false)
 const editingSource = ref(null)
 const verifying = ref(false)
 const isVerified = ref(false)  // 验证状态标识
+
+// Dockerfile 管理相关状态
+const showDockerfileModal = ref(false)
+const showDockerfileEditor = ref(false)
+const currentSource = ref(null)
+const dockerfileList = ref([])
+const loadingDockerfiles = ref(false)
+const editingDockerfilePath = ref(null)
+const dockerfileForm = ref({
+  path: '',
+  content: ''
+})
+
+// CodeMirror 扩展配置（Dockerfile 使用 shell 模式近似）
+const dockerfileExtensions = [
+  StreamLanguage.define(shell),  // 使用 shell 模式近似 Dockerfile
+  oneDark  // 使用暗色主题
+]
 
 const formData = ref({
   name: '',
@@ -328,7 +466,8 @@ function showCreateModal() {
     tags: [],
     default_branch: '',
     username: '',
-    password: ''
+    password: '',
+    dockerfiles: {}
   }
   showModal.value = true
 }
@@ -344,7 +483,8 @@ function editSource(source) {
     tags: source.tags || [],
     default_branch: source.default_branch || '',
     username: source.username || '',
-    password: source.has_password ? '******' : ''  // 不显示真实密码，显示占位符
+    password: source.has_password ? '******' : '',  // 不显示真实密码，显示占位符
+    dockerfiles: source.dockerfiles || {}
   }
   showModal.value = true
 }
@@ -371,7 +511,14 @@ async function verifyAndSave() {
       formData.value.branches = res.data.branches || []
       formData.value.tags = res.data.tags || []
       formData.value.default_branch = res.data.default_branch || ''
+      formData.value.dockerfiles = res.data.dockerfiles || {}  // 保存扫描到的 Dockerfile
       isVerified.value = true  // 标记为已验证
+      
+      // 如果有扫描到的 Dockerfile，提示用户
+      if (res.data.dockerfiles && Object.keys(res.data.dockerfiles).length > 0) {
+        const dockerfileCount = Object.keys(res.data.dockerfiles).length
+        console.log(`✅ 扫描到 ${dockerfileCount} 个 Dockerfile:`, Object.keys(res.data.dockerfiles))
+      }
       
       // 如果没有设置名称，使用仓库名作为默认名称
       if (!formData.value.name) {
@@ -433,7 +580,7 @@ async function saveSource() {
       })
       alert('数据源更新成功')
     } else {
-      // 创建新数据源
+      // 创建新数据源（包含验证时扫描到的 Dockerfile）
       await axios.post('/api/git-sources', {
         name: formData.value.name,
         description: formData.value.description,
@@ -442,7 +589,8 @@ async function saveSource() {
         tags: formData.value.tags,
         default_branch: formData.value.default_branch,
         username: formData.value.username || null,
-        password: password || null
+        password: password || null,
+        dockerfiles: formData.value.dockerfiles || null
       })
       alert('数据源创建成功')
     }
@@ -479,6 +627,15 @@ async function refreshSource(source) {
         tags: res.data.tags || [],
         default_branch: res.data.default_branch || source.default_branch
       })
+      // 更新扫描到的 Dockerfile
+      if (res.data.dockerfiles) {
+        for (const [dockerfile_path, content] of Object.entries(res.data.dockerfiles)) {
+          await axios.put(
+            `/api/git-sources/${source.source_id}/dockerfiles/${encodeURIComponent(dockerfile_path)}`,
+            { content: content }
+          )
+        }
+      }
       alert('数据源刷新成功')
       loadSources()
     } else {
@@ -522,6 +679,106 @@ function formatDateTime(isoString) {
   const minutes = String(date.getMinutes()).padStart(2, '0')
   
   return `${year}-${month}-${day} ${hours}:${minutes}`
+}
+
+// Dockerfile 管理函数
+async function manageDockerfiles(source) {
+  currentSource.value = source
+  showDockerfileModal.value = true
+  await loadDockerfiles(source.source_id)
+}
+
+async function loadDockerfiles(sourceId) {
+  loadingDockerfiles.value = true
+  try {
+    const res = await axios.get(`/api/git-sources/${sourceId}/dockerfiles`)
+    const dockerfiles = res.data.dockerfiles || {}
+    dockerfileList.value = Object.keys(dockerfiles).map(path => ({
+      path,
+      content: dockerfiles[path],
+      lineCount: dockerfiles[path].split('\n').length
+    }))
+  } catch (error) {
+    console.error('加载 Dockerfile 列表失败:', error)
+    alert('加载 Dockerfile 列表失败')
+    dockerfileList.value = []
+  } finally {
+    loadingDockerfiles.value = false
+  }
+}
+
+function closeDockerfileModal() {
+  showDockerfileModal.value = false
+  currentSource.value = null
+  dockerfileList.value = []
+}
+
+function showCreateDockerfile() {
+  editingDockerfilePath.value = null
+  dockerfileForm.value = {
+    path: 'Dockerfile',
+    content: 'FROM alpine:latest\n\n# TODO: 添加构建步骤\n'
+  }
+  showDockerfileEditor.value = true
+}
+
+function editDockerfile(path, content) {
+  editingDockerfilePath.value = path
+  dockerfileForm.value = {
+    path: path,
+    content: content
+  }
+  showDockerfileEditor.value = true
+}
+
+function closeDockerfileEditor() {
+  showDockerfileEditor.value = false
+  editingDockerfilePath.value = null
+  dockerfileForm.value = {
+    path: '',
+    content: ''
+  }
+}
+
+async function saveDockerfile() {
+  if (!dockerfileForm.value.path || !dockerfileForm.value.content) {
+    alert('请填写 Dockerfile 路径和内容')
+    return
+  }
+
+  try {
+    await axios.put(
+      `/api/git-sources/${currentSource.value.source_id}/dockerfiles/${encodeURIComponent(dockerfileForm.value.path)}`,
+      { content: dockerfileForm.value.content }
+    )
+    alert('Dockerfile 保存成功')
+    closeDockerfileEditor()
+    await loadDockerfiles(currentSource.value.source_id)
+    // 刷新数据源列表以更新 Dockerfile 数量
+    loadSources()
+  } catch (error) {
+    console.error('保存 Dockerfile 失败:', error)
+    alert(error.response?.data?.detail || '保存 Dockerfile 失败')
+  }
+}
+
+async function deleteDockerfile(path) {
+  if (!confirm(`确定要删除 Dockerfile "${path}" 吗？`)) {
+    return
+  }
+
+  try {
+    await axios.delete(
+      `/api/git-sources/${currentSource.value.source_id}/dockerfiles/${encodeURIComponent(path)}`
+    )
+    alert('Dockerfile 已删除')
+    await loadDockerfiles(currentSource.value.source_id)
+    // 刷新数据源列表以更新 Dockerfile 数量
+    loadSources()
+  } catch (error) {
+    console.error('删除 Dockerfile 失败:', error)
+    alert(error.response?.data?.detail || '删除 Dockerfile 失败')
+  }
 }
 </script>
 
