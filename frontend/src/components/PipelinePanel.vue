@@ -89,34 +89,43 @@
           
           <!-- 卡片内容 -->
           <div class="card-body">
+            <!-- 项目类型和镜像信息 -->
+            <div class="mb-3 pb-2 border-bottom">
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <span class="badge" :class="getProjectTypeBadgeClass(pipeline.project_type)" style="font-size: 0.85rem; padding: 0.35rem 0.65rem;">
+                  <i :class="getProjectTypeIcon(pipeline.project_type)"></i>
+                  {{ getProjectTypeLabel(pipeline.project_type) }}
+                </span>
+                <div class="d-flex align-items-center">
+                  <i class="fas fa-docker text-muted me-2" style="width: 18px;"></i>
+                  <small class="font-monospace text-truncate" :title="`${pipeline.image_name}:${pipeline.tag}`" style="font-size: 0.85rem;">
+                    {{ pipeline.image_name }}:{{ pipeline.tag }}
+                  </small>
+                </div>
+              </div>
+            </div>
+
             <!-- Git 信息 -->
             <div class="mb-3">
-              <div class="d-flex align-items-center mb-1">
+              <div class="d-flex align-items-center mb-2">
                 <i class="fas fa-code-branch text-muted me-2" style="width: 18px;"></i>
                 <small class="font-monospace text-truncate" :title="pipeline.git_url" style="font-size: 0.9rem;">
                   {{ formatGitUrl(pipeline.git_url) }}
                 </small>
               </div>
-              <div class="d-flex align-items-center gap-2 ms-4">
-                <span class="badge bg-secondary">
+              <div class="d-flex align-items-center flex-wrap gap-2 ms-4">
+                <span class="badge bg-secondary" style="font-size: 0.75rem;">
                   <i class="fas fa-code-branch"></i> {{ pipeline.branch || '默认' }}
                 </span>
-                <span v-if="pipeline.webhook_branch_filter" class="badge bg-warning" title="启用分支过滤">
+                <span v-if="pipeline.webhook_branch_filter" class="badge bg-warning" title="启用分支过滤" style="font-size: 0.75rem;">
                   <i class="fas fa-filter"></i> 分支过滤
                 </span>
-                <span v-if="pipeline.cron_expression" class="badge bg-info" :title="pipeline.cron_expression">
+                <span v-if="pipeline.webhook_token" class="badge bg-primary" title="Webhook 触发" style="font-size: 0.75rem;">
+                  <i class="fas fa-link"></i> Webhook
+                </span>
+                <span v-if="pipeline.cron_expression" class="badge bg-info" :title="pipeline.cron_expression" style="font-size: 0.75rem;">
                   <i class="fas fa-clock"></i> 定时
                 </span>
-              </div>
-            </div>
-            
-            <!-- 镜像信息 -->
-            <div class="mb-3">
-              <div class="d-flex align-items-center">
-                <i class="fas fa-docker text-muted me-2" style="width: 18px;"></i>
-                <small class="font-monospace text-truncate" :title="`${pipeline.image_name}:${pipeline.tag}`" style="font-size: 0.9rem;">
-                  {{ pipeline.image_name }}:{{ pipeline.tag }}
-                </small>
               </div>
             </div>
             
@@ -1145,6 +1154,42 @@ function copyWebhookUrl() {
     document.execCommand('copy')
     alert('Webhook URL 已复制到剪贴板')
   }
+}
+
+function getProjectTypeIcon(type) {
+  const icons = {
+    'jar': 'fab fa-java',
+    'nodejs': 'fab fa-node-js',
+    'python': 'fab fa-python',
+    'go': 'fab fa-golang',
+    'rust': 'fas fa-cog',
+    'static': 'fas fa-globe'
+  }
+  return icons[type] || 'fas fa-file-code'
+}
+
+function getProjectTypeLabel(type) {
+  const labels = {
+    'jar': 'Java 应用',
+    'nodejs': 'Node.js 应用',
+    'python': 'Python 应用',
+    'go': 'Go 应用',
+    'rust': 'Rust 应用',
+    'static': '静态网站'
+  }
+  return labels[type] || type
+}
+
+function getProjectTypeBadgeClass(type) {
+  const classes = {
+    'jar': 'bg-danger',
+    'nodejs': 'bg-success',
+    'python': 'bg-info',
+    'go': 'bg-primary',
+    'rust': 'bg-dark',
+    'static': 'bg-secondary'
+  }
+  return classes[type] || 'bg-secondary'
 }
 
 function formatGitUrl(url) {
