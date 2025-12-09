@@ -39,9 +39,12 @@
             "type": "shell",
             "command": "docker",
             "args": [
+                "buildx",
                 "build",
                 "-t",
                 "jar2docker:latest",
+                "--progress",
+                "plain",
                 "."
             ],
             "group": "build",

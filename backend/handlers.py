@@ -211,7 +211,7 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
     entrypoint_pattern = re.compile(r"ENTRYPOINT\s+(.+)", re.IGNORECASE)
     arg_pattern = re.compile(r"ARG\s+([A-Z_][A-Z0-9_]*)(?:=(.+))?", re.IGNORECASE)
     # 模板变量模式：{{VAR_NAME}} 或 {{VAR_NAME:default}}
-    template_var_pattern = re.compile(r'\{\{([A-Z_][A-Z0-9_]*?)(?::([^}]+))?\}\}')
+    template_var_pattern = re.compile(r"\{\{([A-Z_][A-Z0-9_]*?)(?::([^}]+))?\}\}")
 
     for line in lines:
         # 移除注释和前后空白
@@ -248,7 +248,7 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
             current_stage = from_match.group(1)
             current_params = {}
             continue
-        
+
         # 在第一个 FROM 之前，收集全局模板参数
         if not first_from_found:
             for match in template_var_pattern.finditer(line):
@@ -271,8 +271,8 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
             # 匹配 WORKDIR
             workdir_match = workdir_pattern.search(line)
             if workdir_match:
-                current_params["workdir"] = workdir_match.group(1).strip().strip('"\'')
-            
+                current_params["workdir"] = workdir_match.group(1).strip().strip("\"'")
+
             # 匹配 ENV（支持 ENV KEY=value 和 ENV KEY value 两种格式）
             env_match = env_pattern.search(line)
             if env_match:
@@ -282,40 +282,48 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
                 # ENV 可能有两种格式：
                 # 1. ENV KEY=value
                 # 2. ENV KEY value
-                if '=' in env_line:
+                if "=" in env_line:
                     # 格式1: KEY=value（可能多个，用空格分隔）
                     parts = env_line.split()
                     for part in parts:
-                        if '=' in part:
-                            key, value = part.split('=', 1)
-                            current_params["env"][key.strip()] = value.strip().strip('"\'')
+                        if "=" in part:
+                            key, value = part.split("=", 1)
+                            current_params["env"][key.strip()] = value.strip().strip(
+                                "\"'"
+                            )
                 else:
                     # 格式2: KEY value（单个环境变量）
                     parts = env_line.split(None, 1)
                     if len(parts) >= 2:
                         key = parts[0].strip()
-                        value = parts[1].strip().strip('"\'')
+                        value = parts[1].strip().strip("\"'")
                         current_params["env"][key] = value
-            
+
             # 匹配 CMD
             cmd_match = cmd_pattern.search(line)
             if cmd_match:
-                current_params["cmd"] = cmd_match.group(1).strip().strip('[]"\'')
-            
+                current_params["cmd"] = cmd_match.group(1).strip().strip("[]\"'")
+
             # 匹配 ENTRYPOINT
             entrypoint_match = entrypoint_pattern.search(line)
             if entrypoint_match:
-                current_params["entrypoint"] = entrypoint_match.group(1).strip().strip('[]"\'')
-            
+                current_params["entrypoint"] = (
+                    entrypoint_match.group(1).strip().strip("[]\"'")
+                )
+
             # 匹配 ARG（构建参数）
             arg_match = arg_pattern.search(line)
             if arg_match:
                 if "args" not in current_params:
                     current_params["args"] = {}
                 key = arg_match.group(1).strip()
-                value = arg_match.group(2).strip().strip('"\'') if arg_match.group(2) else ""
+                value = (
+                    arg_match.group(2).strip().strip("\"'")
+                    if arg_match.group(2)
+                    else ""
+                )
                 current_params["args"][key] = value
-            
+
             # 匹配模板变量（{{VAR_NAME}} 或 {{VAR_NAME:default}}）
             for match in template_var_pattern.finditer(line):
                 var_name = match.group(1)
@@ -323,16 +331,26 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
                 if "template_params" not in current_params:
                     current_params["template_params"] = []
                 # 检查是否已存在
-                existing = next((p for p in current_params["template_params"] if p["name"] == var_name), None)
+                existing = next(
+                    (
+                        p
+                        for p in current_params["template_params"]
+                        if p["name"] == var_name
+                    ),
+                    None,
+                )
                 if not existing:
                     from backend.template_parser import _get_var_description
-                    current_params["template_params"].append({
-                        "name": var_name,
-                        "default": default_value.strip(),
-                        "required": not bool(default_value),
-                        "description": _get_var_description(var_name),
-                        "type": "template"
-                    })
+
+                    current_params["template_params"].append(
+                        {
+                            "name": var_name,
+                            "default": default_value.strip(),
+                            "required": not bool(default_value),
+                            "description": _get_var_description(var_name),
+                            "type": "template",
+                        }
+                    )
 
     # 保存最后一个阶段
     if current_stage and current_stage.lower() not in excluded_stages:
@@ -1623,31 +1641,43 @@ class BuildManager:
             ) as f:
                 f.write(dockerfile_content)
             log(f"✅ 已生成 Dockerfile\n")
-            
+
             # 复制资源包到构建上下文
             if resource_package_ids:
                 try:
                     from backend.resource_package_manager import ResourcePackageManager
+
                     package_manager = ResourcePackageManager()
                     # 如果 resource_package_ids 是列表，转换为配置格式
-                    if isinstance(resource_package_ids, list) and len(resource_package_ids) > 0:
+                    if (
+                        isinstance(resource_package_ids, list)
+                        and len(resource_package_ids) > 0
+                    ):
                         if isinstance(resource_package_ids[0], dict):
                             # 已经是配置格式
                             package_configs = resource_package_ids
                         else:
                             # 只是ID列表，使用默认目录
-                            package_configs = [{'package_id': pid, 'target_dir': 'resources'} for pid in resource_package_ids]
-                        copied_packages = package_manager.copy_packages_to_build_context(
-                            package_configs,
-                            build_context
+                            package_configs = [
+                                {"package_id": pid, "target_dir": "resources"}
+                                for pid in resource_package_ids
+                            ]
+                        copied_packages = (
+                            package_manager.copy_packages_to_build_context(
+                                package_configs, build_context
+                            )
                         )
                         if copied_packages:
-                            log(f"✅ 已复制 {len(copied_packages)} 个资源包到构建上下文\n")
+                            log(
+                                f"✅ 已复制 {len(copied_packages)} 个资源包到构建上下文\n"
+                            )
                             # 输出每个资源包的详细信息
                             for config in package_configs:
-                                package_id = config.get('package_id')
+                                package_id = config.get("package_id")
                                 if package_id in copied_packages:
-                                    target_path = config.get('target_path') or config.get('target_dir', 'resources')
+                                    target_path = config.get(
+                                        "target_path"
+                                    ) or config.get("target_dir", "resources")
                                     log(f"   📦 {package_id} -> {target_path}\n")
                         else:
                             log(f"⚠️ 资源包复制失败或资源包不存在\n")
@@ -1657,9 +1687,9 @@ class BuildManager:
             log(f"\n🚀 开始构建镜像: {full_tag}\n")
             connection_info = docker_builder.get_connection_info()
             log(f"🐳 使用构建器: {connection_info}\n")
-            
+
             # 检查连接错误
-            if hasattr(docker_builder, 'get_connection_error'):
+            if hasattr(docker_builder, "get_connection_error"):
                 connection_error = docker_builder.get_connection_error()
                 if connection_error and connection_error != "未知错误":
                     log(f"⚠️ 连接警告: {connection_error}\n")
@@ -1678,11 +1708,17 @@ class BuildManager:
                 elif "error" in chunk:
                     last_error = chunk["error"]
                     log(f"\n🔥 [DOCKER ERROR]: {last_error}\n")
-                    
+
                     # 检测是否是镜像拉取失败的错误
-                    if "manifest" in last_error.lower() and ("not found" in last_error.lower() or "unknown" in last_error.lower()):
+                    if "manifest" in last_error.lower() and (
+                        "not found" in last_error.lower()
+                        or "unknown" in last_error.lower()
+                    ):
                         import re
-                        image_match = re.search(r'manifest for ([^\s]+) not found', last_error)
+
+                        image_match = re.search(
+                            r"manifest for ([^\s]+) not found", last_error
+                        )
                         if image_match:
                             image_name = image_match.group(1)
                             log(f"\n💡 镜像拉取失败分析:\n")
@@ -1692,16 +1728,23 @@ class BuildManager:
                             log(f"   2. 镜像标签不正确\n")
                             log(f"   3. 网络连接问题或仓库访问受限\n")
                             log(f"   4. 需要认证但未配置认证信息\n")
-                            log(f"   建议: 检查 Dockerfile 中的 FROM 指令，确认镜像名称和标签是否正确\n")
+                            log(
+                                f"   建议: 检查 Dockerfile 中的 FROM 指令，确认镜像名称和标签是否正确\n"
+                            )
                 elif "errorDetail" in chunk:
                     err_msg = chunk["errorDetail"].get("message", "Unknown")
                     last_error = err_msg
                     log(f"\n💥 [ERROR DETAIL]: {err_msg}\n")
-                    
+
                     # 检测是否是镜像拉取失败的错误
-                    if "manifest" in err_msg.lower() and ("not found" in err_msg.lower() or "unknown" in err_msg.lower()):
+                    if "manifest" in err_msg.lower() and (
+                        "not found" in err_msg.lower() or "unknown" in err_msg.lower()
+                    ):
                         import re
-                        image_match = re.search(r'manifest for ([^\s]+) not found', err_msg)
+
+                        image_match = re.search(
+                            r"manifest for ([^\s]+) not found", err_msg
+                        )
                         if image_match:
                             image_name = image_match.group(1)
                             log(f"\n💡 镜像拉取失败分析:\n")
@@ -1711,7 +1754,9 @@ class BuildManager:
                             log(f"   2. 镜像标签不正确\n")
                             log(f"   3. 网络连接问题或仓库访问受限\n")
                             log(f"   4. 需要认证但未配置认证信息\n")
-                            log(f"   建议: 检查 Dockerfile 中的 FROM 指令，确认镜像名称和标签是否正确\n")
+                            log(
+                                f"   建议: 检查 Dockerfile 中的 FROM 指令，确认镜像名称和标签是否正确\n"
+                            )
                 elif "aux" in chunk and "ID" in chunk["aux"]:
                     build_succeeded = True
 
@@ -1966,7 +2011,8 @@ class BuildManager:
                 service_push_config=service_push_config,  # 传递服务推送配置
                 push_mode=push_mode,  # 传递推送模式
                 build_steps=build_steps or {},  # 传递构建步骤信息
-                service_template_params=service_template_params or {},  # 传递服务模板参数
+                service_template_params=service_template_params
+                or {},  # 传递服务模板参数
                 resource_package_ids=resource_package_ids or [],  # 传递资源包ID列表
             )
             print(f"✅ 任务创建成功: task_id={task_id}")
@@ -2244,13 +2290,15 @@ class BuildManager:
                     "UPLOADED_FILENAME": "app.jar",  # 源码构建不需要这个
                     **template_params,
                 }
-                
+
                 # 如果有服务模板参数，合并到全局参数中（用于单服务构建）
                 if service_template_params:
                     # 如果只有一个服务，直接使用该服务的参数
                     if len(service_template_params) == 1:
                         service_name = list(service_template_params.keys())[0]
-                        all_template_params.update(service_template_params[service_name])
+                        all_template_params.update(
+                            service_template_params[service_name]
+                        )
                     else:
                         # 多个服务时，合并所有服务的参数（可能会有冲突，但先这样处理）
                         for service_params in service_template_params.values():
@@ -2269,26 +2317,38 @@ class BuildManager:
                 log(f"📋 发现 {len(resource_package_ids)} 个资源包配置\n")
                 try:
                     from backend.resource_package_manager import ResourcePackageManager
+
                     package_manager = ResourcePackageManager()
                     # 如果 resource_package_ids 是列表，转换为配置格式
-                    if isinstance(resource_package_ids, list) and len(resource_package_ids) > 0:
+                    if (
+                        isinstance(resource_package_ids, list)
+                        and len(resource_package_ids) > 0
+                    ):
                         if isinstance(resource_package_ids[0], dict):
                             # 已经是配置格式
                             package_configs = resource_package_ids
                         else:
                             # 只是ID列表，使用默认目录
-                            package_configs = [{'package_id': pid, 'target_dir': 'resources'} for pid in resource_package_ids]
-                        copied_packages = package_manager.copy_packages_to_build_context(
-                            package_configs,
-                            build_context
+                            package_configs = [
+                                {"package_id": pid, "target_dir": "resources"}
+                                for pid in resource_package_ids
+                            ]
+                        copied_packages = (
+                            package_manager.copy_packages_to_build_context(
+                                package_configs, build_context
+                            )
                         )
                         if copied_packages:
-                            log(f"✅ 已复制 {len(copied_packages)} 个资源包到构建上下文\n")
+                            log(
+                                f"✅ 已复制 {len(copied_packages)} 个资源包到构建上下文\n"
+                            )
                             # 输出每个资源包的详细信息
                             for config in package_configs:
-                                package_id = config.get('package_id')
+                                package_id = config.get("package_id")
                                 if package_id in copied_packages:
-                                    target_path = config.get('target_path') or config.get('target_dir', 'resources')
+                                    target_path = config.get(
+                                        "target_path"
+                                    ) or config.get("target_dir", "resources")
                                     log(f"   📦 {package_id} -> {target_path}\n")
                         else:
                             log(f"⚠️ 资源包复制失败或资源包不存在\n")
@@ -2470,12 +2530,19 @@ logs/
                                 if "error" in chunk:
                                     error_msg = chunk["error"]
                                     log(f"[{service_name}] ❌ 构建错误: {error_msg}\n")
-                                    
+
                                     # 检测是否是镜像拉取失败的错误
-                                    if "manifest" in error_msg.lower() and ("not found" in error_msg.lower() or "unknown" in error_msg.lower()):
+                                    if "manifest" in error_msg.lower() and (
+                                        "not found" in error_msg.lower()
+                                        or "unknown" in error_msg.lower()
+                                    ):
                                         # 提取镜像名称
                                         import re
-                                        image_match = re.search(r'manifest for ([^\s]+) not found', error_msg)
+
+                                        image_match = re.search(
+                                            r"manifest for ([^\s]+) not found",
+                                            error_msg,
+                                        )
                                         if image_match:
                                             image_name = image_match.group(1)
                                             enhanced_error = (
@@ -2487,9 +2554,11 @@ logs/
                                                 f"4. 需要认证但未配置认证信息\n"
                                                 f"建议：检查 Dockerfile 中的 FROM 指令，确认镜像名称和标签是否正确"
                                             )
-                                            log(f"[{service_name}] 💡 {enhanced_error}\n")
+                                            log(
+                                                f"[{service_name}] 💡 {enhanced_error}\n"
+                                            )
                                             raise RuntimeError(enhanced_error)
-                                    
+
                                     raise RuntimeError(
                                         f"服务 {service_name} 构建失败: {error_msg}"
                                     )
@@ -3259,10 +3328,10 @@ class BuildTaskManager:
                 self.tasks[task_id]["status"] = status
                 if error:
                     self.tasks[task_id]["error"] = error
-                if status in ("completed", "failed"):
+                if status in ("completed", "failed", "stopped"):
                     self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
 
-                    # 任务完成或失败时，解绑流水线
+                    # 任务完成、失败或停止时，解绑流水线
                     try:
                         from backend.pipeline_manager import PipelineManager
 
@@ -3271,11 +3340,38 @@ class BuildTaskManager:
                         if pipeline_id:
                             pipeline_manager.unbind_task(pipeline_id)
                             print(
-                                f"✅ 任务 {task_id[:8]} 已完成，解绑流水线 {pipeline_id[:8]}"
+                                f"✅ 任务 {task_id[:8]} 已结束，解绑流水线 {pipeline_id[:8]}"
                             )
                     except Exception as e:
                         print(f"⚠️ 解绑流水线失败: {e}")
         self._save_tasks()
+
+    def stop_task(self, task_id: str) -> bool:
+        """停止任务"""
+        with self.lock:
+            if task_id not in self.tasks:
+                return False
+            task = self.tasks[task_id]
+            current_status = task.get("status")
+
+            # 只有运行中或等待中的任务才能停止
+            if current_status not in ("running", "pending"):
+                return False
+
+            # 设置停止标志
+            task["stop_requested"] = True
+            task["status"] = "stopped"
+            task["completed_at"] = datetime.now().isoformat()
+            task["error"] = "任务已停止"
+
+            # 添加停止日志
+            if "logs" not in task:
+                task["logs"] = []
+            task["logs"].append("⚠️ 任务已被用户停止\n")
+
+        self._save_tasks()
+        print(f"✅ 任务 {task_id[:8]} 已停止")
+        return True
 
     def add_log(self, task_id: str, log_message: str):
         """添加任务日志（增强错误处理）"""
@@ -3328,9 +3424,14 @@ class BuildTaskManager:
             return "".join(logs)
 
     def delete_task(self, task_id: str) -> bool:
-        """删除任务"""
+        """删除任务（只有停止、完成或失败的任务才能删除）"""
         with self.lock:
             if task_id not in self.tasks:
+                return False
+            task = self.tasks[task_id]
+            status = task.get("status")
+            # 只有停止、完成或失败的任务才能删除
+            if status not in ("stopped", "completed", "failed"):
                 return False
             del self.tasks[task_id]
         self._save_tasks()
@@ -3516,12 +3617,33 @@ class ExportTaskManager:
             if task_id not in self.tasks:
                 return
             task_info = self.tasks[task_id]
+            # 检查是否已请求停止
+            if task_info.get("stop_requested"):
+                task_info["status"] = "stopped"
+                task_info["completed_at"] = datetime.now().isoformat()
+                task_info["error"] = "任务已停止"
+                self._save_tasks()
+                return
             task_info["status"] = "running"
 
         # 保存状态更新
         self._save_tasks()
 
         try:
+            # 检查停止标志
+            with self.lock:
+                if task_id not in self.tasks or self.tasks[task_id].get(
+                    "stop_requested"
+                ):
+                    with self.lock:
+                        if task_id in self.tasks:
+                            self.tasks[task_id]["status"] = "stopped"
+                            self.tasks[task_id][
+                                "completed_at"
+                            ] = datetime.now().isoformat()
+                            self.tasks[task_id]["error"] = "任务已停止"
+                    self._save_tasks()
+                    return
             image = task_info["image"]
             tag = task_info["tag"]
             compress = task_info["compress"]
@@ -3578,8 +3700,37 @@ class ExportTaskManager:
                 # 拉取镜像
                 pull_stream = docker_builder.pull_image(image, tag, auth_config)
                 for chunk in pull_stream:
+                    # 检查停止标志
+                    with self.lock:
+                        if task_id not in self.tasks or self.tasks[task_id].get(
+                            "stop_requested"
+                        ):
+                            with self.lock:
+                                if task_id in self.tasks:
+                                    self.tasks[task_id]["status"] = "stopped"
+                                    self.tasks[task_id][
+                                        "completed_at"
+                                    ] = datetime.now().isoformat()
+                                    self.tasks[task_id]["error"] = "任务已停止"
+                            self._save_tasks()
+                            return
                     if "error" in chunk:
                         raise RuntimeError(chunk["error"])
+
+            # 再次检查停止标志
+            with self.lock:
+                if task_id not in self.tasks or self.tasks[task_id].get(
+                    "stop_requested"
+                ):
+                    with self.lock:
+                        if task_id in self.tasks:
+                            self.tasks[task_id]["status"] = "stopped"
+                            self.tasks[task_id][
+                                "completed_at"
+                            ] = datetime.now().isoformat()
+                            self.tasks[task_id]["error"] = "任务已停止"
+                    self._save_tasks()
+                    return
 
             full_tag = f"{image}:{tag}"
             # 检查镜像是否存在（本地或已拉取）
@@ -3599,6 +3750,26 @@ class ExportTaskManager:
             image_stream = docker_builder.export_image(full_tag)
             with open(tar_path, "wb") as f:
                 for chunk in image_stream:
+                    # 检查停止标志
+                    with self.lock:
+                        if task_id not in self.tasks or self.tasks[task_id].get(
+                            "stop_requested"
+                        ):
+                            # 删除部分文件
+                            try:
+                                if os.path.exists(tar_path):
+                                    os.remove(tar_path)
+                            except:
+                                pass
+                            with self.lock:
+                                if task_id in self.tasks:
+                                    self.tasks[task_id]["status"] = "stopped"
+                                    self.tasks[task_id][
+                                        "completed_at"
+                                    ] = datetime.now().isoformat()
+                                    self.tasks[task_id]["error"] = "任务已停止"
+                            self._save_tasks()
+                            return
                     f.write(chunk)
 
             final_path = tar_path
@@ -3665,12 +3836,39 @@ class ExportTaskManager:
                 raise ValueError(f"任务文件不存在: {file_path}")
             return file_path
 
-    def delete_task(self, task_id: str) -> bool:
-        """删除任务及其文件"""
+    def stop_task(self, task_id: str) -> bool:
+        """停止任务"""
         with self.lock:
             if task_id not in self.tasks:
                 return False
             task = self.tasks[task_id]
+            current_status = task.get("status")
+
+            # 只有运行中或等待中的任务才能停止
+            if current_status not in ("running", "pending"):
+                return False
+
+            # 设置停止标志
+            task["stop_requested"] = True
+            task["status"] = "stopped"
+            task["completed_at"] = datetime.now().isoformat()
+            task["error"] = "任务已停止"
+
+        self._save_tasks()
+        print(f"✅ 导出任务 {task_id[:8]} 已停止")
+        return True
+
+    def delete_task(self, task_id: str) -> bool:
+        """删除任务及其文件（只有停止、完成或失败的任务才能删除）"""
+        with self.lock:
+            if task_id not in self.tasks:
+                return False
+            task = self.tasks[task_id]
+            status = task.get("status")
+            # 只有停止、完成或失败的任务才能删除
+            if status not in ("stopped", "completed", "failed"):
+                return False
+
             file_path = task.get("file_path")
             task_dir = os.path.join(self.tasks_dir, task_id)
 

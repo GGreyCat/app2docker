@@ -1291,12 +1291,43 @@ async def get_build_task_logs(task_id: str):
         raise HTTPException(status_code=500, detail=f"获取任务日志失败: {str(e)}")
 
 
-@router.delete("/build-tasks/{task_id}")
-async def delete_build_task(task_id: str, request: Request):
-    """删除构建任务"""
+@router.post("/build-tasks/{task_id}/stop")
+async def stop_build_task(task_id: str, request: Request):
+    """停止构建任务"""
     try:
         username = get_current_username(request)
         manager = BuildTaskManager()
+        if manager.stop_task(task_id):
+            OperationLogger.log(username, "stop_build_task", {"task_id": task_id})
+            return JSONResponse({"success": True, "message": "任务已停止"})
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="任务不存在或无法停止（只有运行中或等待中的任务才能停止）",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"停止任务失败: {str(e)}")
+
+
+@router.delete("/build-tasks/{task_id}")
+async def delete_build_task(task_id: str, request: Request):
+    """删除构建任务（只有停止、完成或失败的任务才能删除）"""
+    try:
+        username = get_current_username(request)
+        manager = BuildTaskManager()
+        task = manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        status = task.get("status")
+        if status not in ("stopped", "completed", "failed"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"无法删除任务：只有停止、完成或失败的任务才能删除（当前状态: {status}）",
+            )
+
         if manager.delete_task(task_id):
             OperationLogger.log(username, "delete_build_task", {"task_id": task_id})
             return JSONResponse({"success": True, "message": "任务已删除"})
@@ -1600,13 +1631,43 @@ async def download_export_task(task_id: str):
         raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
 
 
+@router.post("/export-tasks/{task_id}/stop")
+async def stop_export_task(task_id: str, request: Request):
+    """停止导出任务"""
+    try:
+        username = get_current_username(request)
+        task_manager = ExportTaskManager()
+        if task_manager.stop_task(task_id):
+            OperationLogger.log(username, "stop_export_task", {"task_id": task_id})
+            return JSONResponse({"success": True, "message": "任务已停止"})
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="任务不存在或无法停止（只有运行中或等待中的任务才能停止）",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"停止任务失败: {str(e)}")
+
+
 @router.delete("/export-tasks/{task_id}")
 async def delete_export_task(task_id: str, request: Request):
-    """删除导出任务"""
+    """删除导出任务（只有停止、完成或失败的任务才能删除）"""
     try:
         username = get_current_username(request)
         task_manager = ExportTaskManager()
         task = task_manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        status = task.get("status")
+        if status not in ("stopped", "completed", "failed"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"无法删除任务：只有停止、完成或失败的任务才能删除（当前状态: {status}）",
+            )
+
         success = task_manager.delete_task(task_id)
         if not success:
             raise HTTPException(status_code=404, detail="任务不存在")

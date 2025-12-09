@@ -2,10 +2,16 @@
 """
 Docker 构建器抽象类和实现类
 支持本地和远程 Docker 构建
+参考: https://github.com/docker/build-push-action
 """
 import os
+import subprocess
+import json
+import shutil
+import threading
+import queue
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, Iterator
+from typing import Optional, Dict, Any, Iterator, List, Union
 
 
 class DockerBuilder(ABC):
@@ -99,6 +105,261 @@ class DockerBuilder(ABC):
         """获取连接信息（用于日志显示）"""
         return "Unknown"
 
+    def _ensure_buildx_builder(self, docker_path: str) -> str:
+        """
+        确保 buildx builder 存在并可用
+        参考: https://github.com/docker/build-push-action
+        Returns:
+            builder 名称
+        """
+        # 检查默认 builder 是否存在
+        try:
+            result = subprocess.run(
+                [docker_path, "buildx", "ls"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                # 查找默认的 builder（标记为 * 的）
+                for line in result.stdout.splitlines():
+                    if "*" in line and "docker-container" in line:
+                        # 找到 docker-container driver 的 builder
+                        builder_name = line.split()[0]
+                        return builder_name
+                    elif "*" in line:
+                        # 使用默认 builder
+                        builder_name = line.split()[0]
+                        return builder_name
+        except Exception:
+            pass
+        
+        # 如果没有找到合适的 builder，尝试创建或使用默认的
+        return "default"
+    
+    def _build_with_buildx(
+        self, path: str, tag: str, dockerfile: Optional[str] = None, 
+        target: Optional[str] = None, platform: Optional[str] = None,
+        platforms: Optional[list] = None,
+        build_args: Optional[Dict[str, str]] = None,
+        cache_from: Optional[list] = None,
+        cache_to: Optional[str] = None,
+        load: bool = False,
+        push: bool = False,
+        outputs: Optional[list] = None,
+        **kwargs
+    ) -> Iterator[Dict]:
+        """
+        使用 docker buildx build 命令构建镜像
+        参考: https://github.com/docker/build-push-action
+        
+        Args:
+            path: 构建上下文路径
+            tag: 镜像标签（可以是列表，支持多标签）
+            dockerfile: Dockerfile 路径（相对于构建上下文）
+            target: 多阶段构建的目标阶段
+            platform: 目标平台（如 linux/amd64, linux/arm64），已废弃，使用 platforms
+            platforms: 目标平台列表（支持多平台构建）
+            build_args: 构建参数
+            cache_from: 缓存源列表（如 ["type=local,src=path/to/cache"]）
+            cache_to: 缓存目标（如 "type=local,dest=path/to/cache"）
+            load: 是否加载到本地 Docker（多平台构建时不能使用）
+            push: 是否推送到仓库
+            outputs: 输出选项列表（如 ["type=docker,dest=image.tar"]）
+            **kwargs: 其他参数（用于兼容性）
+        Returns:
+            构建日志流（格式与 Docker API 兼容）
+        """
+        # 检查 buildx 是否可用
+        docker_path = shutil.which("docker")
+        if not docker_path:
+            raise RuntimeError("未找到 docker 命令")
+        
+        # 检查 buildx 是否可用
+        try:
+            result = subprocess.run(
+                [docker_path, "buildx", "version"],
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                raise RuntimeError("docker buildx 不可用")
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            raise RuntimeError(f"docker buildx 不可用: {e}")
+        
+        # 确保 builder 存在
+        builder_name = self._ensure_buildx_builder(docker_path)
+        
+        # 构建 buildx 命令
+        cmd = [docker_path, "buildx", "build"]
+        
+        # 使用指定的 builder（如果需要）
+        if builder_name != "default":
+            cmd.extend(["--builder", builder_name])
+        
+        # 处理标签（支持多标签）
+        tags = tag if isinstance(tag, list) else [tag]
+        for t in tags:
+            cmd.extend(["--tag", t])
+        
+        # 构建上下文路径应该是绝对路径
+        build_context = os.path.abspath(path)
+        
+        # 添加 Dockerfile 路径
+        if dockerfile:
+            # dockerfile 路径应该是相对于构建上下文的
+            if os.path.isabs(dockerfile):
+                dockerfile_rel = os.path.relpath(dockerfile, build_context)
+            else:
+                dockerfile_rel = dockerfile
+            cmd.extend(["--file", dockerfile_rel])
+        
+        # 添加目标阶段（多阶段构建）
+        if target:
+            cmd.extend(["--target", target])
+        
+        # 添加平台（支持多平台构建）
+        if platforms:
+            # 多平台构建
+            for p in platforms:
+                cmd.extend(["--platform", p])
+        elif platform:
+            # 单平台构建（向后兼容）
+            cmd.extend(["--platform", platform])
+        
+        # 添加构建参数
+        if build_args:
+            for key, value in build_args.items():
+                if value is not None:
+                    cmd.extend(["--build-arg", f"{key}={value}"])
+        
+        # 添加缓存选项
+        if cache_from:
+            for cache in cache_from:
+                cmd.extend(["--cache-from", cache])
+        
+        if cache_to:
+            cmd.extend(["--cache-to", cache_to])
+        
+        # 添加输出选项
+        if outputs:
+            for output in outputs:
+                cmd.extend(["--output", output])
+        elif push:
+            # 如果指定了 push，使用 registry 输出
+            cmd.append("--push")
+        elif load:
+            # 如果指定了 load，且没有多平台构建，则加载到本地
+            # 注意：多平台构建不能使用 --load，必须使用 --push 或 --output
+            if platforms and len(platforms) > 1:
+                raise RuntimeError("多平台构建不能使用 --load，请使用 --push 或 --output")
+            if platform:
+                # 单平台构建可以使用 --load
+                cmd.append("--load")
+            else:
+                # 没有指定平台，默认加载到本地
+                cmd.append("--load")
+        
+        # 添加其他常用参数
+        if kwargs.get("pull", False):
+            cmd.append("--pull")
+        
+        if kwargs.get("no_cache", False):
+            cmd.append("--no-cache")
+        
+        # 添加进度输出格式（plain 格式，与 Docker API 兼容）
+        # 使用 plain 格式以便更好地解析输出
+        cmd.extend(["--progress", "plain"])
+        
+        # 添加构建上下文路径（使用绝对路径）
+        cmd.append(build_context)
+        
+        # 启动构建进程
+        try:
+            # 使用 PIPE 分别捕获 stdout 和 stderr，以便更好地处理错误
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                cwd=build_context,
+            )
+            
+            # 使用线程同时读取 stdout 和 stderr
+            output_queue = queue.Queue()
+            error_lines = []
+            
+            def read_stdout():
+                try:
+                    for line in process.stdout:
+                        if line:
+                            output_queue.put(("stdout", line))
+                except Exception:
+                    pass
+                output_queue.put(("stdout", None))
+            
+            def read_stderr():
+                try:
+                    for line in process.stderr:
+                        if line:
+                            error_lines.append(line)
+                            output_queue.put(("stderr", line))
+                except Exception:
+                    pass
+                output_queue.put(("stderr", None))
+            
+            # 启动读取线程
+            stdout_thread = threading.Thread(target=read_stdout, daemon=True)
+            stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+            stdout_thread.start()
+            stderr_thread.start()
+            
+            # 流式读取输出
+            stdout_done = False
+            stderr_done = False
+            
+            while not (stdout_done and stderr_done):
+                try:
+                    source, line = output_queue.get(timeout=0.1)
+                    if line is None:
+                        if source == "stdout":
+                            stdout_done = True
+                        else:
+                            stderr_done = True
+                    else:
+                        # 将输出转换为与 Docker API 兼容的格式
+                        yield {"stream": line}
+                except queue.Empty:
+                    # 检查进程是否已经结束
+                    if process.poll() is not None:
+                        # 进程已结束，读取剩余输出
+                        break
+            
+            # 等待进程完成
+            return_code = process.wait()
+            
+            # 读取剩余输出
+            while not output_queue.empty():
+                try:
+                    source, line = output_queue.get_nowait()
+                    if line is not None:
+                        yield {"stream": line}
+                except queue.Empty:
+                    break
+            
+            if return_code != 0:
+                error_msg = f"docker buildx build 失败，退出码: {return_code}"
+                if error_lines:
+                    error_msg += f"\n错误信息:\n{''.join(error_lines[-10:])}"  # 只显示最后10行错误
+                raise RuntimeError(error_msg)
+            
+            # 构建成功，返回最终结果
+            yield {"stream": f"Successfully built and tagged {', '.join(tags)}\n"}
+            
+        except Exception as e:
+            raise RuntimeError(f"执行 docker buildx build 失败: {e}")
+
 
 class LocalDockerBuilder(DockerBuilder):
     """本地 Docker 构建器"""
@@ -153,57 +414,57 @@ class LocalDockerBuilder(DockerBuilder):
         except Exception:
             return False
 
-    def build_image(self, path: str, tag: str, **kwargs) -> Iterator[Dict]:
-        """构建 Docker 镜像（强制启用 BuildKit）"""
+    def build_image(self, path: str, tag: Union[str, List[str]], **kwargs) -> Iterator[Dict]:
+        """
+        构建 Docker 镜像（使用 buildx）
+        参考: https://github.com/docker/build-push-action
+        """
         if not self.available:
             raise RuntimeError("本地 Docker 不可用")
 
-        # 强制启用 BuildKit（方法一：通过环境变量）
-        original_buildkit = os.environ.get("DOCKER_BUILDKIT")
-        os.environ["DOCKER_BUILDKIT"] = "1"
-        # 同时设置 COMPOSE_DOCKER_CLI_BUILD 以支持 docker-compose
-        original_compose_buildkit = os.environ.get("COMPOSE_DOCKER_CLI_BUILD")
-        os.environ["COMPOSE_DOCKER_CLI_BUILD"] = "1"
+        # 如果有认证信息，先尝试登录
+        if hasattr(self, "auth_config") and self.auth_config:
+            try:
+                # 尝试登录到仓库
+                self.client.login(
+                    username=self.auth_config["username"],
+                    password=self.auth_config["password"],
+                    registry=self.auth_config.get("serveraddress", "docker.io"),
+                )
+                print(
+                    f"✅ 已登录到仓库: {self.auth_config.get('serveraddress', 'docker.io')}"
+                )
+            except Exception as e:
+                print(f"⚠️ 仓库登录失败: {e}")
 
-        try:
-            # 准备构建参数，包含认证信息
-            build_kwargs = {
-                "path": path,
-                "tag": tag,
-                "rm": True,
-                "decode": True,
-            }
-
-            # 如果有认证信息，先尝试登录
-            if hasattr(self, "auth_config") and self.auth_config:
-                try:
-                    # 尝试登录到仓库
-                    self.client.login(
-                        username=self.auth_config["username"],
-                        password=self.auth_config["password"],
-                        registry=self.auth_config.get("serveraddress", "docker.io"),
-                    )
-                    print(
-                        f"✅ 已登录到仓库: {self.auth_config.get('serveraddress', 'docker.io')}"
-                    )
-                except Exception as e:
-                    print(f"⚠️ 仓库登录失败: {e}")
-
-            build_kwargs.update(kwargs)
-
-            # 使用低级 API 获取流式输出（BuildKit 会自动启用）
-            return self.client.api.build(**build_kwargs)
-        finally:
-            # 恢复原始环境变量
-            if original_buildkit is not None:
-                os.environ["DOCKER_BUILDKIT"] = original_buildkit
-            elif "DOCKER_BUILDKIT" in os.environ:
-                del os.environ["DOCKER_BUILDKIT"]
-
-            if original_compose_buildkit is not None:
-                os.environ["COMPOSE_DOCKER_CLI_BUILD"] = original_compose_buildkit
-            elif "COMPOSE_DOCKER_CLI_BUILD" in os.environ:
-                del os.environ["COMPOSE_DOCKER_CLI_BUILD"]
+        # 提取 buildx 相关参数
+        dockerfile = kwargs.get("dockerfile")
+        target = kwargs.get("target")
+        platform = kwargs.get("platform")
+        platforms = kwargs.get("platforms")
+        build_args = kwargs.get("buildargs") or kwargs.get("build_args")
+        cache_from = kwargs.get("cache_from")
+        cache_to = kwargs.get("cache_to")
+        load = kwargs.get("load", False)
+        push = kwargs.get("push", False)
+        outputs = kwargs.get("outputs")
+        
+        # 使用 buildx 构建
+        return self._build_with_buildx(
+            path=path,
+            tag=tag,
+            dockerfile=dockerfile,
+            target=target,
+            platform=platform,
+            platforms=platforms,
+            build_args=build_args,
+            cache_from=cache_from,
+            cache_to=cache_to,
+            load=load,
+            push=push,
+            outputs=outputs,
+            **kwargs
+        )
 
     def push_image(
         self, repository: str, tag: str = "latest", auth_config: Optional[Dict] = None
@@ -388,60 +649,85 @@ class RemoteDockerBuilder(DockerBuilder):
         """获取连接错误信息"""
         return getattr(self, "_connection_error", None) or "未知错误"
 
-    def build_image(self, path: str, tag: str, **kwargs) -> Iterator[Dict]:
-        """构建 Docker 镜像（强制启用 BuildKit）"""
+    def build_image(self, path: str, tag: Union[str, List[str]], **kwargs) -> Iterator[Dict]:
+        """
+        构建 Docker 镜像（使用 buildx，远程 Docker 需要在本地执行 buildx）
+        参考: https://github.com/docker/build-push-action
+        """
         if not self.available:
             error_msg = "远程 Docker 不可用"
             if hasattr(self, "_connection_error") and self._connection_error:
                 error_msg += f": {self._connection_error}"
             raise RuntimeError(error_msg)
 
-        # 强制启用 BuildKit（方法一：通过环境变量）
-        original_buildkit = os.environ.get("DOCKER_BUILDKIT")
-        os.environ["DOCKER_BUILDKIT"] = "1"
-        # 同时设置 COMPOSE_DOCKER_CLI_BUILD 以支持 docker-compose
-        original_compose_buildkit = os.environ.get("COMPOSE_DOCKER_CLI_BUILD")
-        os.environ["COMPOSE_DOCKER_CLI_BUILD"] = "1"
+        # 注意：buildx 需要在本地执行，但构建的镜像会推送到远程 Docker
+        # 如果有认证信息，先尝试登录
+        if hasattr(self, "auth_config") and self.auth_config:
+            try:
+                # 尝试登录到仓库
+                self.client.login(
+                    username=self.auth_config["username"],
+                    password=self.auth_config["password"],
+                    registry=self.auth_config.get("serveraddress", "docker.io"),
+                )
+                print(
+                    f"✅ 已登录到仓库: {self.auth_config.get('serveraddress', 'docker.io')}"
+                )
+            except Exception as e:
+                print(f"⚠️ 仓库登录失败: {e}")
 
+        # 提取 buildx 相关参数
+        dockerfile = kwargs.get("dockerfile")
+        target = kwargs.get("target")
+        platform = kwargs.get("platform")
+        platforms = kwargs.get("platforms")
+        build_args = kwargs.get("buildargs") or kwargs.get("build_args")
+        cache_from = kwargs.get("cache_from")
+        cache_to = kwargs.get("cache_to")
+        load = kwargs.get("load", False)
+        push = kwargs.get("push", False)
+        outputs = kwargs.get("outputs")
+        
+        # 对于远程 Docker，需要设置 DOCKER_HOST 环境变量
+        # 获取远程配置
+        remote_config = self.config.get("remote", {})
+        original_docker_host = os.environ.get("DOCKER_HOST")
+        
         try:
-            # 准备构建参数，包含认证信息
-            build_kwargs = {
-                "path": path,
-                "tag": tag,
-                "rm": True,
-                "decode": True,
-            }
-
-            # 如果有认证信息，先尝试登录
-            if hasattr(self, "auth_config") and self.auth_config:
-                try:
-                    # 尝试登录到仓库
-                    self.client.login(
-                        username=self.auth_config["username"],
-                        password=self.auth_config["password"],
-                        registry=self.auth_config.get("serveraddress", "docker.io"),
-                    )
-                    print(
-                        f"✅ 已登录到仓库: {self.auth_config.get('serveraddress', 'docker.io')}"
-                    )
-                except Exception as e:
-                    print(f"⚠️ 仓库登录失败: {e}")
-
-            build_kwargs.update(kwargs)
-
-            # 使用低级 API 获取流式输出（BuildKit 会自动启用）
-            return self.client.api.build(**build_kwargs)
+            if remote_config.get("host"):
+                host = remote_config.get("host")
+                port = remote_config.get("port", 2375)
+                use_tls = remote_config.get("use_tls", False)
+                
+                if use_tls:
+                    docker_host = f"https://{host}:{port}"
+                else:
+                    docker_host = f"tcp://{host}:{port}"
+                
+                os.environ["DOCKER_HOST"] = docker_host
+            
+            # 使用 buildx 构建
+            return self._build_with_buildx(
+                path=path,
+                tag=tag,
+                dockerfile=dockerfile,
+                target=target,
+                platform=platform,
+                platforms=platforms,
+                build_args=build_args,
+                cache_from=cache_from,
+                cache_to=cache_to,
+                load=load,
+                push=push,
+                outputs=outputs,
+                **kwargs
+            )
         finally:
-            # 恢复原始环境变量
-            if original_buildkit is not None:
-                os.environ["DOCKER_BUILDKIT"] = original_buildkit
-            elif "DOCKER_BUILDKIT" in os.environ:
-                del os.environ["DOCKER_BUILDKIT"]
-
-            if original_compose_buildkit is not None:
-                os.environ["COMPOSE_DOCKER_CLI_BUILD"] = original_compose_buildkit
-            elif "COMPOSE_DOCKER_CLI_BUILD" in os.environ:
-                del os.environ["COMPOSE_DOCKER_CLI_BUILD"]
+            # 恢复原始 DOCKER_HOST
+            if original_docker_host is not None:
+                os.environ["DOCKER_HOST"] = original_docker_host
+            elif "DOCKER_HOST" in os.environ:
+                del os.environ["DOCKER_HOST"]
 
     def push_image(
         self, repository: str, tag: str = "latest", auth_config: Optional[Dict] = None

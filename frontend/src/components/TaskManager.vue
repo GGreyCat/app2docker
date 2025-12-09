@@ -102,6 +102,9 @@
               <span v-else-if="task.status === 'running'" class="badge bg-primary">
                 <span class="spinner-border spinner-border-sm me-1"></span> 进行中
               </span>
+              <span v-else-if="task.status === 'stopped'" class="badge bg-warning">
+                <i class="fas fa-stop-circle"></i> 已停止
+              </span>
               <span v-else-if="task.status === 'completed'" class="badge bg-success">
                 <i class="fas fa-check-circle"></i> 已完成
               </span>
@@ -156,12 +159,14 @@
                   <i class="fas fa-terminal"></i> 日志
                 </button>
                 <button 
-                  v-if="task.status === 'failed' && task.error"
-                  class="btn btn-sm btn-outline-warning"
-                  @click="showErrorDetails(task)"
-                  :title="'查看错误详情'"
+                  v-if="task.task_category === 'export' && task.status === 'failed'"
+                  class="btn btn-sm btn-outline-primary"
+                  @click="retryExportTask(task)"
+                  :disabled="retrying === task.task_id"
+                  :title="'重试导出任务'"
                 >
-                  <i class="fas fa-exclamation-triangle"></i> 错误
+                  <i class="fas fa-redo"></i> 重试
+                  <span v-if="retrying === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
                 </button>
                 <button 
                   v-if="task.task_category === 'export' && task.status === 'completed'"
@@ -174,12 +179,16 @@
                   <span v-if="downloading === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
                 </button>
                 <button 
-                  class="btn btn-sm btn-outline-danger"
-                  @click="deleteTask(task)"
-                  :disabled="deleting === task.task_id"
-                  :title="'删除任务'"
+                  class="btn btn-sm"
+                  :class="(task.status === 'running' || task.status === 'pending') ? 'btn-outline-warning' : 'btn-outline-danger'"
+                  @click="(task.status === 'running' || task.status === 'pending') ? stopTask(task) : deleteTask(task)"
+                  :disabled="(task.status === 'running' || task.status === 'pending') ? (stopping === task.task_id) : (deleting === task.task_id)"
+                  :title="(task.status === 'running' || task.status === 'pending') ? '停止任务' : '删除任务（只有停止、完成或失败的任务才能删除）'"
                 >
-                  <i class="fas fa-trash"></i>
+                  <i :class="(task.status === 'running' || task.status === 'pending') ? 'fas fa-stop' : 'fas fa-trash'"></i> 
+                  {{ (task.status === 'running' || task.status === 'pending') ? '停止' : '删除' }}
+                  <span v-if="(task.status === 'running' || task.status === 'pending') && stopping === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
+                  <span v-if="(task.status !== 'running' && task.status !== 'pending') && deleting === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
                 </button>
               </div>
             </td>
@@ -232,66 +241,50 @@
       <i class="fas fa-exclamation-circle"></i> {{ error }}
     </div>
 
-    <!-- 错误详情模态框 -->
-    <div v-if="showErrorModal && selectedErrorTask" class="modal fade show" style="display: block;" tabindex="-1" @click.self="closeErrorModal">
-      <div class="modal-dialog modal-dialog-scrollable">
-        <div class="modal-content">
-          <div class="modal-header bg-danger text-white">
-            <h5 class="modal-title">
-              <i class="fas fa-exclamation-triangle"></i> 任务错误详情
-            </h5>
-            <button type="button" class="btn-close btn-close-white" @click="closeErrorModal"></button>
-          </div>
-          <div class="modal-body">
-            <div class="mb-3">
-              <strong>任务信息:</strong>
-              <div class="mt-1">
-                <code>{{ selectedErrorTask.image || selectedErrorTask.task_type }}:{{ selectedErrorTask.tag || 'latest' }}</code>
-              </div>
-            </div>
-            <div class="mb-3">
-              <strong>任务类型:</strong>
-              <span class="badge" :class="selectedErrorTask.task_category === 'build' ? 'bg-info' : 'bg-secondary'">
-                {{ selectedErrorTask.task_category === 'build' ? '构建任务' : '导出任务' }}
-              </span>
-            </div>
-            <div class="mb-3">
-              <strong>创建时间:</strong> {{ formatTime(selectedErrorTask.created_at) }}
-            </div>
-            <div class="mb-3" v-if="selectedErrorTask.completed_at">
-              <strong>失败时间:</strong> {{ formatTime(selectedErrorTask.completed_at) }}
-            </div>
-            <div>
-              <strong>错误信息:</strong>
-              <pre class="bg-dark text-light p-3 rounded mt-2" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem;">{{ selectedErrorTask.error }}</pre>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" @click="closeErrorModal">关闭</button>
-            <button 
-              v-if="selectedErrorTask.task_category === 'build'"
-              type="button" 
-              class="btn btn-info" 
-              @click="viewLogsFromError(selectedErrorTask)"
-            >
-              <i class="fas fa-terminal"></i> 查看完整日志
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div v-if="showErrorModal" class="modal-backdrop fade show" @click="closeErrorModal"></div>
-
     <!-- 日志模态框 -->
     <div v-if="showLogModal && selectedTask" class="modal fade show" style="display: block;" tabindex="-1" @click.self="closeLogModal">
       <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">任务日志 - {{ selectedTask.image }}:{{ selectedTask.tag }}</h5>
-            <button type="button" class="btn-close" @click="closeLogModal"></button>
+          <div class="modal-header" :class="getStatusHeaderClass(selectedTask.status)">
+            <h5 class="modal-title">
+              <i :class="getStatusIcon(selectedTask.status)"></i>
+              任务日志 - {{ selectedTask.image }}:{{ selectedTask.tag }}
+            </h5>
+            <button type="button" class="btn-close" :class="selectedTask.status === 'failed' ? 'btn-close-white' : ''" @click="closeLogModal"></button>
           </div>
           <div class="modal-body">
-            <pre class="bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto; font-size: 0.85rem;">{{ taskLogs }}</pre>
+            <!-- 任务概况 -->
+            <div v-if="selectedTask.status === 'failed' || selectedTask.status === 'completed' || selectedTask.status === 'stopped'" 
+                 class="mb-3 p-3 rounded" 
+                 :class="getStatusSummaryClass(selectedTask.status)">
+              <div class="d-flex align-items-center mb-2">
+                <i :class="getStatusIcon(selectedTask.status)" class="me-2"></i>
+                <strong>{{ getStatusText(selectedTask.status) }}</strong>
+              </div>
+              <div v-if="selectedTask.status === 'failed' && selectedTask.error" class="mt-2">
+                <strong>错误信息：</strong>
+                <pre class="mb-0 mt-1 p-2 bg-dark text-light rounded" style="font-size: 0.85rem; max-height: 150px; overflow-y: auto;">{{ selectedTask.error }}</pre>
+              </div>
+              <div v-if="selectedTask.status === 'completed'" class="mt-2 small">
+                <div><strong>创建时间：</strong>{{ formatTime(selectedTask.created_at) }}</div>
+                <div v-if="selectedTask.completed_at"><strong>完成时间：</strong>{{ formatTime(selectedTask.completed_at) }}</div>
+                <div v-if="selectedTask.completed_at"><strong>耗时：</strong>{{ calculateDuration(selectedTask.created_at, selectedTask.completed_at) }}</div>
+              </div>
+              <div v-if="selectedTask.status === 'stopped'" class="mt-2 small">
+                <div><strong>创建时间：</strong>{{ formatTime(selectedTask.created_at) }}</div>
+                <div v-if="selectedTask.completed_at"><strong>停止时间：</strong>{{ formatTime(selectedTask.completed_at) }}</div>
+              </div>
+            </div>
+            <!-- 日志内容 -->
+            <div>
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong>构建日志：</strong>
+                <button class="btn btn-sm btn-outline-secondary" @click="copyLogs">
+                  <i class="fas fa-copy"></i> 复制
+                </button>
+              </div>
+              <pre class="bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto; font-size: 0.85rem;">{{ taskLogs }}</pre>
+            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" @click="closeLogModal">关闭</button>
@@ -462,12 +455,13 @@ const categoryFilter = ref('')
 const downloading = ref(null)
 const deleting = ref(null)
 const rebuilding = ref(null)  // 重建中的任务ID
+const retrying = ref(null)  // 重试中的任务ID
+const stopping = ref(null)  // 停止中的任务ID
 const viewingLogs = ref(null)
 const showLogModal = ref(false)
 const selectedTask = ref(null)
 const taskLogs = ref('')
-const showErrorModal = ref(false)
-const selectedErrorTask = ref(null)
+// 错误弹窗已移除，错误信息现在显示在日志顶部
 const currentPage = ref(1)  // 当前页码
 const pageSize = ref(10)    // 每页显示数量
 const cleaning = ref(false)  // 清理中状态
@@ -565,20 +559,8 @@ function resetPage() {
   currentPage.value = 1
 }
 
-function showErrorDetails(task) {
-  selectedErrorTask.value = task
-  showErrorModal.value = true
-}
-
-function closeErrorModal() {
-  showErrorModal.value = false
-  selectedErrorTask.value = null
-}
-
-function viewLogsFromError(task) {
-  closeErrorModal()
-  viewLogs(task)
-}
+// handleLogsOrError 函数已移除，统一使用 viewLogs 函数
+// 错误弹窗相关函数已移除，错误信息现在显示在日志顶部
 
 function formatTime(isoString) {
   if (!isoString) return '-'
@@ -646,6 +628,51 @@ async function loadTasks() {
   }
 }
 
+// 只刷新运行中任务的状态
+async function refreshRunningTasks() {
+  try {
+    // 获取所有运行中的任务ID
+    const runningTaskIds = tasks.value
+      .filter(t => t.status === 'running' || t.status === 'pending')
+      .map(t => ({ id: t.task_id, category: t.task_category }))
+    
+    if (runningTaskIds.length === 0) {
+      return
+    }
+    
+    // 逐个更新运行中任务的状态
+    for (const { id, category } of runningTaskIds) {
+      try {
+        let updatedTask = null
+        if (category === 'build') {
+          const res = await axios.get(`/api/build-tasks/${id}`)
+          updatedTask = res.data
+        } else if (category === 'export') {
+          const res = await axios.get(`/api/export-tasks/${id}`)
+          updatedTask = res.data.task
+        }
+        
+        if (updatedTask) {
+          // 更新对应任务的状态
+          const index = tasks.value.findIndex(t => t.task_id === id)
+          if (index !== -1) {
+            // 只更新状态相关字段，保留其他字段
+            tasks.value[index].status = updatedTask.status
+            tasks.value[index].completed_at = updatedTask.completed_at
+            tasks.value[index].error = updatedTask.error
+            tasks.value[index].file_size = updatedTask.file_size
+          }
+        }
+      } catch (err) {
+        // 单个任务更新失败不影响其他任务
+        console.error(`更新任务 ${id} 状态失败:`, err)
+      }
+    }
+  } catch (err) {
+    console.error('刷新运行中任务状态失败:', err)
+  }
+}
+
 async function viewLogs(task) {
   if (viewingLogs.value) return
   
@@ -670,6 +697,47 @@ async function viewLogs(task) {
   } finally {
     viewingLogs.value = null
   }
+}
+
+function getStatusHeaderClass(status) {
+  if (status === 'failed') return 'bg-danger text-white'
+  if (status === 'completed') return 'bg-success text-white'
+  if (status === 'stopped') return 'bg-warning text-dark'
+  return ''
+}
+
+function getStatusSummaryClass(status) {
+  if (status === 'failed') return 'bg-danger bg-opacity-10 border border-danger'
+  if (status === 'completed') return 'bg-success bg-opacity-10 border border-success'
+  if (status === 'stopped') return 'bg-warning bg-opacity-10 border border-warning'
+  return 'bg-secondary bg-opacity-10'
+}
+
+function getStatusIcon(status) {
+  if (status === 'failed') return 'fas fa-times-circle'
+  if (status === 'completed') return 'fas fa-check-circle'
+  if (status === 'stopped') return 'fas fa-stop-circle'
+  if (status === 'running') return 'fas fa-spinner fa-spin'
+  if (status === 'pending') return 'fas fa-clock'
+  return 'fas fa-info-circle'
+}
+
+function getStatusText(status) {
+  if (status === 'failed') return '任务失败'
+  if (status === 'completed') return '任务成功'
+  if (status === 'stopped') return '任务已停止'
+  if (status === 'running') return '任务进行中'
+  if (status === 'pending') return '任务等待中'
+  return '未知状态'
+}
+
+function copyLogs() {
+  navigator.clipboard.writeText(taskLogs.value).then(() => {
+    alert('日志已复制到剪贴板')
+  }).catch(err => {
+    console.error('复制失败:', err)
+    alert('复制失败，请手动选择文本复制')
+  })
 }
 
 function closeLogModal() {
@@ -718,9 +786,54 @@ async function downloadTask(task) {
   }
 }
 
+async function stopTask(task) {
+  if (stopping.value) return
+  
+  // 确认对话框
+  const taskName = task.image || task.task_type || '未知任务'
+  const taskTag = task.tag || 'latest'
+  if (!confirm(`确定要停止任务 "${taskName}:${taskTag}" 吗？`)) {
+    return
+  }
+  
+  stopping.value = task.task_id
+  error.value = null
+  
+  try {
+    if (task.task_category === 'build') {
+      await axios.post(`/api/build-tasks/${task.task_id}/stop`)
+    } else {
+      await axios.post(`/api/export-tasks/${task.task_id}/stop`)
+    }
+    
+    // 刷新任务列表
+    await loadTasks()
+  } catch (err) {
+    console.error('停止任务失败:', err)
+    const errorMsg = err.response?.data?.detail || err.response?.data?.error || err.message || '停止失败'
+    error.value = `停止任务失败: ${errorMsg}`
+    // 5秒后自动清除错误提示
+    setTimeout(() => {
+      if (error.value && error.value.includes('停止任务失败')) {
+        error.value = null
+      }
+    }, 5000)
+  } finally {
+    stopping.value = null
+  }
+}
+
 async function deleteTask(task) {
   const taskName = task.image || task.task_type || '未知任务'
   const taskTag = task.tag || '-'
+  const status = task.status
+  
+  // 检查任务状态
+  if (status === 'running' || status === 'pending') {
+    alert(`无法删除任务：只有停止、完成或失败的任务才能删除（当前状态: ${status === 'running' ? '进行中' : '等待中'}）\n\n请先停止任务。`)
+    return
+  }
+  
   if (!confirm(`确定要删除任务 "${taskName}:${taskTag}" 吗？`)) {
     return
   }
@@ -921,18 +1034,20 @@ async function rebuildTask(task) {
   
   try {
     // 从任务信息中提取构建参数
+    // 优先从 config 字段获取，如果没有则从任务本身获取
+    const taskConfig = task.config || {}
     const config = {
-      git_url: task.git_url,
-      branch: task.branch || 'main',
-      imagename: task.image,  // API 使用 imagename 而不是 image_name
-      tag: task.tag || 'latest',
-      project_type: task.project_type || 'jar',
-      template: task.selected_template || '',
-      template_params: task.template_params ? JSON.stringify(task.template_params) : undefined,
-      sub_path: task.sub_path || '',
-      use_project_dockerfile: task.use_project_dockerfile !== false,
-      dockerfile_name: task.dockerfile_name || 'Dockerfile',
-      push: task.should_push ? 'on' : 'off',  // API 使用 'on'/'off' 字符串
+      git_url: taskConfig.git_url || task.git_url,
+      branch: taskConfig.branch || task.branch || 'main',
+      imagename: task.image || taskConfig.image_name,  // API 使用 imagename 而不是 image_name
+      tag: task.tag || taskConfig.tag || 'latest',
+      project_type: taskConfig.project_type || task.project_type || 'jar',
+      template: taskConfig.template || task.selected_template || '',
+      template_params: taskConfig.template_params ? (typeof taskConfig.template_params === 'string' ? taskConfig.template_params : JSON.stringify(taskConfig.template_params)) : (task.template_params ? JSON.stringify(task.template_params) : undefined),
+      sub_path: taskConfig.sub_path || task.sub_path || '',
+      use_project_dockerfile: taskConfig.use_project_dockerfile !== false && task.use_project_dockerfile !== false,
+      dockerfile_name: taskConfig.dockerfile_name || task.dockerfile_name || 'Dockerfile',
+      push: (taskConfig.push || task.should_push) ? 'on' : 'off',  // API 使用 'on'/'off' 字符串
     }
     
     // 验证必要参数
@@ -940,7 +1055,7 @@ async function rebuildTask(task) {
       throw new Error('任务缺少 Git 仓库地址，无法重新构建')
     }
     
-    if (!config.image_name) {
+    if (!config.imagename) {
       throw new Error('任务缺少镜像名称，无法重新构建')
     }
     
@@ -971,14 +1086,67 @@ async function rebuildTask(task) {
   }
 }
 
+// 重试导出任务
+async function retryExportTask(task) {
+  if (retrying.value) return
+  
+  // 确认对话框
+  const taskName = task.image || '未知任务'
+  const taskTag = task.tag || 'latest'
+  if (!confirm(`确定要重试导出任务 "${taskName}:${taskTag}" 吗？`)) {
+    return
+  }
+  
+  retrying.value = task.task_id
+  error.value = null
+  
+  try {
+    // 从任务信息中提取导出参数
+    const config = {
+      image: task.image,
+      tag: task.tag || 'latest',
+      compress: task.compress || 'none',
+      registry: task.registry || null,
+      use_local: task.use_local || false,
+    }
+    
+    // 验证必要参数
+    if (!config.image) {
+      throw new Error('任务缺少镜像名称，无法重试导出')
+    }
+    
+    console.log('🔄 重试导出任务:', config)
+    
+    // 调用导出 API
+    const res = await axios.post('/api/export-tasks', config)
+    
+    if (res.data.task_id) {
+      alert(`重试导出任务已创建！\n任务 ID: ${res.data.task_id}`)
+      // 刷新任务列表
+      await loadTasks()
+    } else {
+      throw new Error('创建任务失败，未返回任务 ID')
+    }
+  } catch (err) {
+    console.error('重试导出失败:', err)
+    const errorMsg = err.response?.data?.detail || err.response?.data?.error || err.message || '重试导出失败'
+    error.value = `重试导出失败: ${errorMsg}`
+    // 5秒后自动清除错误提示
+    setTimeout(() => {
+      if (error.value && error.value.includes('重试导出失败')) {
+        error.value = null
+      }
+    }, 5000)
+  } finally {
+    retrying.value = null
+  }
+}
+
 onMounted(() => {
   loadTasks()
-  // 每5秒自动刷新一次（只刷新进行中的任务）
+  // 每5秒自动刷新一次（只刷新运行中任务的状态，不刷新整个列表）
   refreshInterval = setInterval(() => {
-    const hasRunning = tasks.value.some(t => t.status === 'running' || t.status === 'pending')
-    if (hasRunning) {
-      loadTasks()
-    }
+    refreshRunningTasks()
   }, 5000)
 })
 
