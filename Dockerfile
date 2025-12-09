@@ -37,6 +37,13 @@ RUN npm run build
 # ============ 阶段 2: Python 后端 ============
 # 使用阿里云 Python 镜像加速下载
 FROM ac2-registry.cn-hangzhou.cr.aliyuncs.com/ac2/base:ubuntu22.04-py310
+
+# 初始化 apt 源
+RUN mkdir -p /etc/apt && \
+    echo "deb http://archive.ubuntu.com/ubuntu jammy main universe" > /etc/apt/sources.list && \
+    echo "deb http://archive.ubuntu.com/ubuntu jammy-updates main universe" >> /etc/apt/sources.list && \
+    echo "deb http://archive.ubuntu.com/ubuntu jammy-security main universe" >> /etc/apt/sources.list
+
 # 安装 curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
@@ -54,6 +61,7 @@ RUN curl -fsSL https://github.com/docker/buildx/releases/download/v0.16.3/buildx
 
 # 验证
 RUN docker --version && docker buildx version
+
 
 
 WORKDIR /app
