@@ -47,36 +47,40 @@ ENV TZ=Asia/Shanghai
 RUN dnf install -y tzdata curl git \
     && ln -sf /usr/share/zoneinfo=$TZ /etc/localtime \
     && echo "$TZ" > /etc/timezone 
-
-# ✅ 显式声明版本（避免 ARG 未传导致空值）
-ARG DOCKER_CLI_VERSION=24.0.7
-ARG TARGETARCH
-
-# ✅ 自动检测架构（优先用 buildx 传入的 TARGETARCH，否则用 uname）
-RUN ARCH=$(echo "${TARGETARCH:-$(uname -m)}" | sed 's/amd64/x86_64/; s/arm64/aarch64/') && \
-    echo "🎯 Target architecture: $ARCH" && \
-    echo "📦 Downloading Docker CLI ${DOCKER_CLI_VERSION} for $ARCH..." && \
-    # ✅ 关键：拼接正确 URL 并下载
-    curl -fsSL "https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/static/stable/${ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+# ✅ 自动检测架构：amd64 → x86_64, arm64 → aarch64
+RUN ARCH=$(echo "${TARGETARCH:-$(uname -m)}" | sed -E 's/amd64|x86_64/x86_64/; s/arm64|aarch64/aarch64/') && \
+    echo "🎯 Detected architecture: $ARCH" && \
+    #
+    # --- 安装 docker CLI ---
+    echo "📦 Installing Docker CLI ${DOCKER_CLI_VERSION}..." && \
+    curl -fsSL --retry 3 "https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/static/stable/${ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
     | tar -xz -C /tmp && \
-    cp /tmp/docker/docker /usr/local/bin/docker && \
+    cp /tmp/docker/docker /usr/local/bin/ && \
     chmod +x /usr/local/bin/docker && \
     rm -rf /tmp/docker && \
-    echo "✅ Docker CLI installed to /usr/local/bin/docker"
+    echo "✅ Docker CLI installed"
 
-# ✅ 安装 buildx 插件（同样方式）
-ARG BUILDX_VERSION=v0.14.1
-RUN ARCH=$(echo "${TARGETARCH:-$(uname -m)}" | sed 's/amd64/x86_64/; s/arm64/aarch64/') && \
+# --- 安装 buildx 插件 ---
+RUN ARCH=$(echo "${TARGETARCH:-$(uname -m)}" | sed -E 's/amd64|x86_64/x86_64/; s/arm64|aarch64/aarch64/') && \
     mkdir -p ~/.docker/cli-plugins && \
-    echo "📦 Downloading Buildx ${BUILDX_VERSION} for $ARCH..." && \
-    curl -fsSL "https://mirrors.tuna.tsinghua.edu.cn/github-release/docker/buildx/${BUILDX_VERSION}/download/buildx-${BUILDX_VERSION}.linux-${ARCH}" \
-    -o ~/.docker/cli-plugins/docker-buildx && \
+    echo "📦 Installing Buildx ${BUILDX_VERSION} for $ARCH..." && \
+    # 🔁 双重 fallback：清华源 → 官方 GitHub Release
+    if ! curl -fsSL --retry 3 \
+    "https://mirrors.tuna.tsinghua.edu.cn/github-release/docker/buildx/${BUILDX_VERSION}/download/buildx-${BUILDX_VERSION}.linux-${ARCH}" \
+    -o ~/.docker/cli-plugins/docker-buildx; \
+    then \
+    echo "⚠️  清华源失败，回退到 GitHub..."; \
+    curl -fsSL --retry 3 \
+    "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${ARCH}" \
+    -o ~/.docker/cli-plugins/docker-buildx; \
+    fi && \
     chmod +x ~/.docker/cli-plugins/docker-buildx && \
     echo "✅ Buildx plugin installed"
 
-# ✅ 验证
+# ✅ 验证安装结果
 RUN docker --version && \
-    docker buildx version
+    docker buildx version && \
+    echo "🎉 Success: docker + buildx ready!"
 
 
 WORKDIR /app
