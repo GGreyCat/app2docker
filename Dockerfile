@@ -49,8 +49,13 @@ RUN dnf install -y tzdata curl git \
     && echo "$TZ" > /etc/timezone 
 
 # === 步骤 1：安装 docker-cli（最小依赖，不装 dockerd）===
-# ✅ 步骤 1：安装 docker-ce-cli（ALinux3 官方支持的 CLI）
-RUN dnf install -y docker-ce-cli && \
+# 启用 alinux3-docker 仓库（核心修复！）
+RUN sed -i '/^\[alinux3-docker\]$/,/^$/ s/enabled=0/enabled=1/' /etc/yum.repos.d/alinux3-docker.repo && \
+    # 可选：确认已启用
+    grep -A 3 '\[alinux3-docker\]' /etc/yum.repos.d/alinux3-docker.repo
+
+# ✅ 步骤 2：安装官方 docker-ce-cli 和 buildx 插件（RPM 包，安全可靠）
+RUN dnf install -y docker-ce-cli docker-buildx-plugin && \
     dnf clean all
 
 # === 步骤 2：安装 buildx 插件（清华镜像加速）===
