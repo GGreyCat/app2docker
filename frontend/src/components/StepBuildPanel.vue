@@ -365,13 +365,41 @@
           <i class="fas fa-exclamation-triangle"></i> {{ servicesError }}
         </div>
 
-        <div v-else-if="services.length === 0" class="alert alert-info">
+        <div v-else-if="services.length === 0 || forceSingleAppMode" class="alert alert-info">
           <i class="fas fa-info-circle"></i>
-          当前模板为单应用模式，无需选择服务。
+          <span v-if="forceSingleAppMode && services.length > 0">
+            已切换为单应用模式，忽略解析出的多服务。
+            <button 
+              type="button" 
+              class="btn btn-sm btn-link p-0 ms-2" 
+              @click="forceSingleAppMode = false"
+            >
+              <i class="fas fa-undo"></i> 切换回多服务模式
+            </button>
+          </span>
+          <span v-else>
+            当前模板为单应用模式，无需选择服务。
+          </span>
         </div>
 
         <!-- 多服务模式 -->
         <div v-else class="mb-3">
+          <!-- 切换为单应用模式按钮 -->
+          <div class="alert alert-warning alert-sm mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <div>
+                <i class="fas fa-info-circle"></i>
+                已解析为多阶段构建（{{ services.length }} 个服务）
+              </div>
+              <button 
+                type="button" 
+                class="btn btn-sm btn-outline-warning" 
+                @click="switchToSingleAppMode"
+              >
+                <i class="fas fa-exchange-alt"></i> 切换为单应用模式
+              </button>
+            </div>
+          </div>
           <!-- 推送模式选择（仅模板模式且非文件上传，项目 Dockerfile 总是多阶段推送） -->
           <div
             v-if="
@@ -899,7 +927,7 @@
         <!-- 镜像配置（单应用模式或文件上传模式，排除单服务推送模式） -->
         <div
           v-if="
-            (services.length === 0 || buildConfig.sourceType === 'file') &&
+            (services.length === 0 || forceSingleAppMode || buildConfig.sourceType === 'file') &&
             !(
               buildConfig.pushMode === 'single' &&
               !buildConfig.useProjectDockerfile &&
@@ -934,7 +962,7 @@
         <!-- 推送选项（单应用模式或文件上传模式，排除单服务推送模式） -->
         <div
           v-if="
-            (services.length === 0 || buildConfig.sourceType === 'file') &&
+            (services.length === 0 || forceSingleAppMode || buildConfig.sourceType === 'file') &&
             !(
               buildConfig.pushMode === 'single' &&
               !buildConfig.useProjectDockerfile &&
@@ -965,10 +993,10 @@
             @click="nextStep"
             :disabled="
               !buildConfig.imageName ||
-              (services.length > 0 &&
+              (!forceSingleAppMode && services.length > 0 &&
                 buildConfig.pushMode === 'single' &&
                 !buildConfig.selectedService) ||
-              (services.length > 0 &&
+              (!forceSingleAppMode && services.length > 0 &&
                 buildConfig.pushMode === 'multi' &&
                 selectedServices.length === 0)
             "
@@ -1219,7 +1247,7 @@
                   </h6>
                   <div
                     v-if="
-                      services.length > 0 && buildConfig.pushMode === 'multi'
+                      !forceSingleAppMode && services.length > 0 && buildConfig.pushMode === 'multi'
                     "
                   >
                     <div
@@ -1287,7 +1315,7 @@
                   </h6>
                   <div
                     v-if="
-                      services.length > 0 && buildConfig.pushMode === 'multi'
+                      !forceSingleAppMode && services.length > 0 && buildConfig.pushMode === 'multi'
                     "
                   >
                     <div class="mb-2">
@@ -1569,6 +1597,7 @@ const selectedServices = ref([]);
 const servicePushConfig = ref({}); // 每个服务的推送配置
 const parsingServices = ref(false);
 const servicesError = ref("");
+const forceSingleAppMode = ref(false); // 强制单应用模式（即使解析出多服务）
 const registries = ref([]); // 仓库列表
 const batchImagePrefix = ref(""); // 批量设置镜像前缀
 const batchTag = ref(""); // 批量设置标签
@@ -1925,10 +1954,13 @@ async function analyzeTemplate() {
       buildConfig.value.selectedService = "";
       servicePushConfig.value = {};
       buildConfig.value.pushMode = "single";
+      forceSingleAppMode.value = false; // 重置强制单应用模式标志
       parsingServices.value = false;
       return;
     }
 
+    // 重置强制单应用模式标志
+    forceSingleAppMode.value = false;
     // 如果使用项目 Dockerfile，解析项目 Dockerfile
     if (buildConfig.value.useProjectDockerfile) {
       await parseDockerfileServices();
@@ -2181,6 +2213,16 @@ function onPushModeChange(mode) {
       normalizeServiceConfig(service.name);
     });
   }
+}
+
+// 切换为单应用模式
+function switchToSingleAppMode() {
+  forceSingleAppMode.value = true;
+  // 清空服务选择
+  selectedServices.value = [];
+  buildConfig.value.selectedService = "";
+  // 重置推送模式为单应用模式
+  buildConfig.value.pushMode = "single";
 }
 
 // 单服务推送模式：服务选择变化
@@ -2588,9 +2630,9 @@ async function saveBuildConfigToTask(taskId) {
           : "跳过（文件上传）",
       step3: "模板选择完成",
       step4:
-        services.value.length > 0
-          ? `服务选择完成（${selectedServices.value.length}个服务）`
-          : "单应用模式",
+        forceSingleAppMode.value || services.value.length === 0
+          ? "单应用模式"
+          : `服务选择完成（${selectedServices.value.length}个服务）`,
       step5: "构建任务已提交",
     },
   };

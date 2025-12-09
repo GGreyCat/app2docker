@@ -754,8 +754,7 @@ class RemoteDockerBuilder(DockerBuilder):
                 "path": build_context,
                 "tag": primary_tag,  # Docker API 只接受单个标签字符串
                 "dockerfile": os.path.relpath(dockerfile_path, build_context),
-                "stream": True,
-                "decode": True,
+                "decode": True,  # 解码 JSON 响应
                 "pull": pull,
                 "nocache": no_cache,
             }
@@ -788,24 +787,33 @@ class RemoteDockerBuilder(DockerBuilder):
             if build_args:
                 build_kwargs["buildargs"] = build_args
 
-            # 使用 Docker API 构建
+            # 使用 Docker API 构建（默认返回生成器，流式返回日志）
             build_logs = self.client.api.build(**build_kwargs)
 
             # 流式返回构建日志
-            for chunk in build_logs:
-                if isinstance(chunk, dict):
-                    # Docker API 返回的格式
-                    if "stream" in chunk:
-                        yield {"stream": chunk["stream"]}
-                    elif "error" in chunk:
-                        yield {"error": chunk["error"]}
-                    elif "status" in chunk:
-                        yield {"status": chunk["status"]}
-                    elif "aux" in chunk:
-                        yield {"aux": chunk["aux"]}
-                else:
-                    # 字符串格式
-                    yield {"stream": str(chunk)}
+            try:
+                for chunk in build_logs:
+                    if isinstance(chunk, dict):
+                        # Docker API 返回的格式
+                        if "stream" in chunk:
+                            yield {"stream": chunk["stream"]}
+                        elif "error" in chunk:
+                            yield {"error": chunk["error"]}
+                        elif "status" in chunk:
+                            yield {"status": chunk["status"]}
+                        elif "aux" in chunk:
+                            yield {"aux": chunk["aux"]}
+                    else:
+                        # 字符串格式
+                        yield {"stream": str(chunk)}
+            except GeneratorExit:
+                # 生成器被关闭时，清理资源
+                if build_logs:
+                    try:
+                        build_logs.close()
+                    except:
+                        pass
+                raise
 
             # 构建成功后，如果需要多标签，为其他标签打标签
             if len(tags) > 1:
