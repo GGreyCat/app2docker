@@ -51,8 +51,7 @@ RUN mkdir -p ~/.docker/cli-plugins && \
     curl -sL https://numen-share.oss-accelerate.aliyuncs.com/docker/buildx-v0.27.0.linux-amd64 -o ~/.docker/cli-plugins/docker-buildx && \
     chmod +x ~/.docker/cli-plugins/docker-buildx
 # ✅ 4. 安装并注册 qemu-user-static（无需 docker！）
-RUN apt-get update && \
-    apt-get install -y qemu-user-static && \
+RUN apt-get install -y qemu-user-static && \
     /usr/bin/qemu-user-static --reset -p && \
     rm -rf /var/lib/apt/lists/*
 
