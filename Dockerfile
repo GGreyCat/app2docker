@@ -59,8 +59,7 @@ RUN ln -sf python3 /usr/bin/python && \
 
 # ✅ 【关键修复】用户级升级 pip + 当前 shell 立即生效
 # （注意：用 `sh -c` 显式执行，避免 shell 解析歧义）
-RUN sh -c 'pip install --user --upgrade pip && export PATH="$HOME/.local/bin:$PATH" && pip --version'
-
+RUN python -m pip install --upgrade --break-system-packages pip
 # ✅ 验证 Python 环境
 RUN echo "✅ Python version:" && python --version && \
     echo "✅ pip version:" && pip --version && \
