@@ -44,15 +44,23 @@ RUN sed -i 's|mirrors\.cloud\.aliyuncs\.com|mirrors.aliyun.com|g' /etc/yum.repos
 ENV TZ=Asia/Shanghai
 
 # 安装 docker CLI 和 buildx 插件
-RUN dnf install -y tzdata curl git docker-cli \
+RUN dnf install -y tzdata curl git \
     && ln -sf /usr/share/zoneinfo=$TZ /etc/localtime \
-    && echo "$TZ" > /etc/timezone \
-    && mkdir -p ~/.docker/cli-plugins \
-    && curl -SL https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-amd64 -o ~/.docker/cli-plugins/docker-buildx \
-    && chmod +x ~/.docker/cli-plugins/docker-buildx \
-    && docker buildx version \
-    && dnf clean all
+    && echo "$TZ" > /etc/timezone 
 
+# === 步骤 1：安装 docker-cli（最小依赖，不装 dockerd）===
+# ALinux3 使用 dnf；启用 epel（含 docker-cli）
+RUN dnf install -y epel-release && \
+    dnf install -y docker-cli && \
+    dnf clean all
+
+# === 步骤 2：安装 buildx 插件（清华镜像加速）===
+ARG BUILDX_VERSION=v0.14.1  # ✅ 建议升级到最新稳定版：https://github.com/docker/buildx/releases
+RUN mkdir -p ~/.docker/cli-plugins && \
+    ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
+    curl -fsSL "https://mirrors.tuna.tsinghua.edu.cn/github-release/docker/buildx/${BUILDX_VERSION}/download/buildx-${BUILDX_VERSION}.linux-${ARCH}" \
+    -o ~/.docker/cli-plugins/docker-buildx && \
+    chmod +x ~/.docker/cli-plugins/docker-buildx
 
 WORKDIR /app
 
