@@ -45,15 +45,14 @@ RUN mkdir -p /etc/apt && \
     echo "deb http://archive.ubuntu.com/ubuntu jammy-security main universe" >> /etc/apt/sources.list
 
 
-RUN curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-RUN sudo chmod a+r /etc/apt/keyrings/docker.gpg
-RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-# 安装 curl
-RUN sudo apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && rm -rf /var/lib/apt/lists/*
-
-# 4. 验证
-RUN docker --version && docker buildx version
+RUN apt-get update && apt-get install -y curl jq && rm -rf /var/lib/apt/lists/*
+# 安装 buildx（推荐从官方 release 下载）
+RUN mkdir -p ~/.docker/cli-plugins && \
+    curl -sL https://github.com/docker/buildx/releases/download/v0.15.0/buildx-v0.15.0.linux-amd64 -o ~/.docker/cli-plugins/docker-buildx && \
+    chmod +x ~/.docker/cli-plugins/docker-buildx
+# 安装 qemu（支持多架构）
+RUN apt-get update && apt-get install -y qemu-user-static && \
+    docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
 
 
