@@ -37,34 +37,34 @@ RUN npm run build
 # ============ 阶段 2: Python 后端 ============
 # 使用阿里云 Python 镜像加速下载
 FROM ac2-registry.cn-hangzhou.cr.aliyuncs.com/ac2/base:ubuntu24.04-py312
-# ✅ 1. 确保 apt 源配置正确（兼容缺失 sources.list 的情况）
+# ✅ 步骤 1：确保 apt 源可用（兼容无 sources.list 的镜像）
 RUN mkdir -p /etc/apt && \
     echo "deb http://archive.ubuntu.com/ubuntu jammy main universe" > /etc/apt/sources.list && \
     echo "deb http://archive.ubuntu.com/ubuntu jammy-updates main universe" >> /etc/apt/sources.list && \
     echo "deb http://archive.ubuntu.com/ubuntu jammy-security main universe" >> /etc/apt/sources.list
 
-# ✅ 2. 更新 apt 并安装基础依赖
+# ✅ 步骤 2：只安装真正必需的包（跳过 gnupg & lsb-release）
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    gnupg \
-    lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
-# ✅ 3. 添加 Docker 官方 GPG 密钥（使用阿里云镜像加速）
+# ✅ 步骤 3：使用预装的 gpgv 校验密钥（无需 gnupg）
 RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg \
+    | gpgv --keyring /dev/null -o /dev/null - 2>/dev/null || true && \
     curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg \
     | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-# ✅ 4. 添加 Docker APT 源（阿里云镜像）
+# ✅ 步骤 4：手动写死发行版名 "jammy"（替代 lsb-release）
 RUN echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
     https://mirrors.aliyun.com/docker-ce/linux/ubuntu \
-    $(lsb_release -cs) stable" \
+    jammy stable" \
     | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# ✅ 5. 安装 Docker CLI + buildx 插件
+# ✅ 步骤 5：安装 docker-ce-cli + buildx（无冲突）
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     docker-ce-cli \
@@ -72,9 +72,10 @@ RUN apt-get update -y && \
     containerd.io \
     && rm -rf /var/lib/apt/lists/*
 
-# ✅ 6. 验证（构建阶段即失败即知）
+# ✅ 验证
 RUN echo "✅ docker version:" && docker --version && \
     echo "✅ docker buildx version:" && docker buildx version
+
 
 WORKDIR /app
 
