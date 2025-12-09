@@ -48,26 +48,35 @@ RUN dnf install -y tzdata curl git \
     && ln -sf /usr/share/zoneinfo=$TZ /etc/localtime \
     && echo "$TZ" > /etc/timezone 
 
-# ✅ STEP 1: 安装 Docker CLI 官方静态二进制（v24.0.7，适配 ALinux3 glibc 2.28）
+# ✅ 显式声明版本（避免 ARG 未传导致空值）
 ARG DOCKER_CLI_VERSION=24.0.7
-ARG ARCH=$(uname -m | sed 's/x86_64/x86_64/; s/aarch64/aarch64/')
-RUN curl -fsSL "https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/static/stable/${ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+ARG TARGETARCH
+
+# ✅ 自动检测架构（优先用 buildx 传入的 TARGETARCH，否则用 uname）
+RUN ARCH=$(echo "${TARGETARCH:-$(uname -m)}" | sed 's/amd64/x86_64/; s/arm64/aarch64/') && \
+    echo "🎯 Target architecture: $ARCH" && \
+    echo "📦 Downloading Docker CLI ${DOCKER_CLI_VERSION} for $ARCH..." && \
+    # ✅ 关键：拼接正确 URL 并下载
+    curl -fsSL "https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/static/stable/${ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
     | tar -xz -C /tmp && \
     cp /tmp/docker/docker /usr/local/bin/docker && \
     chmod +x /usr/local/bin/docker && \
-    rm -rf /tmp/docker
+    rm -rf /tmp/docker && \
+    echo "✅ Docker CLI installed to /usr/local/bin/docker"
 
-# ✅ STEP 2: 安装 buildx 插件（官方 release，清华镜像）
+# ✅ 安装 buildx 插件（同样方式）
 ARG BUILDX_VERSION=v0.14.1
-RUN mkdir -p ~/.docker/cli-plugins && \
+RUN ARCH=$(echo "${TARGETARCH:-$(uname -m)}" | sed 's/amd64/x86_64/; s/arm64/aarch64/') && \
+    mkdir -p ~/.docker/cli-plugins && \
+    echo "📦 Downloading Buildx ${BUILDX_VERSION} for $ARCH..." && \
     curl -fsSL "https://mirrors.tuna.tsinghua.edu.cn/github-release/docker/buildx/${BUILDX_VERSION}/download/buildx-${BUILDX_VERSION}.linux-${ARCH}" \
     -o ~/.docker/cli-plugins/docker-buildx && \
-    chmod +x ~/.docker/cli-plugins/docker-buildx
+    chmod +x ~/.docker/cli-plugins/docker-buildx && \
+    echo "✅ Buildx plugin installed"
 
-# ✅ STEP 3: 验证（构建阶段即保障可用性）
+# ✅ 验证
 RUN docker --version && \
-    docker buildx version && \
-    echo "✅ Docker CLI ${DOCKER_CLI_VERSION} + Buildx ${BUILDX_VERSION} installed successfully."
+    docker buildx version
 
 
 WORKDIR /app
