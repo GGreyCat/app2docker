@@ -193,6 +193,17 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
     # 需要排除的非服务阶段名称（常见的构建阶段）
     excluded_stages = {"builder", "build", "base", "runtime", "deps", "dependencies"}
 
+    def is_excluded_stage(stage_name: str) -> bool:
+        """检查阶段名称是否应该被排除（不识别为服务）"""
+        stage_lower = stage_name.lower()
+        # 完全匹配排除列表
+        if stage_lower in excluded_stages:
+            return True
+        # 匹配以 -builder 结尾的阶段（如 frontend-builder）
+        if stage_lower.endswith("-builder"):
+            return True
+        return False
+
     lines = dockerfile_content.split("\n")
     current_stage = None
     current_params = {}  # 存储当前阶段的所有参数
@@ -225,7 +236,7 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
             if not first_from_found:
                 first_from_found = True
             # 如果之前有阶段，先保存
-            if current_stage and current_stage.lower() not in excluded_stages:
+            if current_stage and not is_excluded_stage(current_stage):
                 service_data = {"name": current_stage, **current_params}
                 services.append(service_data)
 
@@ -240,7 +251,7 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
             if not first_from_found:
                 first_from_found = True
             # 如果之前有阶段，先保存
-            if current_stage and current_stage.lower() not in excluded_stages:
+            if current_stage and not is_excluded_stage(current_stage):
                 service_data = {"name": current_stage, **current_params}
                 services.append(service_data)
 
@@ -353,7 +364,7 @@ def parse_dockerfile_services(dockerfile_content: str) -> tuple:
                     )
 
     # 保存最后一个阶段
-    if current_stage and current_stage.lower() not in excluded_stages:
+    if current_stage and not is_excluded_stage(current_stage):
         service_data = {"name": current_stage, **current_params}
         services.append(service_data)
 

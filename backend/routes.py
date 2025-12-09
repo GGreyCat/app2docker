@@ -2805,6 +2805,15 @@ class CreatePipelineRequest(BaseModel):
         None  # 分支到标签的映射，如 {"main": "latest", "dev": "dev"}
     )
     source_id: Optional[str] = None  # Git 数据源 ID（可选）
+    selected_services: Optional[list] = None  # 选中的服务列表（多服务构建时使用）
+    service_push_config: Optional[dict] = (
+        None  # 每个服务的推送配置（key为服务名，value为是否推送）
+    )
+    service_template_params: Optional[dict] = None  # 服务模板参数
+    push_mode: Optional[str] = (
+        "multi"  # 推送模式：'single' 单一推送，'multi' 多阶段推送
+    )
+    resource_package_configs: Optional[list] = None  # 资源包配置列表
 
 
 class UpdatePipelineRequest(BaseModel):
@@ -2829,6 +2838,11 @@ class UpdatePipelineRequest(BaseModel):
     webhook_use_push_branch: Optional[bool] = None
     branch_tag_mapping: Optional[dict] = None
     source_id: Optional[str] = None
+    selected_services: Optional[list] = None
+    service_push_config: Optional[dict] = None
+    service_template_params: Optional[dict] = None
+    push_mode: Optional[str] = None
+    resource_package_configs: Optional[list] = None
 
 
 @router.post("/pipelines")
@@ -2887,6 +2901,11 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
             webhook_use_push_branch=request.webhook_use_push_branch,
             branch_tag_mapping=request.branch_tag_mapping,
             source_id=request.source_id,
+            selected_services=request.selected_services,
+            service_push_config=request.service_push_config,
+            service_template_params=request.service_template_params,
+            push_mode=request.push_mode or "multi",
+            resource_package_configs=request.resource_package_configs,
         )
 
         # 记录操作日志
@@ -3127,6 +3146,11 @@ async def update_pipeline(
             webhook_use_push_branch=request.webhook_use_push_branch,
             branch_tag_mapping=request.branch_tag_mapping,
             source_id=request.source_id,
+            selected_services=request.selected_services,
+            service_push_config=request.service_push_config,
+            service_template_params=request.service_template_params,
+            push_mode=request.push_mode,
+            resource_package_configs=request.resource_package_configs,
         )
 
         if not success:
@@ -3210,6 +3234,15 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
             dockerfile_name=pipeline.get("dockerfile_name", "Dockerfile"),
             source_id=pipeline.get("source_id"),  # 传递数据源ID
             pipeline_id=pipeline_id,  # 传递流水线ID
+            selected_services=pipeline.get("selected_services"),  # 传递选中的服务列表
+            service_push_config=pipeline.get("service_push_config"),  # 传递服务推送配置
+            service_template_params=pipeline.get(
+                "service_template_params"
+            ),  # 传递服务模板参数
+            push_mode=pipeline.get("push_mode", "multi"),  # 传递推送模式
+            resource_package_ids=pipeline.get(
+                "resource_package_configs"
+            ),  # 传递资源包配置
         )
 
         # 记录触发并绑定任务（手动触发）
@@ -3528,7 +3561,14 @@ async def webhook_trigger(webhook_token: str, request: Request):
             sub_path=pipeline.get("sub_path"),
             use_project_dockerfile=pipeline.get("use_project_dockerfile", True),
             dockerfile_name=pipeline.get("dockerfile_name", "Dockerfile"),
+            source_id=pipeline.get("source_id"),  # 传递数据源ID
             pipeline_id=pipeline["pipeline_id"],  # 传递流水线ID
+            selected_services=pipeline.get("selected_services"),  # 传递选中的服务列表
+            service_push_config=pipeline.get("service_push_config"),  # 传递服务推送配置
+            service_template_params=pipeline.get(
+                "service_template_params"
+            ),  # 传递服务模板参数
+            push_mode=pipeline.get("push_mode", "multi"),  # 传递推送模式
         )
 
         # 提取 webhook 相关信息

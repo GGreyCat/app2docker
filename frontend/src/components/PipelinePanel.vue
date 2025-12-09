@@ -147,6 +147,33 @@
                   <i class="fas fa-copy" style="font-size: 0.7rem;"></i>
                 </button>
               </div>
+              <!-- 多服务信息 -->
+              <div v-if="pipeline.selected_services && pipeline.selected_services.length > 0" class="d-flex align-items-center flex-wrap gap-2 ms-4 mt-2">
+                <span class="badge bg-info" style="font-size: 0.75rem;">
+                  <i class="fas fa-layer-group"></i> {{ pipeline.selected_services.length }} 个服务
+                </span>
+                <span class="badge" :class="pipeline.push_mode === 'multi' ? 'bg-success' : 'bg-secondary'" style="font-size: 0.75rem;">
+                  <i class="fas" :class="pipeline.push_mode === 'multi' ? 'fa-sitemap' : 'fa-cube'"></i> {{ pipeline.push_mode === 'multi' ? '多阶段' : '单一' }}推送
+                </span>
+              </div>
+              <!-- 子路径 -->
+              <div v-if="pipeline.sub_path" class="ms-4 mt-1">
+                <small class="text-muted" style="font-size: 0.8rem;">
+                  <i class="fas fa-folder"></i> 子路径: {{ pipeline.sub_path }}
+                </small>
+              </div>
+              <!-- 资源包信息 -->
+              <div v-if="pipeline.resource_package_configs && pipeline.resource_package_configs.length > 0" class="ms-4 mt-1">
+                <small class="text-muted" style="font-size: 0.8rem;">
+                  <i class="fas fa-archive"></i> {{ pipeline.resource_package_configs.length }} 个资源包
+                </small>
+              </div>
+              <!-- Dockerfile 信息 -->
+              <div v-if="pipeline.use_project_dockerfile" class="ms-4 mt-1">
+                <small class="text-muted" style="font-size: 0.8rem;">
+                  <i class="fas fa-file-code"></i> {{ pipeline.dockerfile_name || 'Dockerfile' }}
+                </small>
+              </div>
             </div>
             
             <!-- 当前任务状态（固定布局，始终显示） -->
@@ -275,6 +302,17 @@
                 <li class="nav-item" role="presentation">
                   <button 
                     class="nav-link" 
+                    :class="{ active: activeTab === 'services' }"
+                    type="button"
+                    @click="activeTab = 'services'"
+                    id="services-tab"
+                  >
+                    <i class="fas fa-layer-group"></i> 多服务配置
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button 
+                    class="nav-link" 
                     :class="{ active: activeTab === 'other' }"
                     type="button"
                     @click="activeTab = 'other'"
@@ -393,23 +431,59 @@
                   </div>
                 </div>
                 <div class="mb-3">
-                  <label class="form-label">Dockerfile 模板</label>
-                  <select v-model="formData.template" class="form-select form-select-sm">
-                    <option value="">使用项目中的 Dockerfile</option>
-                    <option v-for="tpl in templates" :key="tpl.name" :value="tpl.name">
-                      {{ tpl.name }} ({{ tpl.project_type }})
-                    </option>
-                  </select>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Dockerfile 文件名</label>
-                  <input 
-                    v-model="formData.dockerfile_name" 
-                    type="text" 
-                    class="form-control form-control-sm"
-                    placeholder="Dockerfile"
-                  >
-                  <small class="text-muted">默认为 Dockerfile，可自定义文件名（当使用项目中的 Dockerfile 时）</small>
+                  <label class="form-label">Dockerfile 来源</label>
+                  <div class="btn-group w-100 mb-2" role="group">
+                    <input 
+                      type="radio" 
+                      class="btn-check" 
+                      id="use-project-dockerfile" 
+                      :value="true"
+                      v-model="formData.use_project_dockerfile"
+                    >
+                    <label class="btn btn-outline-primary" for="use-project-dockerfile">
+                      <i class="fas fa-file-code"></i> 使用项目中的 Dockerfile
+                    </label>
+                    
+                    <input 
+                      type="radio" 
+                      class="btn-check" 
+                      id="use-template" 
+                      :value="false"
+                      v-model="formData.use_project_dockerfile"
+                    >
+                    <label class="btn btn-outline-primary" for="use-template">
+                      <i class="fas fa-layer-group"></i> 使用模板
+                    </label>
+                  </div>
+                  
+                  <!-- 使用项目中的 Dockerfile -->
+                  <div v-if="formData.use_project_dockerfile" class="mt-2">
+                    <label class="form-label">Dockerfile 文件名</label>
+                    <input 
+                      v-model="formData.dockerfile_name" 
+                      type="text" 
+                      class="form-control form-control-sm"
+                      placeholder="Dockerfile"
+                    >
+                    <small class="text-muted">默认为 Dockerfile，可自定义文件名</small>
+                  </div>
+                  
+                  <!-- 使用模板 -->
+                  <div v-else class="mt-2">
+                    <label class="form-label">Dockerfile 模板 <span class="text-danger">*</span></label>
+                    <select 
+                      v-model="formData.template" 
+                      class="form-select form-select-sm" 
+                      required
+                      @change="onTemplateChange"
+                    >
+                      <option value="">-- 请选择模板 --</option>
+                      <option v-for="tpl in templates" :key="tpl.name" :value="tpl.name">
+                        {{ tpl.name }} ({{ tpl.project_type }})
+                      </option>
+                    </select>
+                    <small class="text-muted">选择一个 Dockerfile 模板来生成 Dockerfile</small>
+                  </div>
                 </div>
                 <div class="mb-3">
                   <label class="form-label">子路径</label>
@@ -420,6 +494,245 @@
                     placeholder="留空表示根目录"
                   >
                 </div>
+                </div>
+
+                <!-- 多服务配置 Tab -->
+                <div 
+                  class="tab-pane fade" 
+                  :class="{ 'show active': activeTab === 'services' }"
+                  role="tabpanel"
+                  id="services-pane"
+                >
+                  <!-- 推送模式选择 -->
+                  <div class="mb-3" v-if="!formData.use_project_dockerfile && formData.template">
+                    <label class="form-label">推送模式 <span class="text-danger">*</span></label>
+                    <div class="btn-group w-100" role="group">
+                      <input 
+                        type="radio" 
+                        class="btn-check" 
+                        id="push-mode-single" 
+                        value="single"
+                        v-model="formData.push_mode"
+                        @change="onPushModeChange"
+                      >
+                      <label class="btn btn-outline-primary" for="push-mode-single">
+                        <i class="fas fa-box"></i> 单服务推送
+                      </label>
+                      
+                      <input 
+                        type="radio" 
+                        class="btn-check" 
+                        id="push-mode-multi" 
+                        value="multi"
+                        v-model="formData.push_mode"
+                        @change="onPushModeChange"
+                      >
+                      <label class="btn btn-outline-primary" for="push-mode-multi">
+                        <i class="fas fa-boxes"></i> 多服务推送
+                      </label>
+                    </div>
+                    <small class="text-muted d-block mt-2">
+                      <i class="fas fa-info-circle"></i>
+                      <span v-if="formData.push_mode === 'single'">
+                        单服务推送：只能选择一个服务，定义镜像名和标签
+                      </span>
+                      <span v-else>
+                        多服务推送：可以批量设置推送、镜像名和标签
+                      </span>
+                    </small>
+                  </div>
+
+                  <!-- 服务列表加载 -->
+                  <div v-if="loadingServices" class="text-center py-3">
+                    <span class="spinner-border spinner-border-sm"></span> 正在加载服务列表...
+                  </div>
+                  <div v-else-if="servicesError" class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> {{ servicesError }}
+                  </div>
+                  
+                  <!-- 单服务推送模式 -->
+                  <div v-else-if="formData.push_mode === 'single' && !formData.use_project_dockerfile && formData.template && services.length > 0" class="mb-3">
+                    <label class="form-label">选择服务 <span class="text-danger">*</span></label>
+                    <div class="list-group">
+                      <label
+                        v-for="service in services"
+                        :key="service.name"
+                        class="list-group-item list-group-item-action"
+                        :class="{ active: formData.selected_service === service.name }"
+                        style="cursor: pointer"
+                      >
+                        <div class="d-flex align-items-center">
+                          <input
+                            type="radio"
+                            :value="service.name"
+                            v-model="formData.selected_service"
+                            class="form-check-input me-3"
+                          />
+                          <div class="flex-grow-1">
+                            <div class="fw-bold">
+                              <code>{{ service.name }}</code>
+                            </div>
+                            <small class="text-muted">
+                              <span v-if="service.port">端口: {{ service.port }}</span>
+                              <span v-if="service.port && service.user"> | </span>
+                              <span v-if="service.user">用户: {{ service.user }}</span>
+                            </small>
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- 多服务推送模式 -->
+                  <div v-else-if="services.length > 0" class="mb-3">
+                    <div class="card border-info">
+                      <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                        <div>
+                          <i class="fas fa-server"></i> 服务选择
+                          <span class="badge bg-info ms-2">{{ services.length }} 个服务</span>
+                        </div>
+                        <div>
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-outline-info me-2"
+                            @click="selectAllServices"
+                          >
+                            <i class="fas fa-check-square"></i> 全选
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-outline-info"
+                            @click="deselectAllServices"
+                          >
+                            <i class="fas fa-square"></i> 全不选
+                          </button>
+                        </div>
+                      </div>
+                      <div class="card-body">
+                        <!-- 服务列表 -->
+                        <div class="row g-2 mb-3">
+                          <div
+                            v-for="service in services"
+                            :key="service.name"
+                            class="col-md-6 col-lg-4"
+                          >
+                            <div
+                              class="card h-100"
+                              :class="{
+                                'border-success': formData.selected_services?.includes(service.name),
+                                'border-secondary': !formData.selected_services?.includes(service.name)
+                              }"
+                              style="cursor: pointer"
+                              @click="toggleService(service.name)"
+                            >
+                              <div class="card-body p-2">
+                                <div class="form-check">
+                                  <input
+                                    type="checkbox"
+                                    :value="service.name"
+                                    v-model="formData.selected_services"
+                                    class="form-check-input"
+                                    @change="onServiceSelectionChange"
+                                  />
+                                  <label class="form-check-label fw-bold">
+                                    <code>{{ service.name }}</code>
+                                  </label>
+                                </div>
+                                <small class="text-muted d-block">
+                                  <span v-if="service.port">端口: {{ service.port }}</span>
+                                  <span v-if="service.port && service.user"> | </span>
+                                  <span v-if="service.user">用户: {{ service.user }}</span>
+                                </small>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- 服务配置 -->
+                        <div v-if="formData.selected_services && formData.selected_services.length > 0" class="border-top pt-3">
+                          <h6 class="mb-3">
+                            <i class="fas fa-cog"></i> 服务推送配置
+                            <small class="text-muted">(已选择 {{ formData.selected_services.length }} 个服务)</small>
+                          </h6>
+                          <div class="table-responsive">
+                            <table class="table table-sm table-bordered">
+                              <thead>
+                                <tr>
+                                  <th style="width: 30%">服务名</th>
+                                  <th style="width: 20%">推送</th>
+                                  <th style="width: 50%">操作</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr v-for="serviceName in formData.selected_services" :key="serviceName">
+                                  <td><code>{{ serviceName }}</code></td>
+                                  <td class="text-center">
+                                    <input
+                                      type="checkbox"
+                                      v-model="formData.service_push_config[serviceName]"
+                                      class="form-check-input"
+                                    />
+                                  </td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      class="btn btn-sm btn-outline-danger"
+                                      @click="removeService(serviceName)"
+                                    >
+                                      <i class="fas fa-times"></i> 移除
+                                    </button>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else-if="!formData.template && !formData.use_project_dockerfile" class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> 请先选择 Dockerfile 模板或启用"使用项目中的 Dockerfile"以加载服务列表
+                  </div>
+                  <div v-else-if="services.length === 0" class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> 未检测到多服务配置，将使用单服务模式
+                  </div>
+
+                  <!-- 资源包配置 -->
+                  <div class="mb-3">
+                    <label class="form-label">
+                      <i class="fas fa-archive"></i> 资源包配置
+                      <button 
+                        type="button" 
+                        class="btn btn-sm btn-outline-success ms-2" 
+                        @click="showResourcePackageModal = true"
+                        title="添加资源包"
+                      >
+                        <i class="fas fa-plus"></i> 添加
+                      </button>
+                    </label>
+                    <div v-if="formData.resource_package_configs && formData.resource_package_configs.length > 0" class="border rounded p-2">
+                      <div 
+                        v-for="(pkg, index) in formData.resource_package_configs" 
+                        :key="index" 
+                        class="d-flex align-items-center justify-content-between mb-2 p-2 bg-light rounded"
+                      >
+                        <div class="flex-grow-1">
+                          <strong>{{ getResourcePackageName(pkg.package_id) }}</strong>
+                          <small class="text-muted ms-2">→ {{ pkg.target_path || 'resources' }}</small>
+                        </div>
+                        <button 
+                          type="button" 
+                          class="btn btn-sm btn-outline-danger" 
+                          @click="removeResourcePackage(index)"
+                        >
+                          <i class="fas fa-trash"></i>
+                        </button>
+                      </div>
+                    </div>
+                    <div v-else class="text-muted small">
+                      暂无资源包，点击"添加"按钮添加资源包
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Webhook 设置 Tab -->
@@ -871,12 +1184,67 @@
       </div>
     </div>
     <div v-if="showHistoryModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
+
+    <!-- 资源包选择模态框 -->
+    <div v-if="showResourcePackageModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="showResourcePackageModal = false">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">
+              <i class="fas fa-archive"></i> 选择资源包
+            </h5>
+            <button type="button" class="btn-close" @click="showResourcePackageModal = false"></button>
+          </div>
+          <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+            <div v-if="resourcePackages.length === 0" class="text-center py-4 text-muted">
+              <i class="fas fa-inbox fa-2x mb-2"></i>
+              <p class="mb-0">暂无资源包</p>
+              <small class="text-muted">请先在"资源包"标签页上传资源包</small>
+            </div>
+            <div v-else class="row g-3">
+              <div v-for="pkg in resourcePackages" :key="pkg.package_id" class="col-md-6">
+                <div class="card h-100" :class="{ 'border-primary': isResourcePackageSelected(pkg.package_id) }">
+                  <div class="card-body">
+                    <div class="form-check">
+                      <input
+                        type="checkbox"
+                        :value="pkg.package_id"
+                        :checked="isResourcePackageSelected(pkg.package_id)"
+                        @change="toggleResourcePackage(pkg)"
+                        class="form-check-input"
+                      />
+                      <label class="form-check-label fw-bold">
+                        {{ pkg.name }}
+                      </label>
+                    </div>
+                    <small class="text-muted d-block mt-1">{{ pkg.description || '无描述' }}</small>
+                    <div v-if="isResourcePackageSelected(pkg.package_id)" class="mt-2">
+                      <label class="form-label small">目标路径</label>
+                      <input
+                        type="text"
+                        v-model="getResourcePackageConfig(pkg.package_id).target_path"
+                        class="form-control form-control-sm"
+                        placeholder="resources"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" @click="showResourcePackageModal = false">完成</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-if="showResourcePackageModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
   </div>
 </template>
 
 <script setup>
 import axios from 'axios'
-import { onMounted, ref, inject, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 
 const pipelines = ref([])
 const templates = ref([])
@@ -908,6 +1276,13 @@ const showLogModal = ref(false)
 const selectedTask = ref(null)
 const taskLogs = ref('')
 const viewingLogs = ref(null)
+const showResourcePackageModal = ref(false)
+const resourcePackages = ref([])  // 资源包列表
+
+// 多服务相关
+const services = ref([])  // 服务列表
+const loadingServices = ref(false)  // 加载服务中
+const servicesError = ref('')  // 服务加载错误
 
 const activeTab = ref('basic')  // 当前激活的Tab
 
@@ -929,6 +1304,15 @@ const formData = ref({
   trigger_schedule: false,  // 是否启用定时触发
   cron_expression: '',  // Cron 表达式
   dockerfile_name: 'Dockerfile',  // Dockerfile文件名，默认Dockerfile
+  use_project_dockerfile: true,  // 是否使用项目中的 Dockerfile
+  source_id: '',  // 数据源ID
+  // 多服务配置
+  push_mode: 'multi',  // 推送模式：'single' 或 'multi'
+  selected_service: '',  // 单服务模式选中的服务
+  selected_services: [],  // 多服务模式选中的服务列表
+  service_push_config: {},  // 服务推送配置 {服务名: {imageName, tag, push}}
+  service_template_params: {},  // 服务模板参数
+  resource_package_configs: [],  // 资源包配置
 })
 
 onMounted(() => {
@@ -1029,8 +1413,18 @@ function showCreateModal() {
     trigger_schedule: false,
     cron_expression: '',
     dockerfile_name: 'Dockerfile',
-    source_id: ''
+    source_id: '',
+    use_project_dockerfile: true,
+    push_mode: 'multi',
+    selected_service: '',
+    selected_services: [],
+    service_push_config: {},
+    service_template_params: {},
+    resource_package_configs: []
   }
+  services.value = []
+  loadingServices.value = false
+  servicesError.value = ''
   showModal.value = true
 }
 
@@ -1059,6 +1453,19 @@ function editPipeline(pipeline) {
     trigger_schedule: !!pipeline.cron_expression,  // 如果有cron表达式则启用
     cron_expression: pipeline.cron_expression || '',
     dockerfile_name: pipeline.dockerfile_name || 'Dockerfile',
+    // 如果 pipeline 有 template，说明使用的是模板，否则使用项目 Dockerfile
+    use_project_dockerfile: !pipeline.template,  // 有模板则 false，无模板则 true
+    source_id: pipeline.source_id || '',
+    push_mode: pipeline.push_mode || 'multi',
+    selected_service: pipeline.selected_services && pipeline.selected_services.length === 1 ? pipeline.selected_services[0] : '',
+    selected_services: pipeline.selected_services || [],
+    service_push_config: pipeline.service_push_config || {},
+    service_template_params: pipeline.service_template_params || {},
+    resource_package_configs: pipeline.resource_package_configs || []
+  }
+  // 加载服务列表
+  if (pipeline.template || pipeline.use_project_dockerfile) {
+    loadServices()
   }
   showModal.value = true
 }
@@ -1117,9 +1524,27 @@ async function savePipeline() {
       webhook_use_push_branch = false
     }
     
+    // 确保 template 和 use_project_dockerfile 的一致性
+    // 如果使用项目 Dockerfile，则清空 template
+    // 如果使用模板，则确保 use_project_dockerfile 为 false
+    if (formData.value.use_project_dockerfile) {
+      formData.value.template = ''
+    } else {
+      // 使用模板时，确保选择了模板
+      if (!formData.value.template) {
+        alert('请选择 Dockerfile 模板')
+        return
+      }
+    }
+    
     // 准备提交数据
     const payload = {
       ...formData.value,
+      // 确保 use_project_dockerfile 和 template 的一致性
+      use_project_dockerfile: formData.value.use_project_dockerfile,
+      // 如果使用项目 Dockerfile，template 应该为空字符串
+      // 如果使用模板，template 必须有值（不能为空）
+      template: formData.value.use_project_dockerfile ? '' : (formData.value.template || ''),
       // 将分支策略转换为旧格式（向后兼容）
       webhook_branch_filter: webhook_branch_filter,
       webhook_use_push_branch: webhook_use_push_branch,
@@ -1128,16 +1553,46 @@ async function savePipeline() {
       // 如果未启用定时触发，则cron_expression为null
       cron_expression: formData.value.trigger_schedule ? formData.value.cron_expression : null,
       // 传递数据源ID
-      source_id: selectedSourceId.value || null
+      source_id: selectedSourceId.value || formData.value.source_id || null,
+      // 多服务配置：根据推送模式处理
+      selected_services: formData.value.push_mode === 'single' && formData.value.selected_service 
+        ? [formData.value.selected_service] 
+        : formData.value.selected_services && formData.value.selected_services.length > 0
+        ? formData.value.selected_services
+        : null,
+      service_push_config: formData.value.service_push_config && Object.keys(formData.value.service_push_config).length > 0
+        ? formData.value.service_push_config
+        : null,
+      service_template_params: formData.value.service_template_params && Object.keys(formData.value.service_template_params).length > 0
+        ? formData.value.service_template_params
+        : null,
+      resource_package_configs: formData.value.resource_package_configs && formData.value.resource_package_configs.length > 0
+        ? formData.value.resource_package_configs
+        : null
     }
     // 移除webhook_branch_strategy，因为后端不需要这个字段
     delete payload.webhook_branch_strategy
+    delete payload.selected_service  // 移除单服务字段，后端不需要
+    delete payload.trigger_schedule  // 移除前端字段
     
     // 验证：如果启用定时触发，必须填写cron表达式
     if (payload.trigger_schedule && !payload.cron_expression) {
       alert('请填写 Cron 表达式')
       return
     }
+    
+    // 验证：如果使用模板，必须选择了模板
+    if (!payload.use_project_dockerfile && !payload.template) {
+      alert('使用模板时必须选择 Dockerfile 模板')
+      return
+    }
+    
+    // 调试信息
+    console.log('保存流水线参数:', {
+      use_project_dockerfile: payload.use_project_dockerfile,
+      template: payload.template,
+      project_type: payload.project_type
+    })
     
     if (editingPipeline.value) {
       // 更新
@@ -1159,7 +1614,233 @@ async function savePipeline() {
 function closeModal() {
   showModal.value = false
   editingPipeline.value = null
+  services.value = []
+  loadingServices.value = false
+  servicesError.value = ''
 }
+
+// 加载服务列表
+async function loadServices() {
+  if (!formData.value.git_url) {
+    services.value = []
+    return
+  }
+
+  loadingServices.value = true
+  servicesError.value = ''
+
+  try {
+    if (formData.value.use_project_dockerfile) {
+      // 使用项目 Dockerfile
+      const payload = {
+        git_url: formData.value.git_url,
+        branch: formData.value.branch || null,
+        dockerfile_name: formData.value.dockerfile_name || 'Dockerfile',
+        source_id: selectedSourceId.value || formData.value.source_id || null
+      }
+      const res = await axios.post('/api/parse-dockerfile-services', payload)
+      if (res.data.services && res.data.services.length > 0) {
+        services.value = res.data.services
+        // 如果之前没有选择服务，默认全选
+        if (!formData.value.selected_services || formData.value.selected_services.length === 0) {
+          formData.value.selected_services = services.value.map(s => s.name)
+          initializeServiceConfigs()
+        }
+      } else {
+        services.value = []
+      }
+    } else if (formData.value.template) {
+      // 使用模板
+      const res = await axios.get('/api/template-params', {
+        params: {
+          template: formData.value.template,
+          project_type: formData.value.project_type
+        }
+      })
+      const templateServices = res.data.services || []
+      if (templateServices.length > 0) {
+        services.value = templateServices
+        // 如果之前没有选择服务，根据推送模式初始化
+        if (!formData.value.selected_services || formData.value.selected_services.length === 0) {
+          if (formData.value.push_mode === 'single') {
+            formData.value.selected_services = []
+          } else {
+            formData.value.selected_services = services.value.map(s => s.name)
+            initializeServiceConfigs()
+          }
+        }
+      } else {
+        services.value = []
+      }
+    } else {
+      services.value = []
+    }
+  } catch (error) {
+    console.error('加载服务列表失败:', error)
+    servicesError.value = error.response?.data?.detail || '加载服务列表失败'
+    services.value = []
+  } finally {
+    loadingServices.value = false
+  }
+}
+
+// 初始化服务配置
+function initializeServiceConfigs() {
+  if (!formData.value.service_push_config) {
+    formData.value.service_push_config = {}
+  }
+  formData.value.selected_services.forEach(serviceName => {
+    if (formData.value.service_push_config[serviceName] === undefined) {
+      formData.value.service_push_config[serviceName] = false
+    }
+  })
+}
+
+// 推送模式变化
+function onPushModeChange() {
+  if (formData.value.push_mode === 'single') {
+    formData.value.selected_services = []
+    formData.value.selected_service = ''
+  } else {
+    formData.value.selected_service = ''
+    if (services.value.length > 0 && (!formData.value.selected_services || formData.value.selected_services.length === 0)) {
+      formData.value.selected_services = services.value.map(s => s.name)
+      initializeServiceConfigs()
+    }
+  }
+}
+
+// 切换服务选择
+function toggleService(serviceName) {
+  if (!formData.value.selected_services) {
+    formData.value.selected_services = []
+  }
+  const index = formData.value.selected_services.indexOf(serviceName)
+  if (index > -1) {
+    formData.value.selected_services.splice(index, 1)
+    delete formData.value.service_push_config[serviceName]
+  } else {
+    formData.value.selected_services.push(serviceName)
+    if (formData.value.service_push_config[serviceName] === undefined) {
+      formData.value.service_push_config[serviceName] = false
+    }
+  }
+}
+
+// 服务选择变化
+function onServiceSelectionChange() {
+  // 移除未选中服务的配置
+  Object.keys(formData.value.service_push_config).forEach(serviceName => {
+    if (!formData.value.selected_services.includes(serviceName)) {
+      delete formData.value.service_push_config[serviceName]
+    }
+  })
+  // 为新选中的服务初始化配置
+  formData.value.selected_services.forEach(serviceName => {
+    if (formData.value.service_push_config[serviceName] === undefined) {
+      formData.value.service_push_config[serviceName] = false
+    }
+  })
+}
+
+// 全选服务
+function selectAllServices() {
+  if (services.value.length > 0) {
+    formData.value.selected_services = services.value.map(s => s.name)
+    initializeServiceConfigs()
+  }
+}
+
+// 全不选服务
+function deselectAllServices() {
+  formData.value.selected_services = []
+  formData.value.service_push_config = {}
+}
+
+// 移除服务
+function removeService(serviceName) {
+  const index = formData.value.selected_services.indexOf(serviceName)
+  if (index > -1) {
+    formData.value.selected_services.splice(index, 1)
+    delete formData.value.service_push_config[serviceName]
+  }
+}
+
+
+// 加载资源包列表
+async function loadResourcePackages() {
+  try {
+    const res = await axios.get('/api/resource-packages')
+    resourcePackages.value = res.data.packages || []
+  } catch (error) {
+    console.error('加载资源包列表失败:', error)
+  }
+}
+
+// 获取资源包名称
+function getResourcePackageName(packageId) {
+  const pkg = resourcePackages.value.find(p => p.package_id === packageId)
+  return pkg ? pkg.name : packageId
+}
+
+// 移除资源包
+function removeResourcePackage(index) {
+  formData.value.resource_package_configs.splice(index, 1)
+}
+
+// 检查资源包是否已选择
+function isResourcePackageSelected(packageId) {
+  return formData.value.resource_package_configs.some(pkg => pkg.package_id === packageId)
+}
+
+// 切换资源包选择
+function toggleResourcePackage(pkg) {
+  const index = formData.value.resource_package_configs.findIndex(p => p.package_id === pkg.package_id)
+  if (index > -1) {
+    formData.value.resource_package_configs.splice(index, 1)
+  } else {
+    formData.value.resource_package_configs.push({
+      package_id: pkg.package_id,
+      target_path: 'resources'
+    })
+  }
+}
+
+// 获取资源包配置
+function getResourcePackageConfig(packageId) {
+  let config = formData.value.resource_package_configs.find(p => p.package_id === packageId)
+  if (!config) {
+    config = {
+      package_id: packageId,
+      target_path: 'resources'
+    }
+    formData.value.resource_package_configs.push(config)
+  }
+  return config
+}
+
+// 模板变化处理
+function onTemplateChange() {
+  // 选择模板时，确保 use_project_dockerfile 为 false
+  if (formData.value.template) {
+    formData.value.use_project_dockerfile = false
+  }
+}
+
+// 监听 use_project_dockerfile 变化
+watch(() => formData.value.use_project_dockerfile, (newVal) => {
+  if (newVal) {
+    // 使用项目 Dockerfile 时，清空模板
+    formData.value.template = ''
+  }
+})
+
+// 监听模板和 use_project_dockerfile 变化，自动加载服务
+watch(() => [formData.value.template, formData.value.use_project_dockerfile, formData.value.git_url, formData.value.branch], () => {
+  if (formData.value.git_url && (formData.value.template || formData.value.use_project_dockerfile)) {
+    loadServices()
+  }
+}, { deep: true })
 
 async function deletePipeline(pipeline) {
   if (!confirm(`确定要删除流水线"${pipeline.name}"吗？`)) {

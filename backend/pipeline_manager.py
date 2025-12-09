@@ -71,6 +71,11 @@ class PipelineManager:
         webhook_use_push_branch: bool = True,
         branch_tag_mapping: dict = None,  # 分支到标签的映射，如 {"main": "latest", "dev": "dev"}
         source_id: str = None,  # Git 数据源 ID（可选）
+        selected_services: list = None,  # 选中的服务列表（多服务构建时使用）
+        service_push_config: dict = None,  # 每个服务的推送配置（key为服务名，value为是否推送）
+        service_template_params: dict = None,  # 服务模板参数
+        push_mode: str = "multi",  # 推送模式：'single' 单一推送，'multi' 多阶段推送
+        resource_package_configs: list = None,  # 资源包配置列表
     ) -> str:
         """
         创建流水线配置
@@ -132,6 +137,12 @@ class PipelineManager:
             "webhook_use_push_branch": webhook_use_push_branch,  # 是否使用推送的分支构建
             "branch_tag_mapping": branch_tag_mapping or {},  # 分支到标签的映射
             "source_id": source_id,  # Git 数据源 ID
+            # 多服务配置
+            "selected_services": selected_services or [],  # 选中的服务列表
+            "service_push_config": service_push_config or {},  # 每个服务的推送配置
+            "service_template_params": service_template_params or {},  # 服务模板参数
+            "push_mode": push_mode or "multi",  # 推送模式
+            "resource_package_configs": resource_package_configs or [],  # 资源包配置
             # 定时触发配置
             "cron_expression": cron_expression,
             "next_run_time": None,  # 下次执行时间
@@ -210,6 +221,11 @@ class PipelineManager:
         webhook_use_push_branch: bool = None,
         branch_tag_mapping: dict = None,
         source_id: str = None,
+        selected_services: list = None,
+        service_push_config: dict = None,
+        service_template_params: dict = None,
+        push_mode: str = None,
+        resource_package_configs: list = None,
     ) -> bool:
         """
         更新流水线配置
@@ -266,6 +282,16 @@ class PipelineManager:
                 pipeline["branch_tag_mapping"] = branch_tag_mapping
             if source_id is not None:
                 pipeline["source_id"] = source_id
+            if selected_services is not None:
+                pipeline["selected_services"] = selected_services
+            if service_push_config is not None:
+                pipeline["service_push_config"] = service_push_config
+            if service_template_params is not None:
+                pipeline["service_template_params"] = service_template_params
+            if push_mode is not None:
+                pipeline["push_mode"] = push_mode
+            if resource_package_configs is not None:
+                pipeline["resource_package_configs"] = resource_package_configs
             
             # 更新时间
             pipeline["updated_at"] = datetime.now().isoformat()
