@@ -1723,8 +1723,24 @@ class BuildManager:
             last_error = None
 
             for chunk in build_stream:
+                # 检查是否请求停止
+                if (
+                    hasattr(self.task_manager, "tasks")
+                    and task_id in self.task_manager.tasks
+                ):
+                    if self.task_manager.tasks[task_id].get("stop_requested"):
+                        log(f"\n⚠️ 任务已被用户停止\n")
+                        return
+
                 if "stream" in chunk:
-                    log(f"🏗️  {chunk['stream']}")
+                    stream_msg = chunk["stream"]
+                    log(f"🏗️  {stream_msg}")
+                    # 检查构建成功消息（docker buildx build 会输出 "Successfully built and tagged"）
+                    if (
+                        "Successfully built" in stream_msg
+                        or "Successfully tagged" in stream_msg
+                    ):
+                        build_succeeded = True
                 elif "error" in chunk:
                     last_error = chunk["error"]
                     log(f"\n🔥 [DOCKER ERROR]: {last_error}\n")
