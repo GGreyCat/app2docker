@@ -36,34 +36,43 @@ RUN npm run build
 
 # ============ 阶段 2: Python 后端 ============
 # 使用阿里云 Python 镜像加速下载
-FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/python:3.11.1
+FROM ac2-registry.cn-hangzhou.cr.aliyuncs.com/ac2/base:ubuntu24.04-py312
+# ✅ 切换为阿里云 apt 镜像源（国内加速）
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
 
-# 👇 【统一修复源】—— 外网构建必加！
-RUN sed -i 's|mirrors\.cloud\.aliyuncs\.com|mirrors.aliyun.com|g' /etc/yum.repos.d/*.repo 2>/dev/null || true
+# ✅ 更新 + 安装基础依赖
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV TZ=Asia/Shanghai
+# ✅ 添加 Docker 官方 GPG 密钥（阿里云镜像同步，安全可信）
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg \
+    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
+# ✅ 添加 Docker APT 源（阿里云镜像站，含 stable + test）
+RUN echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+    https://mirrors.aliyun.com/docker-ce/linux/ubuntu \
+    $(lsb_release -cs) stable" \
+    | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# ✅ 步骤 1：安装必要工具（yum-utils 提供 yum-config-manager）
-RUN dnf install -y yum-utils device-mapper-persistent-data lvm2
+# ✅ 安装 docker-ce-cli 和 buildx 插件（Ubuntu 原生支持！）
+RUN apt-get update && \
+    apt-get install -y \
+    docker-ce-cli \
+    docker-buildx-plugin \
+    containerd.io \
+    && rm -rf /var/lib/apt/lists/*
 
-# ✅ 步骤 2：添加阿里云 docker-ce 源（自动启用 + GPG 校验）
-RUN yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
-
-# ✅ 步骤 3：清理缓存 + 生成元数据
-RUN dnf clean all && \
-    dnf makecache --refresh
-
-# ✅ 步骤 4：安装 docker-ce（会自动包含 CLI 和 buildx 插件）
-RUN echo "📦 正在安装 docker-ce..." && \
-    dnf install -y docker-ce --allowerasing && \
-    \
-    # ✅ 启动 containerd（buildx 需要运行时）
-    systemctl enable --now containerd && \
-    \
-    # ✅ 确保插件路径存在（部分环境需要手动创建）
-    mkdir -p ~/.docker/cli-plugins && \
-    chmod 755 ~/.docker ~/.docker/cli-plugins
+# ✅ 验证安装（构建阶段即失败即知）
+RUN echo "✅ docker version:" && docker --version && \
+    echo "✅ docker buildx version:" && docker buildx version && \
+    echo "✅ docker info (short):" && docker info --format '{{.ServerVersion}} {{.DefaultRuntime}}'
 
 
 WORKDIR /app
