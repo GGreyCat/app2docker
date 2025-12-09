@@ -986,11 +986,81 @@
     <div v-if="showWebhookModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
 
     <!-- 日志查看模态框 -->
-    <TaskLogModal 
-      v-model="showLogModal" 
-      :task="selectedTask"
-      @task-status-updated="onTaskStatusUpdated"
-    />
+    <div v-if="showLogModal" class="modal fade show d-block" style="z-index: 1070;" tabindex="-1" @click.self="closeLogModal">
+      <div class="modal-dialog modal-xl" style="max-width: 90%;">
+        <div class="modal-content">
+          <div class="modal-header" :class="getLogStatusHeaderClass(selectedTask?.status)">
+            <h5 class="modal-title">
+              <i :class="getLogStatusIcon(selectedTask?.status)"></i>
+              任务日志 - {{ selectedTask?.image || '未知' }}:{{ selectedTask?.tag || 'latest' }}
+              <span v-if="isLogTaskRunning" class="badge bg-primary ms-2">
+                <span class="spinner-border spinner-border-sm me-1" style="width: 0.7rem; height: 0.7rem;"></span> 运行中
+              </span>
+            </h5>
+            <button type="button" class="btn-close" :class="selectedTask?.status === 'failed' ? 'btn-close-white' : ''" @click="closeLogModal"></button>
+          </div>
+          <div class="modal-body" style="display: flex; flex-direction: column; padding: 0; max-height: 80vh;">
+            <!-- 任务信息 -->
+            <div v-if="selectedTask" class="p-3 border-bottom">
+              <div class="text-muted small">
+                任务ID: <code>{{ selectedTask.task_id?.substring(0, 8) || '未知' }}</code>
+              </div>
+            </div>
+            
+            <!-- 任务概况（仅已完成/失败/停止时显示） -->
+            <div 
+              v-if="selectedTask && (selectedTask.status === 'failed' || selectedTask.status === 'completed' || selectedTask.status === 'stopped')" 
+              class="p-3 border-bottom" 
+              :class="getLogStatusSummaryClass(selectedTask.status)"
+            >
+              <div class="d-flex align-items-center mb-2">
+                <i :class="getLogStatusIcon(selectedTask.status)" class="me-2"></i>
+                <strong>{{ getLogStatusText(selectedTask.status) }}</strong>
+              </div>
+              <div v-if="selectedTask.status === 'failed' && selectedTask.error" class="mt-2">
+                <strong>错误信息：</strong>
+                <pre class="mb-0 mt-1 p-2 bg-dark text-light rounded" style="font-size: 0.85rem; max-height: 150px; overflow-y: auto;">{{ selectedTask.error }}</pre>
+              </div>
+              <div v-if="selectedTask.status === 'completed'" class="mt-2 small">
+                <div><strong>创建时间：</strong>{{ formatLogTime(selectedTask.created_at) }}</div>
+                <div v-if="selectedTask.completed_at"><strong>完成时间：</strong>{{ formatLogTime(selectedTask.completed_at) }}</div>
+                <div v-if="selectedTask.completed_at"><strong>耗时：</strong>{{ calculateLogDuration(selectedTask.created_at, selectedTask.completed_at) }}</div>
+              </div>
+              <div v-if="selectedTask.status === 'stopped'" class="mt-2 small">
+                <div><strong>创建时间：</strong>{{ formatLogTime(selectedTask.created_at) }}</div>
+                <div v-if="selectedTask.completed_at"><strong>停止时间：</strong>{{ formatLogTime(selectedTask.completed_at) }}</div>
+              </div>
+            </div>
+            
+            <!-- 日志内容 -->
+            <div style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+              <div class="p-2 border-bottom d-flex justify-content-between align-items-center">
+                <div>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" @click="refreshLogs" :disabled="refreshingLogs">
+                    <i class="fas fa-sync-alt" :class="{ 'fa-spin': refreshingLogs }"></i> 刷新
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary ms-2" @click="toggleAutoScroll">
+                    <i class="fas" :class="autoScroll ? 'fa-pause' : 'fa-play'"></i> {{ autoScroll ? '暂停自动滚动' : '启用自动滚动' }}
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary ms-2" @click="copyLogs">
+                    <i class="fas fa-copy"></i> 复制日志
+                  </button>
+                </div>
+              </div>
+              <pre 
+                ref="logContainer"
+                class="bg-dark text-light p-3 mb-0" 
+                style="flex: 1; overflow-y: auto; overflow-x: hidden; font-size: 0.85rem; white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', monospace; line-height: 1.5; min-height: 0; max-height: 80vh;"
+              >{{ taskLogs || '暂无日志' }}</pre>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" @click="closeLogModal">关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-if="showLogModal" class="modal-backdrop fade show" style="z-index: 1065;" @click="closeLogModal"></div>
 
     <!-- 历史构建模态框 -->
     <div v-if="showHistoryModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="closeHistoryModal">
@@ -1236,7 +1306,7 @@
 
 <script setup>
 import axios from 'axios'
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 const pipelines = ref([])
 const templates = ref([])
@@ -1267,6 +1337,11 @@ const historyPagination = ref({
 const showLogModal = ref(false)
 const selectedTask = ref(null)
 const viewingLogs = ref(null)
+const taskLogs = ref('')
+const logContainer = ref(null)
+const logPollingInterval = ref(null)
+const autoScroll = ref(true)
+const refreshingLogs = ref(false)
 const showResourcePackageModal = ref(false)
 const resourcePackages = ref([])  // 资源包列表
 
@@ -2084,28 +2159,162 @@ function isLastBuildRunning(pipeline) {
   return pipeline.last_build && (pipeline.last_build.status === 'running' || pipeline.last_build.status === 'pending')
 }
 
-// 任务状态更新处理
-function onTaskStatusUpdated(newStatus) {
-  if (selectedTask.value) {
-    selectedTask.value.status = newStatus
-    // 如果任务状态改变，刷新流水线列表
-    if (newStatus === 'completed' || newStatus === 'failed') {
-      loadPipelines()
+// 计算任务是否正在运行（用于日志模态框）
+const isLogTaskRunning = computed(() => {
+  if (!selectedTask.value) return false
+  const status = selectedTask.value.status
+  return status === 'running' || status === 'pending'
+})
+
+// 获取任务日志
+async function fetchTaskLogs(taskId, silent = false) {
+  if (!silent) {
+    refreshingLogs.value = true
+  }
+  
+  try {
+    const res = await axios.get(`/api/build-tasks/${taskId}/logs`)
+    const oldLength = taskLogs.value.length
+    if (typeof res.data === 'string') {
+      taskLogs.value = res.data || '暂无日志'
+    } else {
+      taskLogs.value = JSON.stringify(res.data, null, 2)
     }
+    
+    // 如果有新内容，自动滚动到底部
+    if (taskLogs.value.length > oldLength && autoScroll.value) {
+      setTimeout(() => {
+        scrollLogToBottom()
+      }, 50)
+    }
+  } catch (error) {
+    console.error('获取任务日志失败:', error)
+    taskLogs.value = `获取日志失败: ${error.message || '未知错误'}`
+  } finally {
+    refreshingLogs.value = false
   }
 }
 
+// 滚动日志到底部
+function scrollLogToBottom() {
+  if (logContainer.value && autoScroll.value) {
+    nextTick(() => {
+      if (logContainer.value) {
+        logContainer.value.scrollTop = logContainer.value.scrollHeight
+      }
+    })
+  }
+}
+
+// 开始日志轮询
+function startLogPolling(taskId) {
+  stopLogPolling()
+  if (selectedTask.value && (selectedTask.value.status === 'running' || selectedTask.value.status === 'pending')) {
+    logPollingInterval.value = setInterval(() => {
+      fetchTaskLogs(taskId, true)
+    }, 2000)
+  }
+}
+
+// 停止日志轮询
+function stopLogPolling() {
+  if (logPollingInterval.value) {
+    clearInterval(logPollingInterval.value)
+    logPollingInterval.value = null
+  }
+}
+
+// 刷新日志
+function refreshLogs() {
+  if (selectedTask.value?.task_id) {
+    fetchTaskLogs(selectedTask.value.task_id)
+  }
+}
+
+// 切换自动滚动
+function toggleAutoScroll() {
+  autoScroll.value = !autoScroll.value
+  if (autoScroll.value) {
+    scrollLogToBottom()
+  }
+}
+
+// 复制日志
+function copyLogs() {
+  if (taskLogs.value) {
+    navigator.clipboard.writeText(taskLogs.value).then(() => {
+      alert('日志已复制到剪贴板')
+    }).catch(err => {
+      console.error('复制失败:', err)
+      alert('复制失败')
+    })
+  }
+}
+
+// 关闭日志模态框
+function closeLogModal() {
+  showLogModal.value = false
+  stopLogPolling()
+  taskLogs.value = ''
+  selectedTask.value = null
+  viewingLogs.value = null
+}
+
+// 日志状态相关函数
+function getLogStatusHeaderClass(status) {
+  if (status === 'failed') return 'bg-danger text-white'
+  if (status === 'completed') return 'bg-success text-white'
+  if (status === 'stopped') return 'bg-warning text-dark'
+  return 'bg-primary text-white'
+}
+
+function getLogStatusSummaryClass(status) {
+  if (status === 'failed') return 'bg-danger-subtle'
+  if (status === 'completed') return 'bg-success-subtle'
+  if (status === 'stopped') return 'bg-warning-subtle'
+  return ''
+}
+
+function getLogStatusIcon(status) {
+  if (status === 'failed') return 'fas fa-times-circle'
+  if (status === 'completed') return 'fas fa-check-circle'
+  if (status === 'stopped') return 'fas fa-stop-circle'
+  if (status === 'running') return 'fas fa-spinner fa-spin'
+  if (status === 'pending') return 'fas fa-clock'
+  return 'fas fa-info-circle'
+}
+
+function getLogStatusText(status) {
+  if (status === 'failed') return '构建失败'
+  if (status === 'completed') return '构建成功'
+  if (status === 'stopped') return '构建已停止'
+  if (status === 'running') return '构建中'
+  if (status === 'pending') return '等待中'
+  return '未知状态'
+}
+
+function formatLogTime(time) {
+  if (!time) return '未知'
+  return new Date(time).toLocaleString('zh-CN')
+}
+
+function calculateLogDuration(start, end) {
+  if (!start || !end) return '未知'
+  const startTime = new Date(start).getTime()
+  const endTime = new Date(end).getTime()
+  const duration = Math.floor((endTime - startTime) / 1000)
+  const minutes = Math.floor(duration / 60)
+  const seconds = duration % 60
+  return `${minutes}分${seconds}秒`
+}
+
 function viewTaskLogs(taskId, task) {
-  console.log('viewTaskLogs 被调用', { taskId, task })
-  
   if (!taskId) {
-    console.error('viewTaskLogs: taskId 为空', { taskId, task })
     alert('任务ID不存在，无法查看日志')
     return
   }
   
   if (viewingLogs.value === taskId) {
-    // 如果正在查看同一个任务的日志，直接返回
     return
   }
   
@@ -2113,11 +2322,9 @@ function viewTaskLogs(taskId, task) {
   
   // 确保 task 对象有 task_id 属性
   if (task) {
-    // 如果 task 没有 task_id，添加它
     if (!task.task_id) {
       task = { ...task, task_id: taskId }
     }
-    // 确保有必要的属性
     if (!task.image) {
       task.image = task.image_name || '未知'
     }
@@ -2125,7 +2332,6 @@ function viewTaskLogs(taskId, task) {
       task.tag = 'latest'
     }
   } else {
-    // 如果 task 为空，创建一个基本的 task 对象
     task = { 
       task_id: taskId, 
       status: 'unknown',
@@ -2134,16 +2340,53 @@ function viewTaskLogs(taskId, task) {
     }
   }
   
-  console.log('设置 selectedTask', task)
-  // 先设置 task，确保 watch 能捕获到变化
   selectedTask.value = task
-  // 使用 nextTick 确保 task 已经设置后再显示模态框
-  nextTick(() => {
-    showLogModal.value = true
-    console.log('显示日志模态框', { showLogModal: showLogModal.value, selectedTask: selectedTask.value })
+  showLogModal.value = true
+  taskLogs.value = '加载中...'
+  
+  // 加载日志
+  fetchTaskLogs(taskId)
+  
+  // 如果任务正在运行，开始轮询
+  if (task.status === 'running' || task.status === 'pending') {
+    startLogPolling(taskId)
+  }
+  
+  // 监听任务状态变化
+  let statusCheckInterval = setInterval(async () => {
+    try {
+      const res = await axios.get(`/api/build-tasks/${taskId}`)
+      if (res.data && res.data.status) {
+        if (selectedTask.value && selectedTask.value.task_id === taskId) {
+          selectedTask.value.status = res.data.status
+          if (res.data.status === 'completed' || res.data.status === 'failed' || res.data.status === 'stopped') {
+            stopLogPolling()
+            clearInterval(statusCheckInterval)
+            // 刷新一次日志
+            fetchTaskLogs(taskId)
+            // 刷新流水线列表
+            loadPipelines()
+          } else if (res.data.status === 'running' || res.data.status === 'pending') {
+            startLogPolling(taskId)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('检查任务状态失败:', error)
+    }
+  }, 3000)
+  
+  // 当模态框关闭时，清理状态检查
+  const unwatchStatus = watch(() => showLogModal.value, (newVal) => {
+    if (!newVal) {
+      if (statusCheckInterval) {
+        clearInterval(statusCheckInterval)
+      }
+      unwatchStatus()
+    }
   })
   
-  // 延迟清除 viewingLogs，避免重复点击
+  // 延迟清除 viewingLogs
   setTimeout(() => {
     if (viewingLogs.value === taskId) {
       viewingLogs.value = null
