@@ -306,44 +306,52 @@ function calculateDuration(startTime, endTime) {
   }
 }
 
+// 加载日志的函数
+function loadLogsIfNeeded() {
+  if (props.modelValue && props.task && props.task.task_id) {
+    const taskId = props.task.task_id
+    console.log('TaskLogModal 加载日志', { taskId, task: props.task })
+    logs.value = '加载中...'
+    fetchTaskLogs(taskId)
+    startLogPolling(taskId)
+  } else {
+    console.log('TaskLogModal 条件不满足', { modelValue: props.modelValue, task: props.task })
+    stopLogPolling()
+    if (!props.modelValue) {
+      logs.value = ''
+    } else if (!props.task) {
+      logs.value = '任务信息不存在'
+    } else if (!props.task.task_id) {
+      logs.value = '任务ID不存在'
+    }
+  }
+}
+
 // 监听 modelValue 变化
 watch(() => props.modelValue, (newValue) => {
   console.log('TaskLogModal modelValue 变化', { modelValue: newValue, task: props.task })
-  if (newValue && props.task) {
-    const taskId = props.task.task_id
-    console.log('准备加载日志', { taskId, task: props.task })
-    if (taskId) {
-      logs.value = '加载中...'
-      fetchTaskLogs(taskId)
-      startLogPolling(taskId)
-    } else {
-      console.error('任务ID不存在', props.task)
-      logs.value = '任务ID不存在'
-      stopLogPolling()
-    }
+  if (newValue) {
+    // 模态框打开时，加载日志
+    loadLogsIfNeeded()
   } else {
-    console.log('关闭日志模态框或任务为空')
+    // 模态框关闭时，清理
+    console.log('关闭日志模态框')
     stopLogPolling()
     logs.value = ''
   }
 })
 
 // 监听 task 变化（当模态框已打开时）
-watch(() => props.task, (newTask) => {
-  console.log('TaskLogModal task 变化', { modelValue: props.modelValue, task: newTask })
+watch(() => props.task, (newTask, oldTask) => {
+  console.log('TaskLogModal task 变化', { modelValue: props.modelValue, newTask, oldTask })
   if (props.modelValue && newTask) {
-    const taskId = newTask.task_id
-    if (taskId) {
-      logs.value = '加载中...'
-      fetchTaskLogs(taskId)
-      startLogPolling(taskId)
-    } else {
-      console.error('任务ID不存在', newTask)
-      logs.value = '任务ID不存在'
-      stopLogPolling()
-    }
+    // 如果模态框已打开且 task 变化，重新加载日志
+    // 使用 setTimeout 确保在下一个 tick 执行
+    setTimeout(() => {
+      loadLogsIfNeeded()
+    }, 0)
   }
-})
+}, { deep: true, immediate: false })
 
 // 监听任务状态变化
 watch(() => props.task?.status, (newStatus) => {

@@ -1236,7 +1236,7 @@
 
 <script setup>
 import axios from 'axios'
-import { onMounted, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 
 const pipelines = ref([])
 const templates = ref([])
@@ -2106,7 +2106,6 @@ function viewTaskLogs(taskId, task) {
   
   if (viewingLogs.value === taskId) {
     // 如果正在查看同一个任务的日志，直接返回
-    console.log('正在查看同一个任务，跳过')
     return
   }
   
@@ -2114,8 +2113,16 @@ function viewTaskLogs(taskId, task) {
   
   // 确保 task 对象有 task_id 属性
   if (task) {
+    // 如果 task 没有 task_id，添加它
     if (!task.task_id) {
       task = { ...task, task_id: taskId }
+    }
+    // 确保有必要的属性
+    if (!task.image) {
+      task.image = task.image_name || '未知'
+    }
+    if (!task.tag) {
+      task.tag = 'latest'
     }
   } else {
     // 如果 task 为空，创建一个基本的 task 对象
@@ -2128,10 +2135,13 @@ function viewTaskLogs(taskId, task) {
   }
   
   console.log('设置 selectedTask', task)
-  // 先设置 task，再显示模态框，确保 watch 能正确触发
+  // 先设置 task，确保 watch 能捕获到变化
   selectedTask.value = task
-  showLogModal.value = true
-  console.log('显示日志模态框', { showLogModal: showLogModal.value, selectedTask: selectedTask.value })
+  // 使用 nextTick 确保 task 已经设置后再显示模态框
+  nextTick(() => {
+    showLogModal.value = true
+    console.log('显示日志模态框', { showLogModal: showLogModal.value, selectedTask: selectedTask.value })
+  })
   
   // 延迟清除 viewingLogs，避免重复点击
   setTimeout(() => {
