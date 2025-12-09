@@ -36,7 +36,7 @@ RUN npm run build
 
 # ============ 阶段 2: Python 后端 ============
 # 使用阿里云 Python 镜像加速下载
-FROM ac2-registry.cn-hangzhou.cr.aliyuncs.com/ac2/base:ubuntu22.04-py310
+FROM ac2-registry.cn-hangzhou.cr.aliyuncs.com/ac2/base:ubuntu22.04-py310-optimised
 
 # 初始化 apt 源
 RUN mkdir -p /etc/apt && \
@@ -47,20 +47,33 @@ RUN mkdir -p /etc/apt && \
 # 安装 curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# 下载 docker 和 buildx（静态二进制）
-RUN mkdir -p /usr/local/bin
-RUN curl -fsSL https://mirrors.aliyun.com/docker-ce/release/linux/static/stable/x86_64/docker-25.0.3.tgz | tar xz -C /tmp && \
-    mv /tmp/docker/* /usr/local/bin/ && \
-    rm -rf /tmp/docker
+# ✅ 3. 下载并配置 Docker GPG 密钥（阿里云镜像）
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg \
+    -o /etc/apt/keyrings/docker.gpg && \
+    chmod 644 /etc/apt/keyrings/docker.gpg
 
-# 下载 buildx 插件
+# ✅ 4. 添加 Docker APT 源
+RUN echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+    https://mirrors.aliyun.com/docker-ce/linux/ubuntu \
+    jammy stable" \
+    | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# ✅ 5. 安装 docker-ce-cli（包含 docker CLI）
+RUN apt-get update && \
+    apt-get install -y docker-ce-cli && \
+    rm -rf /var/lib/apt/lists/*
+
+# ✅ 6. 手动安装 buildx 插件（从 GitHub 下载，使用国内代理加速）
 RUN mkdir -p ~/.docker/cli-plugins
-RUN curl -fsSL https://github.com/docker/buildx/releases/download/v0.16.3/buildx-v0.16.3.linux-amd64 \
+RUN curl -fsSL https://ghproxy.com/https://github.com/docker/buildx/releases/download/v0.16.3/buildx-v0.16.3.linux-amd64 \
     -o ~/.docker/cli-plugins/docker-buildx && \
     chmod a+x ~/.docker/cli-plugins/docker-buildx
 
-# 验证
-RUN docker --version && docker buildx version
+# ✅ 7. 验证
+RUN docker --version && \
+    docker buildx version
 
 
 
