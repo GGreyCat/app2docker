@@ -1905,6 +1905,7 @@ class BuildManager:
         service_push_config: dict = None,  # 每个服务的推送配置（key为服务名，value为是否推送）
         push_mode: str = "multi",  # 推送模式：'single' 单一推送，'multi' 多阶段推送（仅模板模式）
         build_steps: dict = None,  # 构建步骤信息
+        service_template_params: dict = None,  # 服务模板参数
     ):
         """从 Git 源码开始构建"""
         try:
@@ -1930,6 +1931,7 @@ class BuildManager:
                 service_push_config=service_push_config,  # 传递服务推送配置
                 push_mode=push_mode,  # 传递推送模式
                 build_steps=build_steps or {},  # 传递构建步骤信息
+                service_template_params=service_template_params or {},  # 传递服务模板参数
             )
             print(f"✅ 任务创建成功: task_id={task_id}")
         except Exception as e:
@@ -1961,6 +1963,7 @@ class BuildManager:
                     selected_services,
                     service_push_config,
                     push_mode,
+                    service_template_params,  # 传递服务模板参数
                 ),
                 daemon=True,
             )
@@ -2004,6 +2007,7 @@ class BuildManager:
         selected_services: list = None,  # 选中的服务列表（多服务构建时使用）
         service_push_config: dict = None,  # 每个服务的推送配置（key为服务名，value为是否推送）
         push_mode: str = "multi",  # 推送模式：'single' 单一推送，'multi' 多阶段推送（仅模板模式）
+        service_template_params: dict = None,  # 服务模板参数
     ):
         """从 Git 源码构建任务"""
         full_tag = f"{image_name}:{tag}"
@@ -2196,14 +2200,28 @@ class BuildManager:
                 dockerfile_path = os.path.join(build_context, "Dockerfile")
                 from backend.template_parser import parse_template
 
+                # 合并全局模板参数和服务模板参数（如果有多个服务，使用第一个服务的参数作为默认值）
+                all_template_params = {
+                    "PROJECT_TYPE": project_type,
+                    "UPLOADED_FILENAME": "app.jar",  # 源码构建不需要这个
+                    **template_params,
+                }
+                
+                # 如果有服务模板参数，合并到全局参数中（用于单服务构建）
+                if service_template_params:
+                    # 如果只有一个服务，直接使用该服务的参数
+                    if len(service_template_params) == 1:
+                        service_name = list(service_template_params.keys())[0]
+                        all_template_params.update(service_template_params[service_name])
+                    else:
+                        # 多个服务时，合并所有服务的参数（可能会有冲突，但先这样处理）
+                        for service_params in service_template_params.values():
+                            all_template_params.update(service_params)
+
                 parse_template(
                     template_path,
                     dockerfile_path,
-                    {
-                        "PROJECT_TYPE": project_type,
-                        "UPLOADED_FILENAME": "app.jar",  # 源码构建不需要这个
-                        **template_params,
-                    },
+                    all_template_params,
                 )
                 log(f"✅ 已生成 Dockerfile\n")
 

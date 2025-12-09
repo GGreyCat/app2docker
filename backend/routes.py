@@ -1007,6 +1007,7 @@ async def build_from_source(
     service_push_config: Optional[dict] = Body(None, description="每个服务的推送配置（key为服务名，value为是否推送）"),
     push_mode: Optional[str] = Body("multi", description="推送模式：'single' 单一推送，'multi' 多阶段推送（仅模板模式）"),
     build_steps: Optional[dict] = Body(None, description="构建步骤信息（JSON对象）"),
+    service_template_params: Optional[dict] = Body(None, description="服务模板参数（JSON对象）"),
 ):
     """从 Git 源码构建镜像"""
     try:
@@ -1055,6 +1056,7 @@ async def build_from_source(
                     service_push_config=service_push_config,
                     push_mode=push_mode or "multi",
                     build_steps=build_steps,  # 传递构建步骤信息
+                    service_template_params=service_template_params_dict,  # 传递服务模板参数
                 )
                 if not task_id:
                     raise RuntimeError("任务创建失败：未返回 task_id")
