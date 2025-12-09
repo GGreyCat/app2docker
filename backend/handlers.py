@@ -1643,6 +1643,12 @@ class BuildManager:
                         )
                         if copied_packages:
                             log(f"✅ 已复制 {len(copied_packages)} 个资源包到构建上下文\n")
+                            # 输出每个资源包的详细信息
+                            for config in package_configs:
+                                package_id = config.get('package_id')
+                                if package_id in copied_packages:
+                                    target_path = config.get('target_path') or config.get('target_dir', 'resources')
+                                    log(f"   📦 {package_id} -> {target_path}\n")
                         else:
                             log(f"⚠️ 资源包复制失败或资源包不存在\n")
                 except Exception as e:
@@ -2276,6 +2282,12 @@ class BuildManager:
                         )
                         if copied_packages:
                             log(f"✅ 已复制 {len(copied_packages)} 个资源包到构建上下文\n")
+                            # 输出每个资源包的详细信息
+                            for config in package_configs:
+                                package_id = config.get('package_id')
+                                if package_id in copied_packages:
+                                    target_path = config.get('target_path') or config.get('target_dir', 'resources')
+                                    log(f"   📦 {package_id} -> {target_path}\n")
                         else:
                             log(f"⚠️ 资源包复制失败或资源包不存在\n")
                 except Exception as e:

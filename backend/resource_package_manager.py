@@ -234,16 +234,20 @@ class ResourcePackageManager:
             try:
                 # 解析目标路径：分离目录和文件名
                 # 例如 "test/b.txt" -> dir="test", filename="b.txt"
+                # 例如 "settings.xml" -> dir="." (根目录), filename="settings.xml"
                 # 例如 "resources" -> dir="resources", filename=None（使用原文件名）
                 target_path_rel = target_path_rel.replace('\\', '/')  # 统一使用正斜杠
                 path_parts = target_path_rel.split('/')
                 
                 # 判断最后一部分是文件名还是目录名
-                # 如果包含扩展名或没有斜杠，可能是文件名
                 last_part = path_parts[-1]
                 has_extension = '.' in last_part and not last_part.startswith('.')
                 
-                if len(path_parts) > 1 and has_extension:
+                if len(path_parts) == 1 and has_extension:
+                    # 单个文件名：如 "settings.xml" -> 复制到根目录
+                    target_dir_rel = '.'  # 根目录
+                    target_filename = last_part
+                elif len(path_parts) > 1 and has_extension:
                     # 有目录和文件名：如 "test/b.txt"
                     target_dir_rel = '/'.join(path_parts[:-1])
                     target_filename = last_part
@@ -253,7 +257,10 @@ class ResourcePackageManager:
                     target_filename = None  # 使用原文件名
                 
                 # 构建完整目标路径
-                target_dir_abs = os.path.join(build_context, target_dir_rel)
+                if target_dir_rel == '.':
+                    target_dir_abs = build_context  # 根目录就是构建上下文
+                else:
+                    target_dir_abs = os.path.join(build_context, target_dir_rel)
                 os.makedirs(target_dir_abs, exist_ok=True)
                 
                 # 如果已解压，复制解压后的目录；否则复制原始文件
@@ -288,7 +295,10 @@ class ResourcePackageManager:
                         shutil.copy2(original_file, os.path.join(target_dir_abs, dst_filename))
                 
                 copied_packages.append(package_id)
-                print(f"✅ 资源包已复制到构建上下文: {package_id} -> {target_path_rel}")
+                final_path = os.path.join(target_dir_rel, dst_filename or package_info['filename']).replace('\\', '/')
+                if final_path.startswith('./'):
+                    final_path = final_path[2:]  # 移除 './' 前缀
+                print(f"✅ 资源包已复制到构建上下文: {package_id} ({package_info['filename']}) -> {final_path}")
             except Exception as e:
                 print(f"❌ 复制资源包失败 {package_id}: {e}")
                 import traceback
