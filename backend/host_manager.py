@@ -234,6 +234,7 @@ class HostManager:
                 "private_key": private_key,  # 注意：实际应用中应该加密存储
                 "key_password": key_password,  # 注意：实际应用中应该加密存储
                 "docker_enabled": docker_enabled,
+                "docker_version": None,  # Docker版本信息
                 "description": description,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
@@ -257,6 +258,7 @@ class HostManager:
         private_key: Optional[str] = None,
         key_password: Optional[str] = None,
         docker_enabled: Optional[bool] = None,
+        docker_version: Optional[str] = None,
         description: Optional[str] = None
     ) -> Optional[Dict]:
         """
@@ -310,6 +312,8 @@ class HostManager:
                 host_info["key_password"] = key_password if key_password else None
             if docker_enabled is not None:
                 host_info["docker_enabled"] = docker_enabled
+            if docker_version is not None:
+                host_info["docker_version"] = docker_version
             if description is not None:
                 host_info["description"] = description
             
@@ -344,6 +348,12 @@ class HostManager:
             
             if host_copy.get("key_password"):
                 host_copy["key_password"] = "***"
+            
+            # 根据docker_version判断docker_available
+            if host_copy.get("docker_version"):
+                host_copy["docker_available"] = True
+            else:
+                host_copy["docker_available"] = False
             
             hosts.append(host_copy)
         

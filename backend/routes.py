@@ -54,67 +54,71 @@ from backend.utils import get_safe_filename
 from backend.auth import authenticate, verify_token
 import jwt
 
+
 def get_current_username(request: Request) -> str:
     """从请求中获取当前用户名"""
     try:
         # FastAPI/Starlette 会将 header 名称标准化为小写
         # 使用小写 'authorization' 是标准做法
         # 注意：request.headers 是 Headers 对象，支持大小写不敏感的查找
-        auth_header = request.headers.get('authorization', '')
-        
+        auth_header = request.headers.get("authorization", "")
+
         if not auth_header:
             # 尝试其他可能的名称
             for key in request.headers.keys():
-                if key.lower() == 'authorization':
+                if key.lower() == "authorization":
                     auth_header = request.headers[key]
                     break
-        
+
         if not auth_header:
             # 调试：打印所有 header 键（仅用于调试，可以注释掉）
             # header_keys = list(request.headers.keys())
             # print(f"⚠️ 没有找到 Authorization header，可用 headers: {header_keys[:5]}")
-            return 'unknown'
-        
+            return "unknown"
+
         # 移除 Bearer 前缀（不区分大小写）
         auth_header_lower = auth_header.lower()
-        if auth_header_lower.startswith('bearer '):
+        if auth_header_lower.startswith("bearer "):
             token = auth_header[7:].strip()
         else:
             # 没有 Bearer 前缀，直接使用
             token = auth_header.strip()
-        
+
         if not token:
-            return 'unknown'
-        
+            return "unknown"
+
         # 验证 token
         result = verify_token(token)
-        if result.get('valid'):
-            username = result.get('username')
+        if result.get("valid"):
+            username = result.get("username")
             if username:
                 return username
             else:
                 # Token 有效但没有用户名，这不应该发生
                 print(f"⚠️ Token 有效但用户名为空")
-                return 'unknown'
+                return "unknown"
         else:
             # Token 无效
-            error_msg = result.get('error', 'unknown error')
+            error_msg = result.get("error", "unknown error")
             # 调试信息（可以注释掉）
             # print(f"⚠️ Token 验证失败: {error_msg}")
-            return 'unknown'
+            return "unknown"
     except jwt.ExpiredSignatureError:
         # Token 已过期
-        return 'unknown'
+        return "unknown"
     except jwt.InvalidTokenError:
         # Token 无效
-        return 'unknown'
+        return "unknown"
     except Exception as e:
         # 其他异常，记录但不影响功能
         print(f"⚠️ 获取用户名异常: {type(e).__name__}: {e}")
         import traceback
+
         traceback.print_exc()
-    
-    return 'unknown'
+
+    return "unknown"
+
+
 from backend.template_parser import parse_template_variables
 from backend.handlers import parse_dockerfile_services
 from datetime import datetime
@@ -190,36 +194,37 @@ async def change_password(request: ChangePasswordRequest):
     try:
         from backend.auth import load_users, verify_password, hash_password
         from backend.config import load_config, save_config
-        
+
         users = load_users()
-        
+
         # 获取当前用户（从token中）
         # 这里简化处理，实际应该从token中获取用户名
         # 暂时使用admin作为默认用户
         username = "admin"
-        
+
         if username not in users:
             raise HTTPException(status_code=400, detail="用户不存在")
-        
+
         # 验证旧密码
         if not verify_password(request.old_password, users[username]):
             raise HTTPException(status_code=400, detail="旧密码错误")
-        
+
         # 更新密码
         config = load_config()
         if "users" not in config:
             config["users"] = {}
         config["users"][username] = hash_password(request.new_password)
         save_config(config)
-        
+
         # 记录操作日志
         OperationLogger.log(username, "change_password", {"username": username})
-        
+
         return JSONResponse({"success": True, "message": "密码修改成功"})
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"修改密码失败: {str(e)}")
 
@@ -242,25 +247,30 @@ async def get_operation_logs(
 @router.delete("/operation-logs")
 async def clear_operation_logs(
     request: Request,
-    days: Optional[int] = Query(None, description="保留最近 N 天的日志，不传则清空所有"),
+    days: Optional[int] = Query(
+        None, description="保留最近 N 天的日志，不传则清空所有"
+    ),
 ):
     """清理操作日志"""
     try:
         username = get_current_username(request)
         logger = OperationLogger()
         removed_count = logger.clear_logs(days=days)
-        
+
         # 记录清理操作
-        OperationLogger.log(username, "clear_logs", {
-            "removed_count": removed_count,
-            "days_kept": days
-        })
-        
-        return JSONResponse({
-            "success": True,
-            "removed_count": removed_count,
-            "message": f"已清理 {removed_count} 条日志" if days else "已清空所有日志"
-        })
+        OperationLogger.log(
+            username, "clear_logs", {"removed_count": removed_count, "days_kept": days}
+        )
+
+        return JSONResponse(
+            {
+                "success": True,
+                "removed_count": removed_count,
+                "message": (
+                    f"已清理 {removed_count} 条日志" if days else "已清空所有日志"
+                ),
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清理操作日志失败: {str(e)}")
 
@@ -299,10 +309,10 @@ async def save_git_config_route(
             "ssh_key_password": ssh_key_password,
         }
         save_git_config(git_config)
-        
+
         # 记录操作日志
         OperationLogger.log(username_param, "save_git_config", {})
-        
+
         return JSONResponse({"success": True, "message": "Git 配置已保存"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存 Git 配置失败: {str(e)}")
@@ -362,10 +372,14 @@ async def save_registries(request: SaveRegistriesRequest, http_request: Request)
         init_docker_builder()
 
         # 记录操作日志
-        OperationLogger.log(username, "save_registries", {
-            "registry_count": len(registries_data),
-            "registry_names": [r.get("name") for r in registries_data]
-        })
+        OperationLogger.log(
+            username,
+            "save_registries",
+            {
+                "registry_count": len(registries_data),
+                "registry_names": [r.get("name") for r in registries_data],
+            },
+        )
 
         return JSONResponse(
             {"message": "仓库配置保存成功", "registries": registries_data}
@@ -381,6 +395,7 @@ async def save_registries(request: SaveRegistriesRequest, http_request: Request)
 
 class TestRegistryRequest(BaseModel):
     """测试Registry登录请求"""
+
     name: str
     registry: str
     username: str
@@ -392,78 +407,93 @@ async def test_registry_login(request: TestRegistryRequest):
     """测试Registry登录"""
     try:
         from backend.handlers import docker_builder
-        
+
         if not docker_builder or not docker_builder.is_available():
             return JSONResponse(
                 {"success": False, "message": "Docker 不可用，请检查 Docker 连接"},
-                status_code=400
+                status_code=400,
             )
-        
+
         registry_host = request.registry
         username = request.username
         password = request.password
-        
+
         if not username or not password:
             return JSONResponse(
-                {"success": False, "message": "用户名和密码不能为空"},
-                status_code=400
+                {"success": False, "message": "用户名和密码不能为空"}, status_code=400
             )
-        
+
         # 构建auth_config
         auth_config = {
             "username": username,
             "password": password,
         }
-        
+
         # 设置serveraddress
         if registry_host and registry_host != "docker.io":
             auth_config["serveraddress"] = registry_host
         else:
             auth_config["serveraddress"] = "https://index.docker.io/v1/"
-        
+
         try:
             # 尝试登录
             if hasattr(docker_builder, "client") and docker_builder.client:
-                login_registry = registry_host if registry_host and registry_host != "docker.io" else None
+                login_registry = (
+                    registry_host
+                    if registry_host and registry_host != "docker.io"
+                    else None
+                )
                 login_result = docker_builder.client.login(
                     username=username,
                     password=password,
                     registry=login_registry,
                 )
-                
+
                 # 登录成功
-                return JSONResponse({
-                    "success": True,
-                    "message": f"登录成功！Registry: {registry_host or 'docker.io'}",
-                    "details": str(login_result) if login_result else "认证通过"
-                })
+                return JSONResponse(
+                    {
+                        "success": True,
+                        "message": f"登录成功！Registry: {registry_host or 'docker.io'}",
+                        "details": str(login_result) if login_result else "认证通过",
+                    }
+                )
             else:
                 return JSONResponse(
                     {"success": False, "message": "Docker 客户端不可用"},
-                    status_code=400
+                    status_code=400,
                 )
         except Exception as login_error:
             error_msg = str(login_error)
-            
+
             # 检查是否是认证错误
-            if "401" in error_msg or "Unauthorized" in error_msg or "unauthorized" in error_msg:
-                return JSONResponse({
-                    "success": False,
-                    "message": "认证失败：用户名或密码不正确",
-                    "details": error_msg,
-                    "suggestions": [
-                        "请检查用户名和密码是否正确",
-                        "对于阿里云registry，请使用独立的Registry登录密码（不是阿里云账号密码）",
-                        "如果使用访问令牌，请确认令牌未过期"
-                    ]
-                }, status_code=401)
+            if (
+                "401" in error_msg
+                or "Unauthorized" in error_msg
+                or "unauthorized" in error_msg
+            ):
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "message": "认证失败：用户名或密码不正确",
+                        "details": error_msg,
+                        "suggestions": [
+                            "请检查用户名和密码是否正确",
+                            "对于阿里云registry，请使用独立的Registry登录密码（不是阿里云账号密码）",
+                            "如果使用访问令牌，请确认令牌未过期",
+                        ],
+                    },
+                    status_code=401,
+                )
             else:
-                return JSONResponse({
-                    "success": False,
-                    "message": f"登录失败: {error_msg}",
-                    "details": error_msg
-                }, status_code=400)
-                
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "message": f"登录失败: {error_msg}",
+                        "details": error_msg,
+                    },
+                    status_code=400,
+                )
+
     except HTTPException:
         raise
     except Exception as e:
@@ -533,12 +563,16 @@ async def save_config_route(
         init_docker_builder()
 
         # 记录操作日志
-        OperationLogger.log(current_username, "save_config", {
-            "expose_port": expose_port_int,
-            "default_push": default_push_bool,
-            "use_remote": use_remote_bool,
-            "remote_host": remote_host.strip() if remote_host else None
-        })
+        OperationLogger.log(
+            current_username,
+            "save_config",
+            {
+                "expose_port": expose_port_int,
+                "default_push": default_push_bool,
+                "use_remote": use_remote_bool,
+                "remote_host": remote_host.strip() if remote_host else None,
+            },
+        )
 
         print(f"✅ Docker 配置已更新")
         return JSONResponse(
@@ -622,14 +656,18 @@ async def upload_file(
         )
 
         # 记录操作日志
-        OperationLogger.log(username, "build", {
-            "task_id": task_id,
-            "image": f"{imagename}:{tag}",
-            "template": template,
-            "project_type": project_type,
-            "push": push == "on",
-            "filename": app_file.filename
-        })
+        OperationLogger.log(
+            username,
+            "build",
+            {
+                "task_id": task_id,
+                "image": f"{imagename}:{tag}",
+                "template": template,
+                "project_type": project_type,
+                "push": push == "on",
+                "filename": app_file.filename,
+            },
+        )
 
         return JSONResponse(
             {
@@ -650,19 +688,27 @@ async def upload_file(
 async def verify_git_repo(
     git_url: str = Body(..., embed=True, description="Git 仓库地址"),
     save_as_source: bool = Body(False, embed=True, description="是否保存为数据源"),
-    source_name: Optional[str] = Body(None, embed=True, description="数据源名称（保存时必填）"),
+    source_name: Optional[str] = Body(
+        None, embed=True, description="数据源名称（保存时必填）"
+    ),
     source_description: Optional[str] = Body("", embed=True, description="数据源描述"),
     username: Optional[str] = Body(None, embed=True, description="Git 用户名（可选）"),
-    password: Optional[str] = Body(None, embed=True, description="Git 密码或 token（可选）"),
-    source_id: Optional[str] = Body(None, embed=True, description="数据源 ID（如果提供，将使用数据源的认证信息）"),
-    branch: Optional[str] = Body(None, embed=True, description="指定分支（用于扫描该分支的 Dockerfile）"),
+    password: Optional[str] = Body(
+        None, embed=True, description="Git 密码或 token（可选）"
+    ),
+    source_id: Optional[str] = Body(
+        None, embed=True, description="数据源 ID（如果提供，将使用数据源的认证信息）"
+    ),
+    branch: Optional[str] = Body(
+        None, embed=True, description="指定分支（用于扫描该分支的 Dockerfile）"
+    ),
 ):
     """验证 Git 仓库并获取分支和标签列表"""
     import subprocess
     import tempfile
     import shutil
     from urllib.parse import urlparse, urlunparse
-    
+
     try:
         # 如果提供了 source_id，从数据源获取认证信息
         if source_id:
@@ -674,7 +720,7 @@ async def verify_git_repo(
                     username = username or auth_config.get("username")
                 if auth_config.get("password"):
                     password = password or auth_config.get("password")
-        
+
         # 如果提供了用户名和密码，嵌入到 URL 中
         verify_url = git_url
         if username and password and git_url.startswith("https://"):
@@ -689,126 +735,141 @@ async def verify_git_repo(
                     parsed.fragment,
                 )
             )
-        
+
         # 使用 git ls-remote 命令获取远程仓库的分支和标签
         # 这个命令不需要克隆整个仓库，只获取引用信息
         cmd = ["git", "ls-remote", "--heads", "--tags", verify_url]
-        
+
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30  # 30秒超时
+            cmd, capture_output=True, text=True, timeout=30  # 30秒超时
         )
-        
+
         if result.returncode != 0:
             error_msg = result.stderr.strip()
-            if "Authentication failed" in error_msg or "Permission denied" in error_msg or "fatal: could not read Username" in error_msg:
+            if (
+                "Authentication failed" in error_msg
+                or "Permission denied" in error_msg
+                or "fatal: could not read Username" in error_msg
+            ):
                 raise HTTPException(
                     status_code=403,  # 使用 403 而不是 401，避免被前端拦截器误判为登录失效
-                    detail="仓库访问被拒绝，请检查认证信息是否正确或配置 SSH 密钥"
+                    detail="仓库访问被拒绝，请检查认证信息是否正确或配置 SSH 密钥",
                 )
             elif "not found" in error_msg.lower():
                 raise HTTPException(
-                    status_code=404,
-                    detail="仓库不存在，请检查 URL 是否正确"
+                    status_code=404, detail="仓库不存在，请检查 URL 是否正确"
                 )
             else:
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"无法访问仓库: {error_msg}"
+                    status_code=400, detail=f"无法访问仓库: {error_msg}"
                 )
-        
+
         # 解析输出
         branches = []
         tags = []
-        
-        for line in result.stdout.strip().split('\n'):
+
+        for line in result.stdout.strip().split("\n"):
             if not line:
                 continue
-            
-            parts = line.split('\t')
+
+            parts = line.split("\t")
             if len(parts) != 2:
                 continue
-            
+
             ref = parts[1]
-            
-            if ref.startswith('refs/heads/'):
-                branch_name = ref.replace('refs/heads/', '')
+
+            if ref.startswith("refs/heads/"):
+                branch_name = ref.replace("refs/heads/", "")
                 branches.append(branch_name)
-            elif ref.startswith('refs/tags/'):
-                tag_name = ref.replace('refs/tags/', '')
+            elif ref.startswith("refs/tags/"):
+                tag_name = ref.replace("refs/tags/", "")
                 # 跳过带 ^{} 的标签（指向标签对象的注解）
-                if not tag_name.endswith('^{}'):
+                if not tag_name.endswith("^{}"):
                     tags.append(tag_name)
-        
+
         # 扫描 Dockerfile（需要克隆仓库的指定分支或默认分支）
         dockerfiles = {}
         # 确定默认分支
-        default_branch = next((b for b in branches if b in ['main', 'master']), branches[0] if branches else None)
+        default_branch = next(
+            (b for b in branches if b in ["main", "master"]),
+            branches[0] if branches else None,
+        )
         # 如果指定了分支，使用指定分支；否则使用默认分支
         scan_branch = branch if branch and branch in branches else default_branch
-        
+
         if scan_branch:
             try:
                 # 临时克隆仓库以扫描 Dockerfile
                 import tempfile
+
                 temp_dir = tempfile.mkdtemp()
                 clone_url = verify_url
-                
+
                 # 准备克隆命令
-                clone_cmd = ["git", "clone", "--depth", "1", "--branch", scan_branch, clone_url, temp_dir]
-                
+                clone_cmd = [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    scan_branch,
+                    clone_url,
+                    temp_dir,
+                ]
+
                 clone_result = subprocess.run(
-                    clone_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=60
+                    clone_cmd, capture_output=True, text=True, timeout=60
                 )
-                
+
                 if clone_result.returncode == 0:
                     # 扫描 Dockerfile（递归查找）
                     for root, dirs, files in os.walk(temp_dir):
                         # 跳过 .git 目录
-                        if '.git' in root.split(os.sep):
+                        if ".git" in root.split(os.sep):
                             continue
-                        
+
                         for file in files:
                             # 检查是否是 Dockerfile（不区分大小写，支持多种命名）
                             file_lower = file.lower()
-                            if file_lower.startswith('dockerfile') or file_lower.endswith('.dockerfile'):
+                            if file_lower.startswith(
+                                "dockerfile"
+                            ) or file_lower.endswith(".dockerfile"):
                                 file_path = os.path.join(root, file)
                                 relative_path = os.path.relpath(file_path, temp_dir)
-                                
+
                                 try:
-                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                    with open(file_path, "r", encoding="utf-8") as f:
                                         content = f.read()
                                         dockerfiles[relative_path] = content
                                         print(f"✅ 扫描到 Dockerfile: {relative_path}")
                                 except Exception as e:
-                                    print(f"⚠️ 读取 Dockerfile 失败 {relative_path}: {e}")
-                    
+                                    print(
+                                        f"⚠️ 读取 Dockerfile 失败 {relative_path}: {e}"
+                                    )
+
                     # 清理临时目录
                     shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception as e:
                 print(f"⚠️ 扫描 Dockerfile 失败: {e}")
                 # 清理临时目录（如果存在）
-                if 'temp_dir' in locals():
+                if "temp_dir" in locals():
                     shutil.rmtree(temp_dir, ignore_errors=True)
-        
+
         result = {
             "success": True,
-            "branches": sorted(branches, key=lambda x: (x != 'main', x != 'master', x)),
+            "branches": sorted(branches, key=lambda x: (x != "main", x != "master", x)),
             "tags": sorted(tags, reverse=True),  # 标签按降序排列，最新的在前
             "default_branch": default_branch,
-            "dockerfiles": dockerfiles  # 扫描到的 Dockerfile 列表
+            "dockerfiles": dockerfiles,  # 扫描到的 Dockerfile 列表
         }
-        
+
         # 如果需要保存为数据源
         if save_as_source:
             if not source_name:
-                raise HTTPException(status_code=400, detail="保存为数据源时必须提供数据源名称")
-            
+                raise HTTPException(
+                    status_code=400, detail="保存为数据源时必须提供数据源名称"
+                )
+
             try:
                 source_manager = GitSourceManager()
                 # 检查是否已存在相同 URL 的数据源
@@ -823,12 +884,14 @@ async def verify_git_repo(
                         tags=result["tags"],
                         default_branch=result["default_branch"],
                         username=username if username is not None else None,
-                        password=password if password is not None else None
+                        password=password if password is not None else None,
                     )
                     # 更新扫描到的 Dockerfile
                     if result.get("dockerfiles"):
                         for dockerfile_path, content in result["dockerfiles"].items():
-                            source_manager.update_dockerfile(existing_source["source_id"], dockerfile_path, content)
+                            source_manager.update_dockerfile(
+                                existing_source["source_id"], dockerfile_path, content
+                            )
                     result["source_id"] = existing_source["source_id"]
                     result["source_saved"] = True
                     result["source_updated"] = True
@@ -842,12 +905,14 @@ async def verify_git_repo(
                         tags=result["tags"],
                         default_branch=result["default_branch"],
                         username=username,
-                        password=password
+                        password=password,
                     )
                     # 保存扫描到的 Dockerfile
                     if result.get("dockerfiles"):
                         for dockerfile_path, content in result["dockerfiles"].items():
-                            source_manager.update_dockerfile(source_id, dockerfile_path, content)
+                            source_manager.update_dockerfile(
+                                source_id, dockerfile_path, content
+                            )
                     result["source_id"] = source_id
                     result["source_saved"] = True
                     result["source_updated"] = False
@@ -856,27 +921,25 @@ async def verify_git_repo(
                 # 即使保存失败，也返回验证结果
                 result["source_saved"] = False
                 result["source_error"] = str(e)
-        
+
         return JSONResponse(result)
-        
+
     except subprocess.TimeoutExpired:
         raise HTTPException(
-            status_code=408,
-            detail="仓库访问超时，请检查网络连接或仓库地址"
+            status_code=408, detail="仓库访问超时，请检查网络连接或仓库地址"
         )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"验证仓库失败: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"验证仓库失败: {str(e)}")
 
 
 class ParseDockerfileRequest(BaseModel):
     """解析 Dockerfile 请求模型"""
+
     dockerfile_content: Optional[str] = None  # 直接提供 Dockerfile 内容
     git_url: Optional[str] = None  # 从 Git 仓库获取
     branch: Optional[str] = None  # Git 分支
@@ -885,22 +948,24 @@ class ParseDockerfileRequest(BaseModel):
 
 
 @router.post("/parse-dockerfile-services")
-async def parse_dockerfile_services_api(request: Request, body: ParseDockerfileRequest = Body(...)):
+async def parse_dockerfile_services_api(
+    request: Request, body: ParseDockerfileRequest = Body(...)
+):
     """解析 Dockerfile 并返回服务列表"""
     try:
         dockerfile_content = None
-        
+
         # 方式1: 直接提供 Dockerfile 内容
         if body.dockerfile_content:
             dockerfile_content = body.dockerfile_content
-        
+
         # 方式2: 从 Git 仓库获取
         elif body.git_url:
             from backend.git_source_manager import GitSourceManager
-            
+
             # 创建临时目录
             temp_dir = tempfile.mkdtemp(prefix="dockerfile_parse_")
-            
+
             try:
                 # 获取 Git 配置
                 git_config = get_git_config()
@@ -911,29 +976,26 @@ async def parse_dockerfile_services_api(request: Request, body: ParseDockerfileR
                         git_config["username"] = source_auth["username"]
                     if source_auth.get("password"):
                         git_config["password"] = source_auth["password"]
-                
+
                 # 克隆仓库
                 manager = BuildManager()
                 clone_dir = os.path.join(temp_dir, "repo")
                 os.makedirs(clone_dir, exist_ok=True)
-                
+
                 clone_success, clone_error = manager._clone_git_repo(
                     body.git_url,
                     clone_dir,
                     body.branch,
                     git_config,
-                    lambda x: None  # 不需要日志
+                    lambda x: None,  # 不需要日志
                 )
-                
+
                 if not clone_success:
                     error_detail = "无法克隆 Git 仓库，请检查仓库地址和认证信息"
                     if clone_error:
                         error_detail += f": {clone_error}"
-                    raise HTTPException(
-                        status_code=400,
-                        detail=error_detail
-                    )
-                
+                    raise HTTPException(status_code=400, detail=error_detail)
+
                 # 找到仓库目录
                 repo_name = body.git_url.rstrip("/").split("/")[-1].replace(".git", "")
                 repo_path = os.path.join(clone_dir, repo_name)
@@ -941,61 +1003,52 @@ async def parse_dockerfile_services_api(request: Request, body: ParseDockerfileR
                     items = os.listdir(clone_dir)
                     if items:
                         repo_path = os.path.join(clone_dir, items[0])
-                
+
                 # 读取 Dockerfile
                 dockerfile_path = os.path.join(repo_path, body.dockerfile_name)
                 if not os.path.exists(dockerfile_path):
                     raise HTTPException(
                         status_code=404,
-                        detail=f"在仓库中未找到 Dockerfile: {body.dockerfile_name}"
+                        detail=f"在仓库中未找到 Dockerfile: {body.dockerfile_name}",
                     )
-                
-                with open(dockerfile_path, 'r', encoding='utf-8') as f:
+
+                with open(dockerfile_path, "r", encoding="utf-8") as f:
                     dockerfile_content = f.read()
-            
+
             finally:
                 # 清理临时目录
                 try:
                     shutil.rmtree(temp_dir, ignore_errors=True)
                 except Exception:
                     pass
-        
+
         else:
             raise HTTPException(
-                status_code=400,
-                detail="必须提供 dockerfile_content 或 git_url"
+                status_code=400, detail="必须提供 dockerfile_content 或 git_url"
             )
-        
+
         if not dockerfile_content:
-            raise HTTPException(
-                status_code=400,
-                detail="无法获取 Dockerfile 内容"
-            )
-        
+            raise HTTPException(status_code=400, detail="无法获取 Dockerfile 内容")
+
         # 解析服务列表
         try:
             services, _ = parse_dockerfile_services(dockerfile_content)
-            return JSONResponse({
-                "services": services,
-                "count": len(services)
-            })
+            return JSONResponse({"services": services, "count": len(services)})
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             raise HTTPException(
-                status_code=500,
-                detail=f"解析 Dockerfile 失败: {str(e)}"
+                status_code=500, detail=f"解析 Dockerfile 失败: {str(e)}"
             )
-    
+
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"处理请求失败: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"处理请求失败: {str(e)}")
 
 
 @router.post("/build-from-source")
@@ -1011,21 +1064,41 @@ async def build_from_source(
     push_registry: Optional[str] = Body(None),  # 已废弃，保留以兼容旧代码，实际不再使用
     branch: Optional[str] = Body(None),
     sub_path: Optional[str] = Body(None),
-    use_project_dockerfile: bool = Body(True, description="是否优先使用项目中的 Dockerfile"),
-    dockerfile_name: str = Body("Dockerfile", description="Dockerfile文件名，默认Dockerfile"),
-    source_id: Optional[str] = Body(None, description="Git 数据源 ID（可选，如果提供将使用数据源的认证信息）"),
-    selected_services: Optional[list] = Body(None, description="选中的服务列表（多服务构建时使用）"),
-    service_push_config: Optional[dict] = Body(None, description="每个服务的推送配置（key为服务名，value为是否推送）"),
-    push_mode: Optional[str] = Body("multi", description="推送模式：'single' 单一推送，'multi' 多阶段推送（仅模板模式）"),
+    use_project_dockerfile: bool = Body(
+        True, description="是否优先使用项目中的 Dockerfile"
+    ),
+    dockerfile_name: str = Body(
+        "Dockerfile", description="Dockerfile文件名，默认Dockerfile"
+    ),
+    source_id: Optional[str] = Body(
+        None, description="Git 数据源 ID（可选，如果提供将使用数据源的认证信息）"
+    ),
+    selected_services: Optional[list] = Body(
+        None, description="选中的服务列表（多服务构建时使用）"
+    ),
+    service_push_config: Optional[dict] = Body(
+        None, description="每个服务的推送配置（key为服务名，value为是否推送）"
+    ),
+    push_mode: Optional[str] = Body(
+        "multi",
+        description="推送模式：'single' 单一推送，'multi' 多阶段推送（仅模板模式）",
+    ),
     build_steps: Optional[dict] = Body(None, description="构建步骤信息（JSON对象）"),
-    service_template_params: Optional[dict] = Body(None, description="服务模板参数（JSON对象）"),
-    resource_package_ids: Optional[list] = Body(None, description="资源包ID列表（已废弃，使用resource_package_configs）"),
-    resource_package_configs: Optional[list] = Body(None, description="资源包配置列表 [{package_id, target_path}]，target_path 为相对路径，如 'test/b.txt' 或 'resources'"),
+    service_template_params: Optional[dict] = Body(
+        None, description="服务模板参数（JSON对象）"
+    ),
+    resource_package_ids: Optional[list] = Body(
+        None, description="资源包ID列表（已废弃，使用resource_package_configs）"
+    ),
+    resource_package_configs: Optional[list] = Body(
+        None,
+        description="资源包配置列表 [{package_id, target_path}]，target_path 为相对路径，如 'test/b.txt' 或 'resources'",
+    ),
 ):
     """从 Git 源码构建镜像"""
     try:
         username = get_current_username(request)
-        
+
         # 解析模板参数
         params_dict = {}
         if template_params:
@@ -1054,14 +1127,14 @@ async def build_from_source(
                 print(f"✅ BuildManager 初始化成功")
             except Exception as init_error:
                 import traceback
+
                 error_trace = traceback.format_exc()
                 print(f"❌ BuildManager 初始化失败: {init_error}")
                 print(f"错误堆栈:\n{error_trace}")
                 raise HTTPException(
-                    status_code=500,
-                    detail=f"构建管理器初始化失败: {str(init_error)}"
+                    status_code=500, detail=f"构建管理器初始化失败: {str(init_error)}"
                 )
-            
+
             try:
                 task_id = manager.start_build_from_source(
                     git_url=git_url,
@@ -1082,54 +1155,62 @@ async def build_from_source(
                     push_mode=push_mode or "multi",
                     build_steps=build_steps,  # 传递构建步骤信息
                     service_template_params=service_template_params_dict,  # 传递服务模板参数
-                    resource_package_ids=resource_package_configs or [],  # 传递资源包配置
+                    resource_package_ids=resource_package_configs
+                    or [],  # 传递资源包配置
                 )
                 if not task_id:
                     raise RuntimeError("任务创建失败：未返回 task_id")
                 print(f"✅ 任务创建成功: task_id={task_id}")
             except Exception as create_error:
                 import traceback
+
                 error_trace = traceback.format_exc()
                 print(f"❌ 创建构建任务失败: {create_error}")
                 print(f"错误堆栈:\n{error_trace}")
                 raise HTTPException(
-                    status_code=500, 
-                    detail=f"创建构建任务失败: {str(create_error)}"
+                    status_code=500, detail=f"创建构建任务失败: {str(create_error)}"
                 )
         except HTTPException:
             raise
         except Exception as create_error:
             import traceback
+
             error_trace = traceback.format_exc()
             print(f"❌ 创建构建任务异常: {create_error}")
             print(f"错误堆栈:\n{error_trace}")
             raise HTTPException(
-                status_code=500, 
-                detail=f"创建构建任务失败: {str(create_error)}"
+                status_code=500, detail=f"创建构建任务失败: {str(create_error)}"
             )
 
         # 记录操作日志
         try:
-            OperationLogger.log(username, "build_from_source", {
-                "task_id": task_id,
-                "image": f"{imagename}:{tag}",
-                "template": template,
-                "project_type": project_type,
-                "git_url": git_url,
-                "branch": branch,
-                "push": push == "on",
-            })
+            OperationLogger.log(
+                username,
+                "build_from_source",
+                {
+                    "task_id": task_id,
+                    "image": f"{imagename}:{tag}",
+                    "template": template,
+                    "project_type": project_type,
+                    "git_url": git_url,
+                    "branch": branch,
+                    "push": push == "on",
+                },
+            )
         except Exception as log_error:
             print(f"⚠️ 记录操作日志失败: {log_error}")
 
-        return JSONResponse({
-            "task_id": task_id,
-            "message": "构建任务已启动，请查看任务管理",
-        })
+        return JSONResponse(
+            {
+                "task_id": task_id,
+                "message": "构建任务已启动，请查看任务管理",
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         error_trace = traceback.format_exc()
         print(f"❌ 构建请求处理失败: {e}")
         print(f"错误堆栈:\n{error_trace}")
@@ -1154,29 +1235,31 @@ async def get_build_tasks(
 @router.get("/tasks")
 async def get_all_tasks(
     status: Optional[str] = Query(None, description="任务状态过滤"),
-    task_type: Optional[str] = Query(None, description="任务类型过滤: build, build_from_source, export"),
+    task_type: Optional[str] = Query(
+        None, description="任务类型过滤: build, build_from_source, export"
+    ),
 ):
     """获取所有任务（构建任务 + 导出任务）"""
     try:
         all_tasks = []
-        
+
         # 获取构建任务
         build_manager = BuildTaskManager()
         build_tasks = build_manager.list_tasks(status=status, task_type=task_type)
         for task in build_tasks:
             task["task_category"] = "build"  # 标记为构建任务
             all_tasks.append(task)
-        
+
         # 获取导出任务
         export_manager = ExportTaskManager()
         export_tasks = export_manager.list_tasks(status=status)
         for task in export_tasks:
             task["task_category"] = "export"  # 标记为导出任务
             all_tasks.append(task)
-        
+
         # 按创建时间倒序排列
         all_tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        
+
         return JSONResponse({"tasks": all_tasks})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取任务列表失败: {str(e)}")
@@ -1228,7 +1311,9 @@ async def delete_build_task(task_id: str, request: Request):
 @router.post("/tasks/cleanup")
 async def cleanup_tasks(
     request: Request,
-    status: Optional[str] = Body(None, description="清理指定状态的任务：completed, failed"),
+    status: Optional[str] = Body(
+        None, description="清理指定状态的任务：completed, failed"
+    ),
     days: Optional[int] = Body(None, description="清理N天前的任务"),
     task_type: Optional[str] = Body(None, description="任务类型：build, export"),
 ):
@@ -1236,24 +1321,26 @@ async def cleanup_tasks(
     try:
         username = get_current_username(request)
         removed_count = 0
-        
+
         # 清理构建任务
         if not task_type or task_type == "build":
             build_manager = BuildTaskManager()
             if days:
                 # 清理指定天数前的任务
                 from datetime import timedelta
+
                 cutoff_time = datetime.now() - timedelta(days=days)
                 cutoff_iso = cutoff_time.isoformat()
-                
+
                 # 在锁内收集要删除的任务ID
                 with build_manager.lock:
                     tasks_to_remove = [
-                        task_id for task_id, task in build_manager.tasks.items()
+                        task_id
+                        for task_id, task in build_manager.tasks.items()
                         if task.get("created_at", "") < cutoff_iso
                         and (not status or task.get("status") == status)
                     ]
-                
+
                 # 在锁外执行删除，避免死锁
                 for task_id in tasks_to_remove:
                     build_manager.delete_task(task_id)
@@ -1263,31 +1350,35 @@ async def cleanup_tasks(
                 # 在锁内收集要删除的任务ID
                 with build_manager.lock:
                     tasks_to_remove = [
-                        task_id for task_id, task in build_manager.tasks.items()
+                        task_id
+                        for task_id, task in build_manager.tasks.items()
                         if task.get("status") == status
                     ]
-                
+
                 # 在锁外执行删除，避免死锁
                 for task_id in tasks_to_remove:
                     build_manager.delete_task(task_id)
                     removed_count += 1
-        
+
         # 清理导出任务
         if not task_type or task_type == "export":
             export_manager = ExportTaskManager()
             if days:
                 # 清理指定天数前的任务
                 from datetime import timedelta
+
                 cutoff_time = datetime.now() - timedelta(days=days)
-                
+
                 # 在锁内收集要删除的任务ID
                 with export_manager.lock:
                     tasks_to_remove = [
-                        task_id for task_id, task in export_manager.tasks.items()
-                        if datetime.fromisoformat(task.get("created_at", "")) < cutoff_time
+                        task_id
+                        for task_id, task in export_manager.tasks.items()
+                        if datetime.fromisoformat(task.get("created_at", ""))
+                        < cutoff_time
                         and (not status or task.get("status") == status)
                     ]
-                
+
                 # 在锁外执行删除，避免死锁
                 for task_id in tasks_to_remove:
                     export_manager.delete_task(task_id)
@@ -1296,30 +1387,38 @@ async def cleanup_tasks(
                 # 在锁内收集要删除的任务ID
                 with export_manager.lock:
                     tasks_to_remove = [
-                        task_id for task_id, task in export_manager.tasks.items()
+                        task_id
+                        for task_id, task in export_manager.tasks.items()
                         if task.get("status") == status
                     ]
-                
+
                 # 在锁外执行删除，避免死锁
                 for task_id in tasks_to_remove:
                     export_manager.delete_task(task_id)
                     removed_count += 1
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "cleanup_tasks", {
-            "removed_count": removed_count,
-            "status": status,
-            "days": days,
-            "task_type": task_type
-        })
-        
-        return JSONResponse({
-            "success": True,
-            "removed_count": removed_count,
-            "message": f"已清理 {removed_count} 个任务"
-        })
+        OperationLogger.log(
+            username,
+            "cleanup_tasks",
+            {
+                "removed_count": removed_count,
+                "status": status,
+                "days": days,
+                "task_type": task_type,
+            },
+        )
+
+        return JSONResponse(
+            {
+                "success": True,
+                "removed_count": removed_count,
+                "message": f"已清理 {removed_count} 个任务",
+            }
+        )
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"清理任务失败: {str(e)}")
 
@@ -1405,27 +1504,36 @@ async def create_export_task(
         )
 
         # 记录操作日志
-        OperationLogger.log(username, "export", {
-            "task_id": task_id,
-            "image": f"{image_name}:{tag_name}",
-            "compress": compress
-        })
+        OperationLogger.log(
+            username,
+            "export",
+            {
+                "task_id": task_id,
+                "image": f"{image_name}:{tag_name}",
+                "compress": compress,
+            },
+        )
 
-        return JSONResponse({
-            "task_id": task_id,
-            "message": "导出任务已创建，请到任务清单查看进度",
-        })
+        return JSONResponse(
+            {
+                "task_id": task_id,
+                "message": "导出任务已创建，请到任务清单查看进度",
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"创建导出任务失败: {str(e)}")
 
 
 @router.get("/export-tasks")
 async def list_export_tasks(
-    status: Optional[str] = Query(None, description="任务状态过滤: pending, running, completed, failed"),
+    status: Optional[str] = Query(
+        None, description="任务状态过滤: pending, running, completed, failed"
+    ),
 ):
     """获取导出任务列表"""
     try:
@@ -1459,18 +1567,20 @@ async def download_export_task(task_id: str):
         task = task_manager.get_task(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="任务不存在")
-        
+
         if task["status"] != "completed":
-            raise HTTPException(status_code=400, detail=f"任务尚未完成，当前状态: {task['status']}")
-        
+            raise HTTPException(
+                status_code=400, detail=f"任务尚未完成，当前状态: {task['status']}"
+            )
+
         file_path = task_manager.get_task_file_path(task_id)
-        
+
         # 确定文件类型
         if file_path.endswith(".gz"):
             content_type = "application/gzip"
         else:
             content_type = "application/x-tar"
-        
+
         # 生成下载文件名
         image = task["image"]
         tag = task["tag"]
@@ -1478,7 +1588,7 @@ async def download_export_task(task_id: str):
         filename = f"{image.replace('/', '_')}-{tag}.tar"
         if compress.lower() in ("gzip", "gz", "tgz", "1", "true", "yes"):
             filename += ".gz"
-        
+
         return FileResponse(
             file_path,
             media_type=content_type,
@@ -1500,15 +1610,19 @@ async def delete_export_task(task_id: str, request: Request):
         success = task_manager.delete_task(task_id)
         if not success:
             raise HTTPException(status_code=404, detail="任务不存在")
-        
+
         # 记录操作日志
         if task:
-            OperationLogger.log(username, "delete_export_task", {
-                "task_id": task_id,
-                "image": task.get("image"),
-                "tag": task.get("tag")
-            })
-        
+            OperationLogger.log(
+                username,
+                "delete_export_task",
+                {
+                    "task_id": task_id,
+                    "image": task.get("image"),
+                    "tag": task.get("tag"),
+                },
+            )
+
         return JSONResponse({"message": "任务已删除"})
     except HTTPException:
         raise
@@ -1530,12 +1644,12 @@ async def parse_compose(request: ParseComposeRequest):
             if not reference:
                 return "", "latest"
             reference = reference.strip()
-            
+
             # 处理 digest (格式: image@sha256:...)
             if "@" in reference:
                 name, digest = reference.split("@", 1)
                 return name.strip(), digest.strip()
-            
+
             # 处理 tag (格式: image:tag)
             # 需要找到最后一个冒号，但要排除端口号的情况
             # 例如: registry.com:5000/image:tag
@@ -1549,25 +1663,25 @@ async def parse_compose(request: ParseComposeRequest):
                     last_slash = before_colon.rfind("/")
                     if last_slash >= 0:
                         # 斜杠后的部分
-                        after_slash = reference[last_slash + 1:]
+                        after_slash = reference[last_slash + 1 :]
                         if ":" in after_slash:
                             # 分离镜像名和标签
                             name = reference[:colon_index]
-                            tag = reference[colon_index + 1:].strip()
+                            tag = reference[colon_index + 1 :].strip()
                             # 如果 tag 为空，使用 latest
                             return name.strip(), tag if tag else "latest"
-                
+
                 # 没有斜杠或斜杠在冒号前，直接分离
                 name = reference[:colon_index]
-                tag = reference[colon_index + 1:].strip()
+                tag = reference[colon_index + 1 :].strip()
                 # 如果 tag 为空，使用 latest
                 return name.strip(), tag if tag else "latest"
-            
+
             # 检查是否以冒号结尾（格式: image:）
             if reference.endswith(":"):
                 # 移除末尾的冒号，tag 使用 latest
                 return reference[:-1].strip(), "latest"
-            
+
             # 没有冒号，返回原镜像名和 latest
             return reference, "latest"
 
@@ -1581,12 +1695,14 @@ async def parse_compose(request: ParseComposeRequest):
                     if image_ref:
                         image_name, tag = split_image_reference(str(image_ref))
                         if image_name:
-                            images.append({
-                                "service": service_name,
-                                "image": image_name,
-                                "tag": tag,
-                                "raw": image_ref
-                            })
+                            images.append(
+                                {
+                                    "service": service_name,
+                                    "image": image_name,
+                                    "tag": tag,
+                                    "raw": image_ref,
+                                }
+                            )
 
         return JSONResponse({"images": images})
     except HTTPException:
@@ -1646,10 +1762,10 @@ async def get_template_params(
 
         # 解析参数（全局参数）
         all_params = parse_template_variables(content)
-        
+
         # 解析服务阶段（多阶段构建）
         services, global_param_names = parse_dockerfile_services(content)
-        
+
         # 区分全局参数和服务参数
         global_params = [p for p in all_params if p["name"] in global_param_names]
         # 服务参数已经在 services 中的 template_params 字段中
@@ -1659,7 +1775,7 @@ async def get_template_params(
                 "template": template,
                 "project_type": project_type,
                 "params": global_params,  # 全局模板参数
-                "services": services  # 服务列表，每个服务可能包含 template_params
+                "services": services,  # 服务列表，每个服务可能包含 template_params
             }
         )
     except HTTPException:
@@ -1768,10 +1884,9 @@ async def create_template(request: TemplateRequest, http_request: Request):
         print(f"📊 文件大小: {os.path.getsize(template_path)} bytes")
 
         # 记录操作日志
-        OperationLogger.log(username, "template_create", {
-            "name": name,
-            "project_type": project_type
-        })
+        OperationLogger.log(
+            username, "template_create", {"name": name, "project_type": project_type}
+        )
 
         return JSONResponse({"message": "模板创建成功", "name": name})
     except HTTPException:
@@ -1832,11 +1947,15 @@ async def update_template(request: TemplateRequest, http_request: Request):
                 f.write(content)
 
         # 记录操作日志
-        OperationLogger.log(username, "template_update", {
-            "name": name,
-            "original_name": original_name,
-            "project_type": request.project_type
-        })
+        OperationLogger.log(
+            username,
+            "template_update",
+            {
+                "name": name,
+                "original_name": original_name,
+                "project_type": request.project_type,
+            },
+        )
 
         return JSONResponse({"message": "模板更新成功", "name": name})
     except HTTPException:
@@ -1868,10 +1987,11 @@ async def delete_template(request: DeleteTemplateRequest, http_request: Request)
             os.remove(template_path)
 
         # 记录操作日志
-        OperationLogger.log(username, "template_delete", {
-            "name": name,
-            "project_type": request.project_type
-        })
+        OperationLogger.log(
+            username,
+            "template_delete",
+            {"name": name, "project_type": request.project_type},
+        )
 
         return JSONResponse({"message": "模板删除成功", "name": name})
     except HTTPException:
@@ -1886,7 +2006,7 @@ async def get_docker_info():
     """获取 Docker 服务信息"""
     try:
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         info = {
             "connected": DOCKER_AVAILABLE,
             "builder_type": "unknown",
@@ -1907,90 +2027,237 @@ async def get_docker_info():
             "mem_total": None,
             "runtime": None,
             "volumes_count": 0,
-            "networks_count": 0
+            "networks_count": 0,
+            "buildx_available": False,
+            "buildx_version": None,
         }
-        
-        if not DOCKER_AVAILABLE or not docker_builder:
-            return JSONResponse(info)
-        
-        # 获取构建器类型
-        connection_info = docker_builder.get_connection_info()
-        connection_error = None
-        if hasattr(docker_builder, 'get_connection_error'):
-            connection_error = docker_builder.get_connection_error()
-            if connection_error and connection_error != "未知错误":
-                info["connection_error"] = connection_error
-        if "本地" in connection_info:
+
+        # 优先从配置中读取远程 Docker 信息（即使连接失败也要显示配置）
+        from backend.config import load_config
+
+        config = load_config()
+        docker_config = config.get("docker", {})
+        use_remote = docker_config.get("use_remote", False)
+        remote_config = docker_config.get("remote", {})
+
+        # 设置构建器类型和远程配置（即使连接失败也要显示）
+        if use_remote:
+            info["builder_type"] = "remote"
+            remote_host = remote_config.get("host", "")
+            remote_port = remote_config.get("port", 2375)
+            if remote_host:
+                info["remote_host"] = f"{remote_host}:{remote_port}"
+                info["remote_config"] = {
+                    "host": remote_host,
+                    "port": remote_port,
+                    "use_tls": remote_config.get("use_tls", False),
+                    "cert_path": remote_config.get("cert_path", ""),
+                    "verify_tls": remote_config.get("verify_tls", False),
+                }
+                print(f"✅ 从配置读取远程 Docker: {remote_host}:{remote_port}")
+
+        # 如果 docker_builder 存在，尝试获取连接信息和错误信息
+        connection_info = ""
+        if docker_builder:
+            try:
+                connection_info = docker_builder.get_connection_info()
+                connection_error = None
+                if hasattr(docker_builder, "get_connection_error"):
+                    connection_error = docker_builder.get_connection_error()
+                    if connection_error and connection_error != "未知错误":
+                        info["connection_error"] = connection_error
+            except Exception as e:
+                print(f"⚠️ 获取连接信息失败: {e}")
+
+        # 如果配置中没有设置，尝试从连接信息中获取
+        if not use_remote and connection_info:
+            if "本地" in connection_info:
+                info["builder_type"] = "local"
+            elif "远程" in connection_info:
+                # 兼容旧逻辑：从连接信息字符串判断
+                info["builder_type"] = "remote"
+                import re
+
+                match = re.search(r"\((.+?)\)", connection_info)
+                if match:
+                    info["remote_host"] = match.group(1)
+            elif "模拟" in connection_info:
+                info["builder_type"] = "mock"
+        elif use_remote:
+            # 如果配置中有 host 但 remote_host 还没设置，补充设置
+            if not info.get("remote_host") and remote_config.get("host"):
+                remote_host = remote_config.get("host", "")
+                remote_port = remote_config.get("port", 2375)
+                info["remote_host"] = f"{remote_host}:{remote_port}"
+                if not info.get("remote_config"):
+                    info["remote_config"] = {
+                        "host": remote_host,
+                        "port": remote_port,
+                        "use_tls": remote_config.get("use_tls", False),
+                        "cert_path": remote_config.get("cert_path", ""),
+                        "verify_tls": remote_config.get("verify_tls", False),
+                    }
+        elif "本地" in connection_info:
             info["builder_type"] = "local"
         elif "远程" in connection_info:
+            # 兼容旧逻辑：从连接信息字符串判断
             info["builder_type"] = "remote"
             import re
-            match = re.search(r'\((.+?)\)', connection_info)
+
+            match = re.search(r"\((.+?)\)", connection_info)
             if match:
                 info["remote_host"] = match.group(1)
         elif "模拟" in connection_info:
             info["builder_type"] = "mock"
-        
+
         # 获取 Docker 详细信息
+        # 注意：即使 DOCKER_AVAILABLE 为 False，也尝试获取信息（可能只是初始化时连接失败，但 client 可能还存在）
         try:
-            if hasattr(docker_builder, 'client') and docker_builder.client:
-                # 获取版本信息
-                version_info = docker_builder.client.version()
-                info["version"] = version_info.get('Version', 'Unknown')
-                info["api_version"] = version_info.get('ApiVersion', 'Unknown')
-                info["os_type"] = version_info.get('Os', 'Unknown')
-                info["arch"] = version_info.get('Arch', 'Unknown')
-                info["kernel_version"] = version_info.get('KernelVersion', '')
-                
+            # 检查 client 是否存在且可用
+            if (
+                docker_builder
+                and hasattr(docker_builder, "client")
+                and docker_builder.client
+            ):
+                try:
+                    # 获取版本信息
+                    version_info = docker_builder.client.version()
+                    info["version"] = version_info.get("Version", "Unknown")
+                    info["api_version"] = version_info.get("ApiVersion", "Unknown")
+                    info["os_type"] = version_info.get("Os", "Unknown")
+                    info["arch"] = version_info.get("Arch", "Unknown")
+                    info["kernel_version"] = version_info.get("KernelVersion", "")
+                    print(f"✅ 成功获取 Docker 版本信息: {info['version']}")
+                except Exception as version_error:
+                    print(f"⚠️ 获取 Docker 版本信息失败: {version_error}")
+                    # 继续尝试获取其他信息
+
                 # 获取系统信息
-                system_info = docker_builder.client.info()
-                info["images_count"] = system_info.get('Images', 0)
-                info["containers_total"] = system_info.get('Containers', 0)
-                info["containers_running"] = system_info.get('ContainersRunning', 0)
-                info["storage_driver"] = system_info.get('Driver', 'Unknown')
-                info["docker_root"] = system_info.get('DockerRootDir', '')
-                info["ncpu"] = system_info.get('NCPU', 0)
-                info["mem_total"] = system_info.get('MemTotal', 0)
-                info["runtime"] = system_info.get('DefaultRuntime', 'runc')
-                
+                try:
+                    system_info = docker_builder.client.info()
+                    info["images_count"] = system_info.get("Images", 0)
+                    info["containers_total"] = system_info.get("Containers", 0)
+                    info["containers_running"] = system_info.get("ContainersRunning", 0)
+                    info["storage_driver"] = system_info.get("Driver", "Unknown")
+                    info["docker_root"] = system_info.get("DockerRootDir", "")
+                    info["ncpu"] = system_info.get("NCPU", 0)
+                    info["mem_total"] = system_info.get("MemTotal", 0)
+                    info["runtime"] = system_info.get("DefaultRuntime", "runc")
+                    print(f"✅ 成功获取 Docker 系统信息")
+                except Exception as system_error:
+                    print(f"⚠️ 获取 Docker 系统信息失败: {system_error}")
+
                 # 获取卷和网络数量
                 try:
                     info["volumes_count"] = len(docker_builder.client.volumes.list())
                     info["networks_count"] = len(docker_builder.client.networks.list())
                 except:
                     pass
-                
+
                 # 获取磁盘使用信息
                 try:
                     df_info = docker_builder.client.df()
-                    if 'Images' in df_info:
-                        info["images_size"] = sum(img.get('Size', 0) for img in df_info['Images'])
-                    if 'Containers' in df_info:
-                        info["containers_size"] = sum(c.get('SizeRw', 0) or 0 for c in df_info['Containers'])
+                    if "Images" in df_info:
+                        info["images_size"] = sum(
+                            img.get("Size", 0) for img in df_info["Images"]
+                        )
+                    if "Containers" in df_info:
+                        info["containers_size"] = sum(
+                            c.get("SizeRw", 0) or 0 for c in df_info["Containers"]
+                        )
                 except:
                     pass
+
+                # 检测 buildx 支持情况
+                try:
+                    import subprocess
+                    import re
+
+                    # 方法1: 检查 docker buildx 命令是否可用
+                    docker_cli_path = shutil.which("docker")
+                    if docker_cli_path:
+                        try:
+                            result = subprocess.run(
+                                ["docker", "buildx", "version"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                                env=os.environ.copy(),
+                            )
+                            if result.returncode == 0:
+                                info["buildx_available"] = True
+                                # 提取版本号
+                                version_output = result.stdout.strip()
+                                # 提取版本号，例如：v0.12.1 或 github.com/docker/buildx v0.12.1
+                                version_match = re.search(
+                                    r"v(\d+\.\d+\.\d+)", version_output
+                                )
+                                if version_match:
+                                    info["buildx_version"] = version_match.group(1)
+                                else:
+                                    info["buildx_version"] = "已安装"
+                        except (
+                            subprocess.TimeoutExpired,
+                            FileNotFoundError,
+                            Exception,
+                        ) as e:
+                            # buildx 命令不可用或超时
+                            pass
+
+                    # 方法2: 检查 Docker 版本（Docker 23+ 内置 buildx）
+                    if not info["buildx_available"] and info["version"]:
+                        try:
+                            # 解析版本号，例如 "24.0.0" 或 "23.0.0"
+                            version_parts = info["version"].split(".")
+                            if len(version_parts) >= 1:
+                                major_version = int(version_parts[0])
+                                if major_version >= 23:
+                                    info["buildx_available"] = True
+                                    info["buildx_version"] = (
+                                        "内置 (Docker " + info["version"] + ")"
+                                    )
+                        except (ValueError, IndexError):
+                            pass
+
+                    # 方法3: 检查 BuildKit 是否可用（通过环境变量）
+                    # 注意：BuildKit 可用不代表 buildx 可用，但 Docker 23+ 内置 buildx
+                    if (
+                        os.environ.get("DOCKER_BUILDKIT") == "1"
+                        and not info["buildx_available"]
+                    ):
+                        # 如果 BuildKit 已启用但 buildx 未检测到，可能是旧版本 Docker
+                        # 这种情况下不设置 buildx_available，因为旧版本需要手动安装 buildx
+                        pass
+                except Exception as e:
+                    print(f"⚠️ 检测 buildx 支持情况失败: {e}")
+                    import traceback
+
+                    traceback.print_exc()
         except Exception as e:
             print(f"⚠️ 获取 Docker 详细信息失败: {e}")
-        
+
         return JSONResponse(info)
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取 Docker 信息失败: {str(e)}")
 
 
 @router.get("/docker/images")
-async def get_docker_images(page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=1000)):
+async def get_docker_images(
+    page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=1000)
+):
     """获取 Docker 镜像列表（支持分页）"""
     try:
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             return JSONResponse({"images": [], "total": 0})
-        
-        if not hasattr(docker_builder, 'client') or not docker_builder.client:
+
+        if not hasattr(docker_builder, "client") or not docker_builder.client:
             return JSONResponse({"images": [], "total": 0})
-        
+
         # 获取镜像列表
         images_data = []
         try:
@@ -1998,35 +2265,40 @@ async def get_docker_images(page: int = Query(1, ge=1), page_size: int = Query(1
             for img in images:
                 tags = img.tags
                 if not tags:
-                    images_data.append({
-                        "id": img.id,
-                        "repository": "<none>",
-                        "tag": "<none>",
-                        "size": img.attrs.get('Size', 0),
-                        "created": img.attrs.get('Created', '')
-                    })
+                    images_data.append(
+                        {
+                            "id": img.id,
+                            "repository": "<none>",
+                            "tag": "<none>",
+                            "size": img.attrs.get("Size", 0),
+                            "created": img.attrs.get("Created", ""),
+                        }
+                    )
                 else:
                     for tag in tags:
-                        if ':' in tag:
-                            repo, tag_name = tag.rsplit(':', 1)
+                        if ":" in tag:
+                            repo, tag_name = tag.rsplit(":", 1)
                         else:
-                            repo, tag_name = tag, 'latest'
-                        images_data.append({
-                            "id": img.id,
-                            "repository": repo,
-                            "tag": tag_name,
-                            "size": img.attrs.get('Size', 0),
-                            "created": img.attrs.get('Created', '')
-                        })
+                            repo, tag_name = tag, "latest"
+                        images_data.append(
+                            {
+                                "id": img.id,
+                                "repository": repo,
+                                "tag": tag_name,
+                                "size": img.attrs.get("Size", 0),
+                                "created": img.attrs.get("Created", ""),
+                            }
+                        )
         except Exception as e:
             print(f"⚠️ 获取镜像列表失败: {e}")
-        
+
         total = len(images_data)
         start = (page - 1) * page_size
         end = start + page_size
         return JSONResponse({"images": images_data[start:end], "total": total})
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取镜像列表失败: {str(e)}")
 
@@ -2041,16 +2313,18 @@ async def delete_docker_image(request: DeleteImageRequest, http_request: Request
     try:
         username = get_current_username(http_request)
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             raise HTTPException(status_code=503, detail="Docker 服务不可用")
-        
-        if not hasattr(docker_builder, 'client') or not docker_builder.client:
+
+        if not hasattr(docker_builder, "client") or not docker_builder.client:
             raise HTTPException(status_code=503, detail="Docker 客户端不可用")
-        
+
         try:
             docker_builder.client.images.remove(request.image_id, force=True)
-            OperationLogger.log(username, "docker_image_delete", {"image_id": request.image_id})
+            OperationLogger.log(
+                username, "docker_image_delete", {"image_id": request.image_id}
+            )
             return JSONResponse({"message": "镜像已删除"})
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"删除镜像失败: {str(e)}")
@@ -2066,13 +2340,15 @@ async def prune_docker_images(http_request: Request):
     try:
         username = get_current_username(http_request)
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             raise HTTPException(status_code=503, detail="Docker 服务不可用")
-        
+
         result = docker_builder.client.images.prune()
-        space_reclaimed = result.get('SpaceReclaimed', 0)
-        OperationLogger.log(username, "docker_images_prune", {"space_reclaimed": space_reclaimed})
+        space_reclaimed = result.get("SpaceReclaimed", 0)
+        OperationLogger.log(
+            username, "docker_images_prune", {"space_reclaimed": space_reclaimed}
+        )
         return JSONResponse({"space_reclaimed": space_reclaimed})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清理镜像失败: {str(e)}")
@@ -2080,52 +2356,56 @@ async def prune_docker_images(http_request: Request):
 
 # === 容器管理 ===
 @router.get("/docker/containers")
-async def get_docker_containers(page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=1000)):
+async def get_docker_containers(
+    page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=1000)
+):
     """获取容器列表（支持分页）"""
     try:
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             return JSONResponse({"containers": [], "total": 0})
-        
-        if not hasattr(docker_builder, 'client') or not docker_builder.client:
+
+        if not hasattr(docker_builder, "client") or not docker_builder.client:
             return JSONResponse({"containers": [], "total": 0})
-        
+
         containers_data = []
         try:
             containers = docker_builder.client.containers.list(all=True)
             for c in containers:
                 # 解析端口映射
-                ports_str = ''
+                ports_str = ""
                 try:
-                    ports = c.attrs.get('NetworkSettings', {}).get('Ports', {}) or {}
+                    ports = c.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
                     port_list = []
                     for container_port, host_bindings in ports.items():
                         if host_bindings:
                             for binding in host_bindings:
-                                host_port = binding.get('HostPort', '')
+                                host_port = binding.get("HostPort", "")
                                 if host_port:
                                     port_list.append(f"{host_port}->{container_port}")
                         else:
                             port_list.append(container_port)
-                    ports_str = ', '.join(port_list[:3])  # 最多显示3个
+                    ports_str = ", ".join(port_list[:3])  # 最多显示3个
                     if len(port_list) > 3:
                         ports_str += f" (+{len(port_list)-3})"
                 except:
                     pass
-                
-                containers_data.append({
-                    "id": c.id,
-                    "name": c.name,
-                    "image": c.image.tags[0] if c.image.tags else c.image.id[:12],
-                    "status": c.status,
-                    "state": c.attrs.get('State', {}).get('Status', 'unknown'),
-                    "created": c.attrs.get('Created', ''),
-                    "ports": ports_str
-                })
+
+                containers_data.append(
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                        "image": c.image.tags[0] if c.image.tags else c.image.id[:12],
+                        "status": c.status,
+                        "state": c.attrs.get("State", {}).get("Status", "unknown"),
+                        "created": c.attrs.get("Created", ""),
+                        "ports": ports_str,
+                    }
+                )
         except Exception as e:
             print(f"⚠️ 获取容器列表失败: {e}")
-        
+
         total = len(containers_data)
         start = (page - 1) * page_size
         end = start + page_size
@@ -2140,35 +2420,45 @@ async def start_container(container_id: str, http_request: Request):
     try:
         username = get_current_username(http_request)
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             raise HTTPException(status_code=503, detail="Docker 服务不可用")
-        
+
         container = docker_builder.client.containers.get(container_id)
         container.start()
-        OperationLogger.log(username, "docker_container_start", {"container_id": container_id})
+        OperationLogger.log(
+            username, "docker_container_start", {"container_id": container_id}
+        )
         return JSONResponse({"message": "容器已启动"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"启动容器失败: {str(e)}")
 
 
 @router.post("/docker/containers/{container_id}/stop")
-async def stop_container(container_id: str, http_request: Request, force: bool = Query(False)):
+async def stop_container(
+    container_id: str, http_request: Request, force: bool = Query(False)
+):
     """停止容器，支持强制停止"""
     try:
         username = get_current_username(http_request)
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             raise HTTPException(status_code=503, detail="Docker 服务不可用")
-        
+
         container = docker_builder.client.containers.get(container_id)
         if force:
             container.kill()  # 强制停止
         else:
             container.stop()  # 正常停止
-        OperationLogger.log(username, "docker_container_stop", {"container_id": container_id, "force": force})
-        return JSONResponse({"message": "容器已停止" if not force else "容器已强制停止"})
+        OperationLogger.log(
+            username,
+            "docker_container_stop",
+            {"container_id": container_id, "force": force},
+        )
+        return JSONResponse(
+            {"message": "容器已停止" if not force else "容器已强制停止"}
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"停止容器失败: {str(e)}")
 
@@ -2179,13 +2469,15 @@ async def restart_container(container_id: str, http_request: Request):
     try:
         username = get_current_username(http_request)
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             raise HTTPException(status_code=503, detail="Docker 服务不可用")
-        
+
         container = docker_builder.client.containers.get(container_id)
         container.restart()
-        OperationLogger.log(username, "docker_container_restart", {"container_id": container_id})
+        OperationLogger.log(
+            username, "docker_container_restart", {"container_id": container_id}
+        )
         return JSONResponse({"message": "容器已重启"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"重启容器失败: {str(e)}")
@@ -2197,13 +2489,15 @@ async def remove_container(container_id: str, http_request: Request):
     try:
         username = get_current_username(http_request)
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             raise HTTPException(status_code=503, detail="Docker 服务不可用")
-        
+
         container = docker_builder.client.containers.get(container_id)
         container.remove(force=True)
-        OperationLogger.log(username, "docker_container_remove", {"container_id": container_id})
+        OperationLogger.log(
+            username, "docker_container_remove", {"container_id": container_id}
+        )
         return JSONResponse({"message": "容器已删除"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除容器失败: {str(e)}")
@@ -2215,14 +2509,14 @@ async def prune_containers(http_request: Request):
     try:
         username = get_current_username(http_request)
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
-        
+
         if not DOCKER_AVAILABLE or not docker_builder:
             raise HTTPException(status_code=503, detail="Docker 服务不可用")
-        
+
         result = docker_builder.client.containers.prune()
-        deleted = len(result.get('ContainersDeleted', []) or [])
+        deleted = len(result.get("ContainersDeleted", []) or [])
         OperationLogger.log(username, "docker_containers_prune", {"deleted": deleted})
-        return JSONResponse({"deleted": deleted})  
+        return JSONResponse({"deleted": deleted})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清理容器失败: {str(e)}")
 
@@ -2254,7 +2548,9 @@ class CreatePipelineRequest(BaseModel):
     cron_expression: Optional[str] = None
     webhook_branch_filter: bool = False
     webhook_use_push_branch: bool = True
-    branch_tag_mapping: Optional[dict] = None  # 分支到标签的映射，如 {"main": "latest", "dev": "dev"}
+    branch_tag_mapping: Optional[dict] = (
+        None  # 分支到标签的映射，如 {"main": "latest", "dev": "dev"}
+    )
 
 
 class UpdatePipelineRequest(BaseModel):
@@ -2287,7 +2583,7 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
     try:
         username = get_current_username(http_request)
         manager = PipelineManager()
-        
+
         pipeline_id = manager.create_pipeline(
             name=request.name,
             git_url=request.git_url,
@@ -2311,37 +2607,41 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
             branch_tag_mapping=request.branch_tag_mapping,
             source_id=request.source_id,
         )
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "pipeline_create", {
-            "pipeline_id": pipeline_id,
-            "name": request.name,
-            "git_url": request.git_url
-        })
-        
-        return JSONResponse({
-            "pipeline_id": pipeline_id,
-            "message": "流水线创建成功"
-        })
+        OperationLogger.log(
+            username,
+            "pipeline_create",
+            {
+                "pipeline_id": pipeline_id,
+                "name": request.name,
+                "git_url": request.git_url,
+            },
+        )
+
+        return JSONResponse({"pipeline_id": pipeline_id, "message": "流水线创建成功"})
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"创建流水线失败: {str(e)}")
 
 
 @router.get("/pipelines")
-async def list_pipelines(enabled: Optional[bool] = Query(None, description="过滤启用状态")):
+async def list_pipelines(
+    enabled: Optional[bool] = Query(None, description="过滤启用状态")
+):
     """获取流水线列表"""
     try:
         manager = PipelineManager()
         pipelines = manager.list_pipelines(enabled=enabled)
-        
+
         # 为每个流水线添加当前任务状态和最后一次构建状态
         build_manager = BuildManager()
         pipeline_id = None
         for pipeline in pipelines:
             pipeline_id = pipeline.get("pipeline_id")
-            
+
             # 获取当前正在运行的任务
             task_id = pipeline.get("current_task_id")
             if task_id:
@@ -2359,9 +2659,11 @@ async def list_pipelines(enabled: Optional[bool] = Query(None, description="过�
                     # 任务不存在，清除绑定
                     manager.unbind_task(pipeline_id)
                     pipeline["current_task_id"] = None
-            
+
             # 查找最后一次完成的构建任务（completed 或 failed）
-            all_tasks = build_manager.task_manager.list_tasks(task_type="build_from_source")
+            all_tasks = build_manager.task_manager.list_tasks(
+                task_type="build_from_source"
+            )
             last_task = None
             for task in all_tasks:
                 # 检查任务是否属于该流水线
@@ -2370,9 +2672,11 @@ async def list_pipelines(enabled: Optional[bool] = Query(None, description="过�
                     task_status = task.get("status")
                     # 只考虑已完成的任务（completed 或 failed）
                     if task_status in ["completed", "failed"]:
-                        if not last_task or task.get("created_at", "") > last_task.get("created_at", ""):
+                        if not last_task or task.get("created_at", "") > last_task.get(
+                            "created_at", ""
+                        ):
                             last_task = task
-            
+
             # 添加最后一次构建信息
             if last_task:
                 pipeline["last_build"] = {
@@ -2385,11 +2689,11 @@ async def list_pipelines(enabled: Optional[bool] = Query(None, description="过�
                     "error": last_task.get("error"),
                 }
                 # 添加一个便捷的成功状态字段
-                pipeline["last_build_success"] = (last_task.get("status") == "completed")
+                pipeline["last_build_success"] = last_task.get("status") == "completed"
             else:
                 pipeline["last_build"] = None
                 pipeline["last_build_success"] = None
-        
+
         return JSONResponse({"pipelines": pipelines, "total": len(pipelines)})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取流水线列表失败: {str(e)}")
@@ -2415,7 +2719,9 @@ async def get_pipeline_tasks(
     pipeline_id: str,
     status: Optional[str] = Query(None, description="过滤任务状态"),
     limit: Optional[int] = Query(50, description="返回任务数量限制", ge=1, le=200),
-    trigger_source: Optional[str] = Query(None, description="过滤触发来源: webhook, manual, cron"),
+    trigger_source: Optional[str] = Query(
+        None, description="过滤触发来源: webhook, manual, cron"
+    ),
 ):
     """获取流水线关联的所有任务历史记录"""
     try:
@@ -2424,23 +2730,23 @@ async def get_pipeline_tasks(
         pipeline = manager.get_pipeline(pipeline_id)
         if not pipeline:
             raise HTTPException(status_code=404, detail="流水线不存在")
-        
+
         # 获取任务历史
         task_history = pipeline.get("task_history", [])
-        
+
         # 获取所有任务并补充详细信息
         build_manager = BuildManager()
         tasks_with_details = []
-        
+
         for history_entry in task_history:
             task_id = history_entry.get("task_id")
             if not task_id:
                 continue
-            
+
             # 应用过滤
             if trigger_source and history_entry.get("trigger_source") != trigger_source:
                 continue
-            
+
             # 获取任务详情
             task = build_manager.task_manager.get_task(task_id)
             if not task:
@@ -2456,7 +2762,7 @@ async def get_pipeline_tasks(
                 # 应用状态过滤
                 if status and task.get("status") != status:
                     continue
-                
+
                 task_info = {
                     "task_id": task_id,
                     "status": task.get("status"),
@@ -2466,47 +2772,50 @@ async def get_pipeline_tasks(
                     "tag": task.get("tag"),
                     "error": task.get("error"),
                 }
-            
+
             # 合并历史记录信息
-            task_info.update({
-                "trigger_source": history_entry.get("trigger_source"),
-                "triggered_at": history_entry.get("triggered_at"),
-                "trigger_info": history_entry.get("trigger_info", {}),
-            })
-            
+            task_info.update(
+                {
+                    "trigger_source": history_entry.get("trigger_source"),
+                    "triggered_at": history_entry.get("triggered_at"),
+                    "trigger_info": history_entry.get("trigger_info", {}),
+                }
+            )
+
             tasks_with_details.append(task_info)
-        
+
         # 按触发时间倒序排列
         tasks_with_details.sort(key=lambda x: x.get("triggered_at", ""), reverse=True)
-        
+
         # 限制返回数量
         tasks_with_details = tasks_with_details[:limit]
-        
-        return JSONResponse({
-            "tasks": tasks_with_details,
-            "total": len(tasks_with_details),
-            "pipeline_id": pipeline_id,
-            "pipeline_name": pipeline.get("name"),
-        })
+
+        return JSONResponse(
+            {
+                "tasks": tasks_with_details,
+                "total": len(tasks_with_details),
+                "pipeline_id": pipeline_id,
+                "pipeline_name": pipeline.get("name"),
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取流水线任务失败: {str(e)}")
 
 
 @router.put("/pipelines/{pipeline_id}")
 async def update_pipeline(
-    pipeline_id: str,
-    request: UpdatePipelineRequest,
-    http_request: Request
+    pipeline_id: str, request: UpdatePipelineRequest, http_request: Request
 ):
     """更新流水线配置"""
     try:
         username = get_current_username(http_request)
         manager = PipelineManager()
-        
+
         success = manager.update_pipeline(
             pipeline_id=pipeline_id,
             name=request.name,
@@ -2531,20 +2840,19 @@ async def update_pipeline(
             branch_tag_mapping=request.branch_tag_mapping,
             source_id=request.source_id,
         )
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="流水线不存在")
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "pipeline_update", {
-            "pipeline_id": pipeline_id
-        })
-        
+        OperationLogger.log(username, "pipeline_update", {"pipeline_id": pipeline_id})
+
         return JSONResponse({"message": "流水线更新成功"})
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"更新流水线失败: {str(e)}")
 
@@ -2555,16 +2863,14 @@ async def delete_pipeline(pipeline_id: str, http_request: Request):
     try:
         username = get_current_username(http_request)
         manager = PipelineManager()
-        
+
         success = manager.delete_pipeline(pipeline_id)
         if not success:
             raise HTTPException(status_code=404, detail="流水线不存在")
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "pipeline_delete", {
-            "pipeline_id": pipeline_id
-        })
-        
+        OperationLogger.log(username, "pipeline_delete", {"pipeline_id": pipeline_id})
+
         return JSONResponse({"message": "流水线已删除"})
     except HTTPException:
         raise
@@ -2578,12 +2884,12 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
     try:
         username = get_current_username(http_request)
         manager = PipelineManager()
-        
+
         # 获取流水线配置
         pipeline = manager.get_pipeline(pipeline_id)
         if not pipeline:
             raise HTTPException(status_code=404, detail="流水线不存在")
-        
+
         # 检查是否有正在运行的任务
         current_task_id = manager.get_pipeline_running_task(pipeline_id)
         if current_task_id:
@@ -2593,12 +2899,12 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
             if task and task.get("status") in ["pending", "running"]:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"流水线已有正在执行的任务（任务ID: {current_task_id[:8]}）"
+                    detail=f"流水线已有正在执行的任务（任务ID: {current_task_id[:8]}）",
                 )
             else:
                 # 任务已完成或不存在，解绑
                 manager.unbind_task(pipeline_id)
-        
+
         # 启动构建任务
         build_manager = BuildManager()
         task_id = build_manager.start_build_from_source(
@@ -2617,37 +2923,44 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
             source_id=pipeline.get("source_id"),  # 传递数据源ID
             pipeline_id=pipeline_id,  # 传递流水线ID
         )
-        
+
         # 记录触发并绑定任务（手动触发）
         manager.record_trigger(
-            pipeline_id, 
+            pipeline_id,
             task_id,
             trigger_source="manual",
             trigger_info={
                 "username": username,
                 "branch": pipeline.get("branch"),
+            },
+        )
+
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "pipeline_run",
+            {
+                "pipeline_id": pipeline_id,
+                "pipeline_name": pipeline.get("name"),
+                "task_id": task_id,
+                "branch": pipeline.get("branch"),
+                "trigger_source": "manual",
+            },
+        )
+
+        return JSONResponse(
+            {
+                "message": "构建任务已启动",
+                "task_id": task_id,
+                "pipeline": pipeline.get("name"),
+                "branch": pipeline.get("branch"),
             }
         )
-        
-        # 记录操作日志
-        OperationLogger.log(username, "pipeline_run", {
-            "pipeline_id": pipeline_id,
-            "pipeline_name": pipeline.get("name"),
-            "task_id": task_id,
-            "branch": pipeline.get("branch"),
-            "trigger_source": "manual",
-        })
-        
-        return JSONResponse({
-            "message": "构建任务已启动",
-            "task_id": task_id,
-            "pipeline": pipeline.get("name"),
-            "branch": pipeline.get("branch"),
-        })
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"执行流水线失败: {str(e)}")
 
@@ -2661,91 +2974,107 @@ async def webhook_trigger(webhook_token: str, request: Request):
         print(f"🔍 Webhook 请求头:")
         for key, value in request.headers.items():
             print(f"  {key}: {value}")
-        
+
         # 获取请求体（原始字节）
         body = await request.body()
         print(f"📦 请求体大小: {len(body)} bytes")
-        
+
         # 获取流水线配置
         manager = PipelineManager()
         pipeline = manager.get_pipeline_by_token(webhook_token)
-        
+
         if not pipeline:
             print(f"❌ 未找到流水线: webhook_token={webhook_token}")
             raise HTTPException(status_code=404, detail="流水线不存在")
-        
-        print(f"✅ 找到流水线: {pipeline.get('name')} (pipeline_id={pipeline.get('pipeline_id')})")
-        
+
+        print(
+            f"✅ 找到流水线: {pipeline.get('name')} (pipeline_id={pipeline.get('pipeline_id')})"
+        )
+
         if not pipeline.get("enabled", False):
             print(f"❌ 流水线已禁用: {pipeline.get('name')}")
             raise HTTPException(status_code=403, detail="流水线已禁用")
-        
+
         # 检查是否是 Gitee ping 事件（测试请求）
         # FastAPI/Starlette 会将 header 名称标准化为小写
         gitee_ping = request.headers.get("x-gitee-ping", "")
         print(f"🔍 X-Gitee-Ping: {gitee_ping}")
         if gitee_ping and gitee_ping.lower() == "true":
             print(f"✅ Gitee Ping 测试请求: pipeline={pipeline.get('name')}")
-            return JSONResponse({
-                "message": "Webhook 配置正确",
-                "pipeline": pipeline.get("name"),
-                "status": "ok"
-            })
-        
+            return JSONResponse(
+                {
+                    "message": "Webhook 配置正确",
+                    "pipeline": pipeline.get("name"),
+                    "status": "ok",
+                }
+            )
+
         # 验证 Webhook 签名（可选）
         webhook_secret = pipeline.get("webhook_secret")
         if webhook_secret:
             # 如果配置了 secret，则尝试验证签名
             signature_verified = False
             signature_found = False
-            
+
             # GitHub: X-Hub-Signature-256 或 X-Hub-Signature
             if "x-hub-signature-256" in request.headers:
                 signature = request.headers["x-hub-signature-256"]
                 signature_found = True
-                signature_verified = manager.verify_webhook_signature(body, signature, webhook_secret, "sha256")
+                signature_verified = manager.verify_webhook_signature(
+                    body, signature, webhook_secret, "sha256"
+                )
             elif "x-hub-signature" in request.headers:
                 signature = request.headers["x-hub-signature"]
                 signature_found = True
-                signature_verified = manager.verify_webhook_signature(body, signature, webhook_secret, "sha1")
+                signature_verified = manager.verify_webhook_signature(
+                    body, signature, webhook_secret, "sha1"
+                )
             # GitLab: X-Gitlab-Token
             elif "x-gitlab-token" in request.headers:
                 gitlab_token = request.headers["x-gitlab-token"]
                 signature_found = True
-                signature_verified = (gitlab_token == webhook_secret)
+                signature_verified = gitlab_token == webhook_secret
             # Gitee: X-Gitee-Token
             elif "x-gitee-token" in request.headers:
                 gitee_token = request.headers["x-gitee-token"]
-                print(f"🔍 X-Gitee-Token: '{gitee_token}' (长度: {len(gitee_token) if gitee_token else 0})")
+                print(
+                    f"🔍 X-Gitee-Token: '{gitee_token}' (长度: {len(gitee_token) if gitee_token else 0})"
+                )
                 # 只有当 token 不为空时才进行验证
                 if gitee_token and gitee_token.strip():
                     signature_found = True
-                    signature_verified = (gitee_token == webhook_secret)
-                    print(f"🔍 Token 验证: found={signature_found}, verified={signature_verified}")
+                    signature_verified = gitee_token == webhook_secret
+                    print(
+                        f"🔍 Token 验证: found={signature_found}, verified={signature_verified}"
+                    )
                 else:
                     # 如果 token 为空，说明 Gitee 没有配置密码，跳过验证
                     print(f"⚠️ Gitee Token 为空，跳过验证")
-            
+
             # 如果提供了签名但验证失败，则拒绝请求
             if signature_found and not signature_verified:
                 print(f"❌ Webhook 签名验证失败: pipeline={pipeline.get('name')}")
                 raise HTTPException(status_code=403, detail="Webhook 签名验证失败")
-            
+
             # 如果没有提供签名，警告但允许通过（容错处理）
             if not signature_found:
-                print(f"⚠️ Webhook 请求未提供签名，但配置了 secret，允许通过: pipeline={pipeline.get('name')}")
+                print(
+                    f"⚠️ Webhook 请求未提供签名，但配置了 secret，允许通过: pipeline={pipeline.get('name')}"
+                )
             else:
                 print(f"✅ Webhook 签名验证通过: pipeline={pipeline.get('name')}")
         else:
             # 没有配置 secret，直接允许通过
-            print(f"🔓 Webhook 未配置签名验证，直接允许通过: pipeline={pipeline.get('name')}")
-        
+            print(
+                f"🔓 Webhook 未配置签名验证，直接允许通过: pipeline={pipeline.get('name')}"
+            )
+
         # 解析 Webhook 负载（尝试解析 JSON）
         try:
-            payload = json.loads(body.decode('utf-8'))
+            payload = json.loads(body.decode("utf-8"))
         except:
             payload = {}
-        
+
         # 提取分支信息（不同平台格式不同）
         webhook_branch = None
         # GitHub: ref = refs/heads/main
@@ -2759,33 +3088,43 @@ async def webhook_trigger(webhook_token: str, request: Request):
             if not ref.startswith("refs/"):
                 webhook_branch = ref
         # Gitee: ref = refs/heads/main (已在上面处理)
-        
+
         # 检查是否启用分支过滤和使用推送分支
         webhook_branch_filter = pipeline.get("webhook_branch_filter", False)
-        webhook_use_push_branch = pipeline.get("webhook_use_push_branch", True)  # 默认为True
+        webhook_use_push_branch = pipeline.get(
+            "webhook_use_push_branch", True
+        )  # 默认为True
         configured_branch = pipeline.get("branch")
-        
+
         # 分支触发逻辑：优先使用推送的分支进行构建
         if webhook_branch_filter and configured_branch:
             # 如果启用了分支过滤，检查推送的分支是否匹配配置的分支
             if webhook_branch:
                 if webhook_branch != configured_branch:
                     # 分支不匹配，忽略触发
-                    print(f"⚠️ 分支不匹配，忽略触发: pipeline={pipeline.get('name')}, webhook_branch={webhook_branch}, configured_branch={configured_branch}")
-                    return JSONResponse({
-                        "message": f"分支不匹配，已忽略触发（推送分支: {webhook_branch}, 配置分支: {configured_branch}）",
-                        "pipeline": pipeline.get("name"),
-                        "webhook_branch": webhook_branch,
-                        "configured_branch": configured_branch,
-                        "ignored": True
-                    })
+                    print(
+                        f"⚠️ 分支不匹配，忽略触发: pipeline={pipeline.get('name')}, webhook_branch={webhook_branch}, configured_branch={configured_branch}"
+                    )
+                    return JSONResponse(
+                        {
+                            "message": f"分支不匹配，已忽略触发（推送分支: {webhook_branch}, 配置分支: {configured_branch}）",
+                            "pipeline": pipeline.get("name"),
+                            "webhook_branch": webhook_branch,
+                            "configured_branch": configured_branch,
+                            "ignored": True,
+                        }
+                    )
                 else:
                     # 分支匹配，使用推送的分支进行构建
                     branch = webhook_branch
-                    print(f"✅ 分支匹配，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}")
+                    print(
+                        f"✅ 分支匹配，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}"
+                    )
             else:
                 # Webhook未提供分支信息，且启用了分支过滤，无法确定是否应该触发
-                print(f"⚠️ Webhook未提供分支信息，但启用了分支过滤，使用配置的分支: pipeline={pipeline.get('name')}, configured_branch={configured_branch}")
+                print(
+                    f"⚠️ Webhook未提供分支信息，但启用了分支过滤，使用配置的分支: pipeline={pipeline.get('name')}, configured_branch={configured_branch}"
+                )
                 branch = configured_branch
         else:
             # 未启用分支过滤，根据配置决定使用哪个分支
@@ -2793,30 +3132,43 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 # 启用使用推送分支，优先使用推送的分支
                 if webhook_branch:
                     branch = webhook_branch
-                    print(f"🔔 Webhook 触发，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}")
+                    print(
+                        f"🔔 Webhook 触发，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}"
+                    )
                 else:
                     # 没有推送分支信息，使用配置的分支
                     branch = configured_branch
-                    print(f"⚠️ Webhook未提供分支信息，使用配置的分支: pipeline={pipeline.get('name')}, branch={branch}")
+                    print(
+                        f"⚠️ Webhook未提供分支信息，使用配置的分支: pipeline={pipeline.get('name')}, branch={branch}"
+                    )
             else:
                 # 禁用使用推送分支，使用配置的分支
                 branch = configured_branch
                 if not branch:
                     # 如果配置的分支为空，且没有推送分支信息，无法确定使用哪个分支
                     if not webhook_branch:
-                        print(f"❌ 无法触发构建: pipeline={pipeline.get('name')}, 配置分支为空且Webhook未提供分支信息")
-                        return JSONResponse({
-                            "message": "无法触发构建：配置分支为空且Webhook未提供分支信息",
-                            "pipeline": pipeline.get("name"),
-                            "error": "missing_branch"
-                        }, status_code=400)
+                        print(
+                            f"❌ 无法触发构建: pipeline={pipeline.get('name')}, 配置分支为空且Webhook未提供分支信息"
+                        )
+                        return JSONResponse(
+                            {
+                                "message": "无法触发构建：配置分支为空且Webhook未提供分支信息",
+                                "pipeline": pipeline.get("name"),
+                                "error": "missing_branch",
+                            },
+                            status_code=400,
+                        )
                     else:
                         # 配置分支为空，但Webhook提供了分支信息，使用推送的分支
                         branch = webhook_branch
-                        print(f"⚠️ 配置分支为空，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}")
+                        print(
+                            f"⚠️ 配置分支为空，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}"
+                        )
                 else:
-                    print(f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (忽略推送分支: {webhook_branch})")
-        
+                    print(
+                        f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (忽略推送分支: {webhook_branch})"
+                    )
+
         # 检查是否有正在运行的任务
         pipeline_id = pipeline["pipeline_id"]
         current_task_id = manager.get_pipeline_running_task(pipeline_id)
@@ -2825,41 +3177,54 @@ async def webhook_trigger(webhook_token: str, request: Request):
             build_manager = BuildManager()
             task = build_manager.task_manager.get_task(current_task_id)
             if task and task.get("status") in ["pending", "running"]:
-                print(f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，忽略本次触发")
-                return JSONResponse({
-                    "message": "流水线已有正在执行的任务，忽略本次触发",
-                    "current_task_id": current_task_id,
-                    "pipeline": pipeline.get("name"),
-                })
+                print(
+                    f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，忽略本次触发"
+                )
+                return JSONResponse(
+                    {
+                        "message": "流水线已有正在执行的任务，忽略本次触发",
+                        "current_task_id": current_task_id,
+                        "pipeline": pipeline.get("name"),
+                    }
+                )
             else:
                 # 任务已完成或不存在，解绑
                 manager.unbind_task(pipeline_id)
-        
+
         # 根据推送的分支查找对应的标签（分支标签映射应该基于推送的分支，而不是用于构建的分支）
         branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
         tag = pipeline.get("tag", "latest")  # 默认标签
-        
+
         # 使用webhook推送的分支来查找标签映射（如果有的话）
         branch_for_tag_mapping = webhook_branch if webhook_branch else branch
-        
+
         if branch_for_tag_mapping and branch_tag_mapping:
             # 优先精确匹配
             if branch_for_tag_mapping in branch_tag_mapping:
                 tag = branch_tag_mapping[branch_for_tag_mapping]
-                print(f"✅ 找到分支标签映射: {branch_for_tag_mapping} -> {tag} (推送分支: {webhook_branch}, 构建分支: {branch})")
+                print(
+                    f"✅ 找到分支标签映射: {branch_for_tag_mapping} -> {tag} (推送分支: {webhook_branch}, 构建分支: {branch})"
+                )
             else:
                 # 尝试通配符匹配（如 feature/* -> feature）
                 import fnmatch
+
                 for pattern, mapped_tag in branch_tag_mapping.items():
                     if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
                         tag = mapped_tag
-                        print(f"✅ 通配符匹配分支标签: {branch_for_tag_mapping} (pattern: {pattern}) -> {tag} (推送分支: {webhook_branch}, 构建分支: {branch})")
+                        print(
+                            f"✅ 通配符匹配分支标签: {branch_for_tag_mapping} (pattern: {pattern}) -> {tag} (推送分支: {webhook_branch}, 构建分支: {branch})"
+                        )
                         break
                 else:
-                    print(f"ℹ️  未找到分支 {branch_for_tag_mapping} 的标签映射，使用默认标签: {tag} (推送分支: {webhook_branch}, 构建分支: {branch})")
+                    print(
+                        f"ℹ️  未找到分支 {branch_for_tag_mapping} 的标签映射，使用默认标签: {tag} (推送分支: {webhook_branch}, 构建分支: {branch})"
+                    )
         else:
-            print(f"ℹ️  使用默认标签: {tag} (推送分支: {webhook_branch}, 构建分支: {branch})")
-        
+            print(
+                f"ℹ️  使用默认标签: {tag} (推送分支: {webhook_branch}, 构建分支: {branch})"
+            )
+
         # 启动构建任务
         build_manager = BuildManager()
         task_id = build_manager.start_build_from_source(
@@ -2877,55 +3242,73 @@ async def webhook_trigger(webhook_token: str, request: Request):
             dockerfile_name=pipeline.get("dockerfile_name", "Dockerfile"),
             pipeline_id=pipeline["pipeline_id"],  # 传递流水线ID
         )
-        
+
         # 提取 webhook 相关信息
         webhook_info = {
             "branch": branch,
-            "event": request.headers.get("x-gitee-event") or request.headers.get("x-gitlab-event") or request.headers.get("x-github-event", "unknown"),
-            "platform": "gitee" if "x-gitee-event" in request.headers else ("gitlab" if "x-gitlab-event" in request.headers else "github"),
+            "event": request.headers.get("x-gitee-event")
+            or request.headers.get("x-gitlab-event")
+            or request.headers.get("x-github-event", "unknown"),
+            "platform": (
+                "gitee"
+                if "x-gitee-event" in request.headers
+                else ("gitlab" if "x-gitlab-event" in request.headers else "github")
+            ),
         }
-        
+
         # 尝试从 payload 中提取更多信息
         if payload:
             if "commits" in payload and payload["commits"]:
                 webhook_info["commit_count"] = len(payload["commits"])
-                webhook_info["last_commit"] = payload["commits"][0].get("message", "")[:100] if payload["commits"] else ""
+                webhook_info["last_commit"] = (
+                    payload["commits"][0].get("message", "")[:100]
+                    if payload["commits"]
+                    else ""
+                )
             if "repository" in payload:
                 webhook_info["repository"] = payload["repository"].get("name", "")
-        
+
         # 记录触发并绑定任务（webhook 触发）
         manager.record_trigger(
-            pipeline["pipeline_id"], 
+            pipeline["pipeline_id"],
             task_id,
             trigger_source="webhook",
-            trigger_info=webhook_info
+            trigger_info=webhook_info,
         )
-        
+
         # 记录操作日志
-        OperationLogger.log("webhook", "pipeline_trigger", {
-            "pipeline_id": pipeline["pipeline_id"],
-            "pipeline_name": pipeline.get("name"),
-            "task_id": task_id,
-            "branch": branch,
-            "trigger_source": "webhook",
-            "webhook_info": webhook_info,
-        })
-        
-        return JSONResponse({
-            "message": "构建任务已启动",
-            "task_id": task_id,
-            "pipeline": pipeline.get("name"),
-            "branch": branch,
-        })
+        OperationLogger.log(
+            "webhook",
+            "pipeline_trigger",
+            {
+                "pipeline_id": pipeline["pipeline_id"],
+                "pipeline_name": pipeline.get("name"),
+                "task_id": task_id,
+                "branch": branch,
+                "trigger_source": "webhook",
+                "webhook_info": webhook_info,
+            },
+        )
+
+        return JSONResponse(
+            {
+                "message": "构建任务已启动",
+                "task_id": task_id,
+                "pipeline": pipeline.get("name"),
+                "branch": branch,
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Webhook 处理失败: {str(e)}")
 
 
 # === Git 数据源管理 ===
+
 
 class CreateGitSourceRequest(BaseModel):
     name: str
@@ -2985,7 +3368,7 @@ async def create_git_source(request: CreateGitSourceRequest, http_request: Reque
     try:
         username = get_current_username(http_request)
         manager = GitSourceManager()
-        
+
         source_id = manager.create_source(
             name=request.name,
             git_url=request.git_url,
@@ -2996,35 +3379,35 @@ async def create_git_source(request: CreateGitSourceRequest, http_request: Reque
             username=request.username,
             password=request.password,
         )
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "git_source_create", {
-            "source_id": source_id,
-            "name": request.name,
-            "git_url": request.git_url,
-        })
-        
-        return JSONResponse({
-            "source_id": source_id,
-            "message": "数据源创建成功"
-        })
+        OperationLogger.log(
+            username,
+            "git_source_create",
+            {
+                "source_id": source_id,
+                "name": request.name,
+                "git_url": request.git_url,
+            },
+        )
+
+        return JSONResponse({"source_id": source_id, "message": "数据源创建成功"})
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"创建数据源失败: {str(e)}")
 
 
 @router.put("/git-sources/{source_id}")
 async def update_git_source(
-    source_id: str,
-    request: UpdateGitSourceRequest,
-    http_request: Request
+    source_id: str, request: UpdateGitSourceRequest, http_request: Request
 ):
     """更新 Git 数据源"""
     try:
         username = get_current_username(http_request)
         manager = GitSourceManager()
-        
+
         success = manager.update_source(
             source_id=source_id,
             name=request.name,
@@ -3036,10 +3419,10 @@ async def update_git_source(
             username=request.username,
             password=request.password,
         )
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="数据源不存在")
-        
+
         # 更新 Dockerfile（如果有）
         if request.dockerfiles is not None:
             source = manager.get_source(source_id, include_password=True)
@@ -3048,17 +3431,16 @@ async def update_git_source(
                 # 这里我们只更新提供的 Dockerfile，不删除其他的
                 for dockerfile_path, content in request.dockerfiles.items():
                     manager.update_dockerfile(source_id, dockerfile_path, content)
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "git_source_update", {
-            "source_id": source_id
-        })
-        
+        OperationLogger.log(username, "git_source_update", {"source_id": source_id})
+
         return JSONResponse({"message": "数据源更新成功"})
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"更新数据源失败: {str(e)}")
 
@@ -3069,21 +3451,20 @@ async def delete_git_source(source_id: str, http_request: Request):
     try:
         username = get_current_username(http_request)
         manager = GitSourceManager()
-        
+
         success = manager.delete_source(source_id)
         if not success:
             raise HTTPException(status_code=404, detail="数据源不存在")
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "git_source_delete", {
-            "source_id": source_id
-        })
-        
+        OperationLogger.log(username, "git_source_delete", {"source_id": source_id})
+
         return JSONResponse({"message": "数据源已删除"})
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"删除数据源失败: {str(e)}")
 
@@ -3097,16 +3478,17 @@ async def get_dockerfiles(source_id: str, http_request: Request):
         source = manager.get_source(source_id)
         if not source:
             raise HTTPException(status_code=404, detail="数据源不存在")
-        
+
         dockerfiles = source.get("dockerfiles", {})
-        return JSONResponse({
-            "dockerfiles": dockerfiles,
-            "dockerfile_paths": list(dockerfiles.keys())
-        })
+        return JSONResponse(
+            {"dockerfiles": dockerfiles, "dockerfile_paths": list(dockerfiles.keys())}
+        )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取 Dockerfile 列表失败: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"获取 Dockerfile 列表失败: {str(e)}"
+        )
 
 
 @router.get("/git-sources/{source_id}/dockerfiles/{dockerfile_path:path}")
@@ -3118,11 +3500,8 @@ async def get_dockerfile(source_id: str, dockerfile_path: str, http_request: Req
         content = manager.get_dockerfile(source_id, dockerfile_path)
         if content is None:
             raise HTTPException(status_code=404, detail="Dockerfile 不存在")
-        
-        return JSONResponse({
-            "dockerfile_path": dockerfile_path,
-            "content": content
-        })
+
+        return JSONResponse({"dockerfile_path": dockerfile_path, "content": content})
     except HTTPException:
         raise
     except Exception as e:
@@ -3134,21 +3513,20 @@ async def update_dockerfile(
     source_id: str,
     dockerfile_path: str,
     content: str = Body(..., embed=True, description="Dockerfile 内容"),
-    http_request: Request = None
+    http_request: Request = None,
 ):
     """更新或创建 Dockerfile"""
     try:
         get_current_username(http_request)  # 验证登录
         manager = GitSourceManager()
-        
+
         success = manager.update_dockerfile(source_id, dockerfile_path, content)
         if not success:
             raise HTTPException(status_code=404, detail="数据源不存在")
-        
-        return JSONResponse({
-            "message": "Dockerfile 已保存",
-            "dockerfile_path": dockerfile_path
-        })
+
+        return JSONResponse(
+            {"message": "Dockerfile 已保存", "dockerfile_path": dockerfile_path}
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -3157,23 +3535,20 @@ async def update_dockerfile(
 
 @router.delete("/git-sources/{source_id}/dockerfiles/{dockerfile_path:path}")
 async def delete_dockerfile(
-    source_id: str,
-    dockerfile_path: str,
-    http_request: Request
+    source_id: str, dockerfile_path: str, http_request: Request
 ):
     """删除 Dockerfile"""
     try:
         get_current_username(http_request)  # 验证登录
         manager = GitSourceManager()
-        
+
         success = manager.delete_dockerfile(source_id, dockerfile_path)
         if not success:
             raise HTTPException(status_code=404, detail="Dockerfile 不存在")
-        
-        return JSONResponse({
-            "message": "Dockerfile 已删除",
-            "dockerfile_path": dockerfile_path
-        })
+
+        return JSONResponse(
+            {"message": "Dockerfile 已删除", "dockerfile_path": dockerfile_path}
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -3186,34 +3561,34 @@ async def commit_dockerfile(
     dockerfile_path: str,
     branch: str = Body(..., embed=True, description="目标分支"),
     commit_message: str = Body(None, embed=True, description="提交信息（可选）"),
-    http_request: Request = None
+    http_request: Request = None,
 ):
     """提交 Dockerfile 到 Git 仓库"""
     import subprocess
     import tempfile
     import shutil
     from urllib.parse import urlparse, urlunparse
-    
+
     try:
         username = get_current_username(http_request)  # 验证登录
         manager = GitSourceManager()
-        
+
         # 获取数据源信息
         source = manager.get_source(source_id, include_password=True)
         if not source:
             raise HTTPException(status_code=404, detail="数据源不存在")
-        
+
         # 获取 Dockerfile 内容
         dockerfile_content = manager.get_dockerfile(source_id, dockerfile_path)
         if not dockerfile_content:
             raise HTTPException(status_code=404, detail="Dockerfile 不存在")
-        
+
         # 获取认证信息
         auth_config = manager.get_auth_config(source_id)
         git_url = source["git_url"]
         username_auth = auth_config.get("username")
         password_auth = auth_config.get("password")
-        
+
         # 构建带认证信息的 URL
         verify_url = git_url
         if username_auth and password_auth and git_url.startswith("https://"):
@@ -3228,39 +3603,54 @@ async def commit_dockerfile(
                     parsed.fragment,
                 )
             )
-        
+
         # 创建临时目录
         temp_dir = tempfile.mkdtemp()
-        
+
         try:
             # 克隆仓库
-            clone_cmd = ["git", "clone", "--depth", "1", "--branch", branch, verify_url, temp_dir]
+            clone_cmd = [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                branch,
+                verify_url,
+                temp_dir,
+            ]
             clone_result = subprocess.run(
-                clone_cmd,
-                capture_output=True,
-                text=True,
-                timeout=60
+                clone_cmd, capture_output=True, text=True, timeout=60
             )
-            
+
             if clone_result.returncode != 0:
                 # 如果分支不存在，尝试克隆默认分支然后切换
-                if "not found" in clone_result.stderr.lower() or "does not exist" in clone_result.stderr.lower():
+                if (
+                    "not found" in clone_result.stderr.lower()
+                    or "does not exist" in clone_result.stderr.lower()
+                ):
                     # 先克隆默认分支
                     default_branch = source.get("default_branch") or "main"
-                    clone_cmd_default = ["git", "clone", "--depth", "1", "--branch", default_branch, verify_url, temp_dir]
+                    clone_cmd_default = [
+                        "git",
+                        "clone",
+                        "--depth",
+                        "1",
+                        "--branch",
+                        default_branch,
+                        verify_url,
+                        temp_dir,
+                    ]
                     clone_result_default = subprocess.run(
-                        clone_cmd_default,
-                        capture_output=True,
-                        text=True,
-                        timeout=60
+                        clone_cmd_default, capture_output=True, text=True, timeout=60
                     )
-                    
+
                     if clone_result_default.returncode != 0:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"无法克隆仓库: {clone_result_default.stderr.strip()}"
+                            detail=f"无法克隆仓库: {clone_result_default.stderr.strip()}",
                         )
-                    
+
                     # 切换到目标分支（如果不存在则创建）
                     checkout_cmd = ["git", "checkout", "-b", branch]
                     checkout_result = subprocess.run(
@@ -3268,9 +3658,9 @@ async def commit_dockerfile(
                         cwd=temp_dir,
                         capture_output=True,
                         text=True,
-                        timeout=30
+                        timeout=30,
                     )
-                    
+
                     # 如果分支已存在，直接切换
                     if checkout_result.returncode != 0:
                         checkout_cmd = ["git", "checkout", branch]
@@ -3279,51 +3669,39 @@ async def commit_dockerfile(
                             cwd=temp_dir,
                             capture_output=True,
                             text=True,
-                            timeout=30
+                            timeout=30,
                         )
                         if checkout_result.returncode != 0:
                             raise HTTPException(
                                 status_code=400,
-                                detail=f"无法切换到分支 {branch}: {checkout_result.stderr.strip()}"
+                                detail=f"无法切换到分支 {branch}: {checkout_result.stderr.strip()}",
                             )
                 else:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"无法克隆仓库: {clone_result.stderr.strip()}"
+                        detail=f"无法克隆仓库: {clone_result.stderr.strip()}",
                     )
-            
+
             # 先拉取最新更改，确保与远程同步
             fetch_cmd = ["git", "fetch", "origin", branch]
             fetch_result = subprocess.run(
-                fetch_cmd,
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=30
+                fetch_cmd, cwd=temp_dir, capture_output=True, text=True, timeout=30
             )
-            
+
             # 尝试合并远程更改
             merge_cmd = ["git", "merge", f"origin/{branch}", "--no-edit"]
             merge_result = subprocess.run(
-                merge_cmd,
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=30
+                merge_cmd, cwd=temp_dir, capture_output=True, text=True, timeout=30
             )
-            
+
             # 如果有冲突，使用本地版本（ours）
             if merge_result.returncode != 0:
                 # 检查是否有冲突
                 status_cmd = ["git", "status", "--porcelain"]
                 status_result = subprocess.run(
-                    status_cmd,
-                    cwd=temp_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=10
+                    status_cmd, cwd=temp_dir, capture_output=True, text=True, timeout=10
                 )
-                
+
                 if "UU" in status_result.stdout or "AA" in status_result.stdout:
                     # 有冲突，使用本地版本
                     checkout_ours_cmd = ["git", "checkout", "--ours", dockerfile_path]
@@ -3332,7 +3710,7 @@ async def commit_dockerfile(
                         cwd=temp_dir,
                         capture_output=True,
                         text=True,
-                        timeout=10
+                        timeout=10,
                     )
                     # 添加解决冲突的文件
                     add_cmd = ["git", "add", dockerfile_path]
@@ -3341,7 +3719,7 @@ async def commit_dockerfile(
                         cwd=temp_dir,
                         capture_output=True,
                         text=True,
-                        timeout=10
+                        timeout=10,
                     )
                     # 继续合并
                     continue_cmd = ["git", "merge", "--continue", "--no-edit"]
@@ -3350,7 +3728,7 @@ async def commit_dockerfile(
                         cwd=temp_dir,
                         capture_output=True,
                         text=True,
-                        timeout=10
+                        timeout=10,
                     )
                 else:
                     # 其他错误，重置合并
@@ -3360,24 +3738,20 @@ async def commit_dockerfile(
                         cwd=temp_dir,
                         capture_output=True,
                         text=True,
-                        timeout=10
+                        timeout=10,
                     )
-            
+
             # 写入 Dockerfile
             dockerfile_full_path = os.path.join(temp_dir, dockerfile_path)
             os.makedirs(os.path.dirname(dockerfile_full_path), exist_ok=True)
-            
-            with open(dockerfile_full_path, 'w', encoding='utf-8') as f:
+
+            with open(dockerfile_full_path, "w", encoding="utf-8") as f:
                 f.write(dockerfile_content)
-            
+
             # 配置 Git 用户信息（如果没有配置）
             config_cmd = ["git", "config", "user.name"]
             config_result = subprocess.run(
-                config_cmd,
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=10
+                config_cmd, cwd=temp_dir, capture_output=True, text=True, timeout=10
             )
             if config_result.returncode != 0 or not config_result.stdout.strip():
                 subprocess.run(
@@ -3385,100 +3759,96 @@ async def commit_dockerfile(
                     cwd=temp_dir,
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
                 )
                 subprocess.run(
                     ["git", "config", "user.email", "jar2docker@localhost"],
                     cwd=temp_dir,
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
                 )
-            
+
             # 添加文件
             add_cmd = ["git", "add", dockerfile_path]
             add_result = subprocess.run(
-                add_cmd,
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=10
+                add_cmd, cwd=temp_dir, capture_output=True, text=True, timeout=10
             )
-            
+
             if add_result.returncode != 0:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"添加文件到 Git 失败: {add_result.stderr.strip()}"
+                    detail=f"添加文件到 Git 失败: {add_result.stderr.strip()}",
                 )
-            
+
             # 提交
             commit_msg = commit_message or f"Update {dockerfile_path} via jar2docker"
             commit_cmd = ["git", "commit", "-m", commit_msg]
             commit_result = subprocess.run(
-                commit_cmd,
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=30
+                commit_cmd, cwd=temp_dir, capture_output=True, text=True, timeout=30
             )
-            
+
             if commit_result.returncode != 0:
                 # 检查是否没有更改
                 if "nothing to commit" in commit_result.stdout.lower():
-                    return JSONResponse({
-                        "success": True,
-                        "message": "没有更改需要提交",
-                        "no_changes": True
-                    })
+                    return JSONResponse(
+                        {
+                            "success": True,
+                            "message": "没有更改需要提交",
+                            "no_changes": True,
+                        }
+                    )
                 raise HTTPException(
-                    status_code=500,
-                    detail=f"提交失败: {commit_result.stderr.strip()}"
+                    status_code=500, detail=f"提交失败: {commit_result.stderr.strip()}"
                 )
-            
+
             # 推送到远程
             push_cmd = ["git", "push", "origin", branch]
             push_result = subprocess.run(
-                push_cmd,
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=60
+                push_cmd, cwd=temp_dir, capture_output=True, text=True, timeout=60
             )
-            
+
             if push_result.returncode != 0:
                 raise HTTPException(
-                    status_code=500,
-                    detail=f"推送失败: {push_result.stderr.strip()}"
+                    status_code=500, detail=f"推送失败: {push_result.stderr.strip()}"
                 )
-            
+
             # 记录操作日志
-            OperationLogger.log(username, "commit_dockerfile", {
-                "source_id": source_id,
-                "dockerfile_path": dockerfile_path,
-                "branch": branch,
-                "commit_message": commit_msg
-            })
-            
-            return JSONResponse({
-                "success": True,
-                "message": f"Dockerfile 已成功提交并推送到分支 {branch}",
-                "branch": branch,
-                "commit_message": commit_msg
-            })
-            
+            OperationLogger.log(
+                username,
+                "commit_dockerfile",
+                {
+                    "source_id": source_id,
+                    "dockerfile_path": dockerfile_path,
+                    "branch": branch,
+                    "commit_message": commit_msg,
+                },
+            )
+
+            return JSONResponse(
+                {
+                    "success": True,
+                    "message": f"Dockerfile 已成功提交并推送到分支 {branch}",
+                    "branch": branch,
+                    "commit_message": commit_msg,
+                }
+            )
+
         finally:
             # 清理临时目录
             shutil.rmtree(temp_dir, ignore_errors=True)
-            
+
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"提交 Dockerfile 失败: {str(e)}")
 
 
 # ==================== 资源包管理 API ====================
+
 
 @router.post("/resource-packages/upload")
 async def upload_resource_package(
@@ -3490,13 +3860,13 @@ async def upload_resource_package(
     """上传资源包"""
     try:
         username = get_current_username(request)
-        
+
         # 读取文件数据
         file_data = await package_file.read()
-        
+
         if not file_data:
             raise HTTPException(status_code=400, detail="文件为空")
-        
+
         # 上传资源包
         manager = ResourcePackageManager()
         package_info = manager.upload_package(
@@ -3505,23 +3875,30 @@ async def upload_resource_package(
             description=description,
             extract=extract,
         )
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "resource_package_upload", {
-            "package_id": package_info["package_id"],
-            "filename": package_file.filename,
-            "size": package_info["size"],
-        })
-        
-        return JSONResponse({
-            "success": True,
-            "package": package_info,
-            "message": "资源包上传成功",
-        })
+        OperationLogger.log(
+            username,
+            "resource_package_upload",
+            {
+                "package_id": package_info["package_id"],
+                "filename": package_file.filename,
+                "size": package_info["size"],
+            },
+        )
+
+        return JSONResponse(
+            {
+                "success": True,
+                "package": package_info,
+                "message": "资源包上传成功",
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"上传资源包失败: {str(e)}")
 
@@ -3532,13 +3909,16 @@ async def list_resource_packages(request: Request):
     try:
         manager = ResourcePackageManager()
         packages = manager.list_packages()
-        
-        return JSONResponse({
-            "success": True,
-            "packages": packages,
-        })
+
+        return JSONResponse(
+            {
+                "success": True,
+                "packages": packages,
+            }
+        )
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取资源包列表失败: {str(e)}")
 
@@ -3549,18 +3929,21 @@ async def get_resource_package(request: Request, package_id: str):
     try:
         manager = ResourcePackageManager()
         package_info = manager.get_package(package_id)
-        
+
         if not package_info:
             raise HTTPException(status_code=404, detail="资源包不存在")
-        
-        return JSONResponse({
-            "success": True,
-            "package": package_info,
-        })
+
+        return JSONResponse(
+            {
+                "success": True,
+                "package": package_info,
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取资源包信息失败: {str(e)}")
 
@@ -3570,26 +3953,33 @@ async def delete_resource_package(request: Request, package_id: str):
     """删除资源包"""
     try:
         username = get_current_username(request)
-        
+
         manager = ResourcePackageManager()
         success = manager.delete_package(package_id)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="资源包不存在")
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "resource_package_delete", {
-            "package_id": package_id,
-        })
-        
-        return JSONResponse({
-            "success": True,
-            "message": "资源包已删除",
-        })
+        OperationLogger.log(
+            username,
+            "resource_package_delete",
+            {
+                "package_id": package_id,
+            },
+        )
+
+        return JSONResponse(
+            {
+                "success": True,
+                "message": "资源包已删除",
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"删除资源包失败: {str(e)}")
 
@@ -3600,58 +3990,96 @@ async def get_resource_package_content(request: Request, package_id: str):
     try:
         manager = ResourcePackageManager()
         package_info = manager.get_package(package_id)
-        
+
         if not package_info:
             raise HTTPException(status_code=404, detail="资源包不存在")
-        
+
         # 检查是否为文本文件
-        filename = package_info.get('filename', '')
-        text_extensions = ['.txt', '.json', '.yaml', '.yml', '.xml', '.properties', 
-                          '.conf', '.config', '.ini', '.env', '.sh', '.bash', 
-                          '.py', '.js', '.ts', '.java', '.go', '.rs', '.md', 
-                          '.log', '.sql', '.csv', '.html', '.css', '.scss', 
-                          '.less', '.vue', '.tsx', '.jsx', '.dockerfile', 
-                          '.gitignore', '.gitattributes', '.editorconfig']
-        
+        filename = package_info.get("filename", "")
+        text_extensions = [
+            ".txt",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".xml",
+            ".properties",
+            ".conf",
+            ".config",
+            ".ini",
+            ".env",
+            ".sh",
+            ".bash",
+            ".py",
+            ".js",
+            ".ts",
+            ".java",
+            ".go",
+            ".rs",
+            ".md",
+            ".log",
+            ".sql",
+            ".csv",
+            ".html",
+            ".css",
+            ".scss",
+            ".less",
+            ".vue",
+            ".tsx",
+            ".jsx",
+            ".dockerfile",
+            ".gitignore",
+            ".gitattributes",
+            ".editorconfig",
+        ]
+
         filename_lower = filename.lower()
         is_text_file = any(filename_lower.endswith(ext) for ext in text_extensions)
-        
+
         if not is_text_file:
-            raise HTTPException(status_code=400, detail="该文件不是文本文件，无法在线编辑")
-        
+            raise HTTPException(
+                status_code=400, detail="该文件不是文本文件，无法在线编辑"
+            )
+
         # 读取文件内容
         package_dir = os.path.join("data/resource_packages", package_id)
         file_path = os.path.join(package_dir, filename)
-        
+
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="文件不存在")
-        
+
         # 检查文件大小（限制为1MB）
         file_size = os.path.getsize(file_path)
         if file_size > 1024 * 1024:
-            raise HTTPException(status_code=400, detail="文件过大（超过1MB），无法在线编辑")
-        
+            raise HTTPException(
+                status_code=400, detail="文件过大（超过1MB），无法在线编辑"
+            )
+
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
         except UnicodeDecodeError:
             # 尝试其他编码
             try:
-                with open(file_path, 'r', encoding='gbk') as f:
+                with open(file_path, "r", encoding="gbk") as f:
                     content = f.read()
             except:
-                raise HTTPException(status_code=400, detail="文件编码不支持，无法在线编辑")
-        
-        return JSONResponse({
-            "success": True,
-            "content": content,
-            "filename": filename,
-            "encoding": "utf-8"
-        })
+                raise HTTPException(
+                    status_code=400, detail="文件编码不支持，无法在线编辑"
+                )
+
+        return JSONResponse(
+            {
+                "success": True,
+                "content": content,
+                "filename": filename,
+                "encoding": "utf-8",
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取资源包内容失败: {str(e)}")
 
@@ -3660,84 +4088,123 @@ async def get_resource_package_content(request: Request, package_id: str):
 async def update_resource_package_content(
     request: Request,
     package_id: str,
-    content: str = Body(..., embed=True, description="文件内容")
+    content: str = Body(..., embed=True, description="文件内容"),
 ):
     """更新资源包文件内容（仅文本文件）"""
     try:
         username = get_current_username(request)
-        
+
         manager = ResourcePackageManager()
         package_info = manager.get_package(package_id)
-        
+
         if not package_info:
             raise HTTPException(status_code=404, detail="资源包不存在")
-        
+
         # 检查是否为文本文件
-        filename = package_info.get('filename', '')
-        text_extensions = ['.txt', '.json', '.yaml', '.yml', '.xml', '.properties', 
-                          '.conf', '.config', '.ini', '.env', '.sh', '.bash', 
-                          '.py', '.js', '.ts', '.java', '.go', '.rs', '.md', 
-                          '.log', '.sql', '.csv', '.html', '.css', '.scss', 
-                          '.less', '.vue', '.tsx', '.jsx', '.dockerfile', 
-                          '.gitignore', '.gitattributes', '.editorconfig']
-        
+        filename = package_info.get("filename", "")
+        text_extensions = [
+            ".txt",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".xml",
+            ".properties",
+            ".conf",
+            ".config",
+            ".ini",
+            ".env",
+            ".sh",
+            ".bash",
+            ".py",
+            ".js",
+            ".ts",
+            ".java",
+            ".go",
+            ".rs",
+            ".md",
+            ".log",
+            ".sql",
+            ".csv",
+            ".html",
+            ".css",
+            ".scss",
+            ".less",
+            ".vue",
+            ".tsx",
+            ".jsx",
+            ".dockerfile",
+            ".gitignore",
+            ".gitattributes",
+            ".editorconfig",
+        ]
+
         filename_lower = filename.lower()
         is_text_file = any(filename_lower.endswith(ext) for ext in text_extensions)
-        
+
         if not is_text_file:
-            raise HTTPException(status_code=400, detail="该文件不是文本文件，无法在线编辑")
-        
+            raise HTTPException(
+                status_code=400, detail="该文件不是文本文件，无法在线编辑"
+            )
+
         # 保存文件内容
         package_dir = os.path.join("data/resource_packages", package_id)
         file_path = os.path.join(package_dir, filename)
-        
+
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="文件不存在")
-        
+
         # 备份原文件
-        backup_path = file_path + '.bak'
+        backup_path = file_path + ".bak"
         try:
             import shutil
+
             shutil.copy2(file_path, backup_path)
         except:
             pass
-        
+
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            
+
             # 更新文件大小
-            new_size = len(content.encode('utf-8'))
+            new_size = len(content.encode("utf-8"))
             metadata = manager._load_metadata()
             if package_id in metadata:
-                metadata[package_id]['size'] = new_size
-                metadata[package_id]['updated_at'] = datetime.now().isoformat()
+                metadata[package_id]["size"] = new_size
+                metadata[package_id]["updated_at"] = datetime.now().isoformat()
                 manager._save_metadata(metadata)
-            
+
             # 删除备份文件
             if os.path.exists(backup_path):
                 os.remove(backup_path)
-            
+
             # 记录操作日志
-            OperationLogger.log(username, "resource_package_edit", {
-                "package_id": package_id,
-                "filename": filename,
-            })
-            
-            return JSONResponse({
-                "success": True,
-                "message": "文件已保存",
-            })
+            OperationLogger.log(
+                username,
+                "resource_package_edit",
+                {
+                    "package_id": package_id,
+                    "filename": filename,
+                },
+            )
+
+            return JSONResponse(
+                {
+                    "success": True,
+                    "message": "文件已保存",
+                }
+            )
         except Exception as e:
             # 恢复备份
             if os.path.exists(backup_path):
                 shutil.copy2(backup_path, file_path)
             raise e
-        
+
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"更新资源包内容失败: {str(e)}")
 
@@ -3751,7 +4218,6 @@ class HostRequest(BaseModel):
     password: Optional[str] = None
     private_key: Optional[str] = None
     key_password: Optional[str] = None
-    docker_enabled: bool = False
     description: str = ""
 
 
@@ -3764,6 +4230,7 @@ class HostUpdateRequest(BaseModel):
     private_key: Optional[str] = None
     key_password: Optional[str] = None
     docker_enabled: Optional[bool] = None
+    docker_version: Optional[str] = None
     description: Optional[str] = None
 
 
@@ -3782,25 +4249,27 @@ async def test_ssh_connection(request: Request, ssh_test: SSHTestRequest):
     try:
         username = get_current_username(request)
         manager = HostManager()
-        
+
         result = manager.test_ssh_connection(
             host=ssh_test.host,
             port=ssh_test.port,
             username=ssh_test.username,
             password=ssh_test.password,
             private_key=ssh_test.private_key,
-            key_password=ssh_test.key_password
+            key_password=ssh_test.key_password,
         )
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "host_test_ssh", {
-            "host": ssh_test.host,
-            "success": result.get("success", False)
-        })
-        
+        OperationLogger.log(
+            username,
+            "host_test_ssh",
+            {"host": ssh_test.host, "success": result.get("success", False)},
+        )
+
         return JSONResponse(result)
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"测试SSH连接失败: {str(e)}")
 
@@ -3811,12 +4280,12 @@ async def test_host_ssh_connection(request: Request, host_id: str):
     try:
         username = get_current_username(request)
         manager = HostManager()
-        
+
         # 获取完整的主机信息（包含密码/私钥）
         host_info = manager.get_host_full(host_id)
         if not host_info:
             raise HTTPException(status_code=404, detail="主机不存在")
-        
+
         # 使用已保存的配置进行测试
         result = manager.test_ssh_connection(
             host=host_info["host"],
@@ -3824,21 +4293,33 @@ async def test_host_ssh_connection(request: Request, host_id: str):
             username=host_info["username"],
             password=host_info.get("password"),
             private_key=host_info.get("private_key"),
-            key_password=host_info.get("key_password")
+            key_password=host_info.get("key_password"),
         )
-        
+
+        # 如果测试成功且检测到Docker版本，更新主机信息
+        if result.get("success") and result.get("docker_version"):
+            manager.update_host(
+                host_id=host_id, docker_version=result.get("docker_version")
+            )
+
         # 记录操作日志
-        OperationLogger.log(username, "host_test_ssh", {
-            "host_id": host_id,
-            "host": host_info["host"],
-            "success": result.get("success", False)
-        })
-        
+        OperationLogger.log(
+            username,
+            "host_test_ssh",
+            {
+                "host_id": host_id,
+                "host": host_info["host"],
+                "success": result.get("success", False),
+                "docker_available": result.get("docker_available", False),
+            },
+        )
+
         return JSONResponse(result)
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"测试SSH连接失败: {str(e)}")
 
@@ -3877,7 +4358,7 @@ async def add_host(request: Request, host_req: HostRequest):
     try:
         username = get_current_username(request)
         manager = HostManager()
-        
+
         host_info = manager.add_host(
             name=host_req.name,
             host=host_req.host,
@@ -3886,22 +4367,27 @@ async def add_host(request: Request, host_req: HostRequest):
             password=host_req.password,
             private_key=host_req.private_key,
             key_password=host_req.key_password,
-            docker_enabled=host_req.docker_enabled,
-            description=host_req.description
+            docker_enabled=False,  # 默认不支持，通过检测后自动更新
+            description=host_req.description,
         )
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "host_add", {
-            "host_id": host_info["host_id"],
-            "name": host_info["name"],
-            "host": host_info["host"]
-        })
-        
+        OperationLogger.log(
+            username,
+            "host_add",
+            {
+                "host_id": host_info["host_id"],
+                "name": host_info["name"],
+                "host": host_info["host"],
+            },
+        )
+
         return JSONResponse({"success": True, "host": host_info})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"添加主机失败: {str(e)}")
 
@@ -3912,7 +4398,7 @@ async def update_host(request: Request, host_id: str, host_req: HostUpdateReques
     try:
         username = get_current_username(request)
         manager = HostManager()
-        
+
         host_info = manager.update_host(
             host_id=host_id,
             name=host_req.name,
@@ -3923,18 +4409,18 @@ async def update_host(request: Request, host_id: str, host_req: HostUpdateReques
             private_key=host_req.private_key,
             key_password=host_req.key_password,
             docker_enabled=host_req.docker_enabled,
-            description=host_req.description
+            docker_version=host_req.docker_version,
+            description=host_req.description,
         )
-        
+
         if not host_info:
             raise HTTPException(status_code=404, detail="主机不存在")
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "host_update", {
-            "host_id": host_id,
-            "name": host_info.get("name")
-        })
-        
+        OperationLogger.log(
+            username, "host_update", {"host_id": host_id, "name": host_info.get("name")}
+        )
+
         return JSONResponse({"success": True, "host": host_info})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3942,6 +4428,7 @@ async def update_host(request: Request, host_id: str, host_req: HostUpdateReques
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"更新主机失败: {str(e)}")
 
@@ -3952,16 +4439,14 @@ async def delete_host(request: Request, host_id: str):
     try:
         username = get_current_username(request)
         manager = HostManager()
-        
+
         success = manager.delete_host(host_id)
         if not success:
             raise HTTPException(status_code=404, detail="主机不存在")
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "host_delete", {
-            "host_id": host_id
-        })
-        
+        OperationLogger.log(username, "host_delete", {"host_id": host_id})
+
         return JSONResponse({"success": True, "message": "主机已删除"})
     except HTTPException:
         raise

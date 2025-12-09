@@ -19,7 +19,7 @@
             <th>SSH端口</th>
             <th>用户名</th>
             <th>认证方式</th>
-            <th>Docker编译</th>
+            <th>Docker信息</th>
             <th>描述</th>
             <th>创建时间</th>
             <th class="text-end">操作</th>
@@ -55,18 +55,19 @@
               <span v-else class="badge bg-warning">未配置</span>
             </td>
             <td>
-              <div class="form-check form-switch d-inline-block">
-                <input 
-                  class="form-check-input" 
-                  type="checkbox" 
-                  :checked="host.docker_enabled"
-                  @change="toggleDockerEnabled(host)"
-                  :disabled="updatingDocker"
-                />
-                <label class="form-check-label">
-                  <span v-if="host.docker_enabled" class="badge bg-success">支持</span>
-                  <span v-else class="badge bg-secondary">不支持</span>
-                </label>
+              <div v-if="host.checking_docker" class="text-muted small">
+                <span class="spinner-border spinner-border-sm me-1"></span>检测中...
+              </div>
+              <div v-else>
+                <span v-if="host.docker_available" class="badge bg-success mb-1 d-inline-block">
+                  <i class="fab fa-docker me-1"></i>可用
+                </span>
+                <span v-else class="badge bg-secondary mb-1 d-inline-block">
+                  <i class="fab fa-docker me-1"></i>不可用
+                </span>
+                <div v-if="host.docker_version" class="small text-muted mt-1">
+                  <i class="fas fa-info-circle me-1"></i>{{ host.docker_version }}
+                </div>
               </div>
             </td>
             <td>
@@ -147,7 +148,7 @@
                       required
                     />
                   </div>
-                  <div class="col-md-4">
+                  <div class="col-md-6">
                     <label class="form-label">
                       SSH端口 <span class="text-danger">*</span>
                     </label>
@@ -161,18 +162,6 @@
                       required
                     />
                   </div>
-                  <div class="col-md-8">
-                    <label class="form-label">
-                      SSH用户名 <span class="text-danger">*</span>
-                    </label>
-                    <input 
-                      type="text" 
-                      class="form-control form-control-sm" 
-                      v-model="hostForm.username"
-                      placeholder="例如：root"
-                      required
-                    />
-                  </div>
                   <div class="col-12">
                     <label class="form-label">描述（可选）</label>
                     <input 
@@ -183,16 +172,13 @@
                     />
                   </div>
                   <div class="col-12">
-                    <div class="form-check form-switch">
-                      <input 
-                        class="form-check-input" 
-                        type="checkbox" 
-                        v-model="hostForm.docker_enabled"
-                        id="dockerEnabled"
-                      />
-                      <label class="form-check-label" for="dockerEnabled">
-                        <i class="fab fa-docker me-1"></i>支持Docker编译
-                      </label>
+                    <div v-if="hostForm.docker_version || (editingHost && editingHost.docker_version)" class="small text-muted">
+                      <i class="fab fa-docker me-1"></i>
+                      <strong>Docker版本:</strong> {{ hostForm.docker_version || (editingHost && editingHost.docker_version) || '未知' }}
+                    </div>
+                    <div v-else class="small text-muted">
+                      <i class="fab fa-docker me-1"></i>
+                      Docker信息将在测试连接后自动检测
                     </div>
                   </div>
                 </div>
@@ -237,36 +223,66 @@
 
                 <!-- 密码认证 -->
                 <div v-if="authType === 'password'">
-                  <label class="form-label">
-                    SSH密码 <span class="text-danger">*</span>
-                  </label>
-                  <input 
-                    type="password" 
-                    class="form-control form-control-sm" 
-                    v-model="hostForm.password"
-                    placeholder="请输入SSH密码"
-                    :required="authType === 'password'"
-                  />
-                  <small class="text-muted" v-if="editingHost && editingHost.has_password">
+                  <div class="row g-3">
+                    <div class="col-md-6">
+                      <label class="form-label">
+                        SSH用户名 <span class="text-danger">*</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        class="form-control form-control-sm" 
+                        v-model="hostForm.username"
+                        placeholder="例如：root"
+                        required
+                      />
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label">
+                        SSH密码 <span class="text-danger">*</span>
+                      </label>
+                      <input 
+                        type="password" 
+                        class="form-control form-control-sm" 
+                        v-model="hostForm.password"
+                        placeholder="请输入SSH密码"
+                        :required="authType === 'password'"
+                      />
+                    </div>
+                  </div>
+                  <small class="text-muted d-block mt-1" v-if="editingHost && editingHost.has_password">
                     留空表示不修改密码
                   </small>
                 </div>
 
                 <!-- 密钥认证 -->
                 <div v-if="authType === 'key'">
-                  <label class="form-label">
-                    SSH私钥 <span class="text-danger">*</span>
-                  </label>
-                  <textarea 
-                    class="form-control form-control-sm font-monospace" 
-                    v-model="hostForm.private_key"
-                    rows="4"
-                    placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
-                    :required="authType === 'key'"
-                    style="font-size: 0.8rem;"
-                  ></textarea>
-                  <small class="text-muted d-block mt-1">支持RSA、Ed25519、ECDSA、DSS格式</small>
-                  <div class="mt-2">
+                  <div class="mb-3">
+                    <label class="form-label">
+                      SSH用户名 <span class="text-danger">*</span>
+                    </label>
+                    <input 
+                      type="text" 
+                      class="form-control form-control-sm" 
+                      v-model="hostForm.username"
+                      placeholder="例如：root"
+                      required
+                    />
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label">
+                      SSH私钥 <span class="text-danger">*</span>
+                    </label>
+                    <textarea 
+                      class="form-control form-control-sm font-monospace" 
+                      v-model="hostForm.private_key"
+                      rows="4"
+                      placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
+                      :required="authType === 'key'"
+                      style="font-size: 0.8rem;"
+                    ></textarea>
+                    <small class="text-muted d-block mt-1">支持RSA、Ed25519、ECDSA、DSS格式</small>
+                  </div>
+                  <div>
                     <label class="form-label small">私钥密码（可选）</label>
                     <input 
                       type="password" 
@@ -342,7 +358,6 @@ export default {
       showEditModal: false,
       editingHost: null,
       saving: false,
-      updatingDocker: false,
       testingConnection: null,
       testingConnectionForm: false,
       testResult: null,
@@ -355,7 +370,7 @@ export default {
         password: '',
         private_key: '',
         key_password: '',
-        docker_enabled: false,
+        docker_version: null,
         description: ''
       }
     }
@@ -370,12 +385,51 @@ export default {
         const res = await axios.get('/api/hosts')
         if (res.data.hosts) {
           this.hosts = res.data.hosts || []
+          // 自动检测每个主机的Docker信息
+          this.checkDockerForAllHosts()
         }
       } catch (error) {
         console.error('加载主机列表失败:', error)
         alert('加载主机列表失败: ' + (error.response?.data?.detail || error.message))
       } finally {
         this.loading = false
+      }
+    },
+    async checkDockerForAllHosts() {
+      // 为每个主机异步检测Docker信息
+      for (const host of this.hosts) {
+        // 如果已经有Docker版本信息，跳过检测
+        if (host.docker_version) {
+          continue
+        }
+        // 如果没有认证信息，跳过检测
+        if (!host.has_password && !host.has_private_key) {
+          continue
+        }
+        
+        // 标记为检测中
+        this.$set(host, 'checking_docker', true)
+        
+        try {
+          const res = await axios.post(`/api/hosts/${host.host_id}/test-ssh`)
+          if (res.data.success && res.data.docker_available) {
+            this.$set(host, 'docker_available', true)
+            if (res.data.docker_version) {
+              this.$set(host, 'docker_version', res.data.docker_version)
+              // 更新后端保存版本信息
+              await axios.put(`/api/hosts/${host.host_id}`, {
+                docker_version: res.data.docker_version
+              })
+            }
+          } else {
+            this.$set(host, 'docker_available', false)
+          }
+        } catch (error) {
+          console.error(`检测主机 ${host.name} 的Docker信息失败:`, error)
+          this.$set(host, 'docker_available', false)
+        } finally {
+          this.$set(host, 'checking_docker', false)
+        }
       }
     },
     closeModal() {
@@ -392,7 +446,7 @@ export default {
         password: '',
         private_key: '',
         key_password: '',
-        docker_enabled: false,
+        docker_version: null,
         description: ''
       }
     },
@@ -407,7 +461,7 @@ export default {
         password: '', // 不显示密码
         private_key: '', // 不显示私钥
         key_password: '', // 不显示私钥密码
-        docker_enabled: host.docker_enabled,
+        docker_version: host.docker_version || null,
         description: host.description || ''
       }
       // 根据已有认证方式设置
@@ -449,9 +503,11 @@ export default {
 
         this.testResult = res.data
 
-        // 如果测试成功且检测到Docker，自动勾选Docker编译支持
+        // 如果测试成功且检测到Docker，更新版本信息
         if (this.testResult.success && this.testResult.docker_available) {
-          this.hostForm.docker_enabled = true
+          if (this.testResult.docker_version) {
+            this.hostForm.docker_version = this.testResult.docker_version
+          }
         }
       } catch (error) {
         console.error('测试SSH连接失败:', error)
@@ -471,14 +527,15 @@ export default {
         const res = await axios.post(`/api/hosts/${host.host_id}/test-ssh`)
         
         if (res.data.success) {
-          alert(`✅ 连接成功！\n${res.data.message}${res.data.docker_available ? '\n🐳 Docker可用: ' + res.data.docker_version : ''}`)
-          // 如果检测到Docker可用，自动更新Docker编译支持状态
-          if (res.data.docker_available && !host.docker_enabled) {
-            if (confirm('检测到Docker可用，是否启用Docker编译支持？')) {
-              await axios.put(`/api/hosts/${host.host_id}`, { docker_enabled: true })
-              this.loadHosts()
-            }
+          alert(`✅ 连接成功！\n${res.data.message}${res.data.docker_available ? '\n🐳 Docker可用: ' + res.data.docker_version : '\n⚠️ Docker不可用'}`)
+          // 更新Docker版本信息
+          if (res.data.docker_available && res.data.docker_version) {
+            await axios.put(`/api/hosts/${host.host_id}`, {
+              docker_version: res.data.docker_version
+            })
           }
+          // 重新加载以获取最新状态
+          this.loadHosts()
         } else {
           alert(`❌ 连接失败：${res.data.message}`)
         }
@@ -516,7 +573,9 @@ export default {
         hostData.host = this.hostForm.host
         hostData.port = this.hostForm.port
         hostData.username = this.hostForm.username
-        hostData.docker_enabled = this.hostForm.docker_enabled
+        if (this.hostForm.docker_version) {
+          hostData.docker_version = this.hostForm.docker_version
+        }
         if (this.hostForm.description) {
           hostData.description = this.hostForm.description
         }
@@ -579,29 +638,6 @@ export default {
         alert('保存主机失败: ' + (error.response?.data?.detail || error.message))
       } finally {
         this.saving = false
-      }
-    },
-    async toggleDockerEnabled(host) {
-      if (!confirm(`确定要${host.docker_enabled ? '禁用' : '启用'}该主机的Docker编译支持吗？`)) {
-        return
-      }
-
-      this.updatingDocker = true
-      try {
-        const res = await axios.put(`/api/hosts/${host.host_id}`, {
-          docker_enabled: !host.docker_enabled
-        })
-
-        if (res.data.success) {
-          host.docker_enabled = !host.docker_enabled
-        }
-      } catch (error) {
-        console.error('更新Docker编译支持失败:', error)
-        alert('更新失败: ' + (error.response?.data?.detail || error.message))
-        // 重新加载列表以恢复状态
-        this.loadHosts()
-      } finally {
-        this.updatingDocker = false
       }
     },
     async deleteHost(host) {

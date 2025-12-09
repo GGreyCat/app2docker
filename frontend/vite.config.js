@@ -14,6 +14,16 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0',
+    // 启用 HMR（热模块替换）
+    hmr: {
+      host: 'localhost',
+      port: 3000,
+    },
+    // 文件监听配置（Windows 上可能需要轮询）
+    watch: {
+      usePolling: true, // Windows 上建议启用轮询
+      interval: 1000,   // 轮询间隔（毫秒）
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

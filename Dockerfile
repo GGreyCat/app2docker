@@ -42,10 +42,17 @@ FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/python:3
 RUN sed -i 's|mirrors\.cloud\.aliyuncs\.com|mirrors.aliyun.com|g' /etc/yum.repos.d/*.repo 2>/dev/null || true
 
 ENV TZ=Asia/Shanghai
-RUN dnf install -y tzdata curl git \
+
+# 安装 docker CLI 和 buildx 插件
+RUN dnf install -y tzdata curl git docker-cli \
     && ln -sf /usr/share/zoneinfo=$TZ /etc/localtime \
     && echo "$TZ" > /etc/timezone \
+    && mkdir -p ~/.docker/cli-plugins \
+    && curl -SL https://github.com/docker/buildx/releases/download/v0.12.1/buildx-v0.12.1.linux-amd64 -o ~/.docker/cli-plugins/docker-buildx \
+    && chmod +x ~/.docker/cli-plugins/docker-buildx \
+    && docker buildx version \
     && dnf clean all
+
 
 WORKDIR /app
 
