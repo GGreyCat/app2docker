@@ -38,33 +38,33 @@ RUN npm run build
 # 使用阿里云 Python 镜像加速下载
 FROM ac2-registry.cn-hangzhou.cr.aliyuncs.com/ac2/base:ubuntu22.04-py310
 
-
-# ✅ 1. 确保 apt 源配置正确（兼容无 sources.list 的情况）
+# ✅ 1. 确保 apt 源配置正确
 RUN mkdir -p /etc/apt && \
     echo "deb http://archive.ubuntu.com/ubuntu jammy main universe" > /etc/apt/sources.list && \
     echo "deb http://archive.ubuntu.com/ubuntu jammy-updates main universe" >> /etc/apt/sources.list && \
     echo "deb http://archive.ubuntu.com/ubuntu jammy-security main universe" >> /etc/apt/sources.list
 
-# ✅ 2. 更新并安装 ca-certificates + curl（HTTPS 支持）
+# ✅ 2. 安装基础依赖
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# ✅ 3. 直接下载 GPG 密钥到 keyring（跳过 gpg 校验步骤）
+# ✅ 3. 下载 Docker GPG 密钥（阿里云镜像）并设置正确权限
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg \
-    -o /etc/apt/keyrings/docker.gpg
+    -o /etc/apt/keyrings/docker.gpg && \
+    chmod 644 /etc/apt/keyrings/docker.gpg
 
-# ✅ 4. 添加 Docker APT 源（使用阿里云镜像）
+# ✅ 4. 添加源（必须包含 signed-by=）
 RUN echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
     https://mirrors.aliyun.com/docker-ce/linux/ubuntu \
     jammy stable" \
     | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# ✅ 5. 安装 docker-ce-cli + buildx 插件
+# ✅ 5. 更新 + 安装（现在不会报 GPG 错误）
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     docker-ce-cli \
@@ -75,6 +75,7 @@ RUN apt-get update -y && \
 # ✅ 6. 验证
 RUN echo "✅ docker version:" && docker --version && \
     echo "✅ docker buildx version:" && docker buildx version
+
 
 
 WORKDIR /app
