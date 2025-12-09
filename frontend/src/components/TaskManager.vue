@@ -515,10 +515,15 @@ const pipelineForm = ref({
   template_params: {},
   sub_path: '',
   use_project_dockerfile: true,
+  dockerfile_name: 'Dockerfile',
+  source_id: null,
   push: false,
   trigger_webhook: true,
   trigger_schedule: false,
   cron_expression: '',
+  webhook_branch_filter: false,
+  webhook_use_push_branch: true,
+  branch_tag_mapping: null,
   enabled: true
 })
 let refreshInterval = null
@@ -1077,10 +1082,15 @@ function addToPipeline(task) {
     template_params: config.template_params || {},
     sub_path: config.sub_path || '',
     use_project_dockerfile: config.use_project_dockerfile !== false,
+    dockerfile_name: config.dockerfile_name || task.dockerfile_name || 'Dockerfile',
+    source_id: config.source_id || task.source_id || null,
     push: config.push || false,
     trigger_webhook: true,
     trigger_schedule: false,
     cron_expression: '',
+    webhook_branch_filter: false,
+    webhook_use_push_branch: true,
+    branch_tag_mapping: null,
     enabled: true
   }
   
@@ -1129,8 +1139,13 @@ async function savePipeline() {
       template_params: pipelineForm.value.template_params,
       sub_path: pipelineForm.value.sub_path,
       use_project_dockerfile: pipelineForm.value.use_project_dockerfile,
+      dockerfile_name: pipelineForm.value.dockerfile_name || 'Dockerfile',
+      source_id: pipelineForm.value.source_id || null,
       enabled: pipelineForm.value.enabled,
-      cron_expression: pipelineForm.value.trigger_schedule ? pipelineForm.value.cron_expression : null
+      cron_expression: pipelineForm.value.trigger_schedule ? pipelineForm.value.cron_expression : null,
+      webhook_branch_filter: pipelineForm.value.webhook_branch_filter || false,
+      webhook_use_push_branch: pipelineForm.value.webhook_use_push_branch !== false,
+      branch_tag_mapping: pipelineForm.value.branch_tag_mapping || null
     }
     
     await axios.post('/api/pipelines', payload)
