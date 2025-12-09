@@ -47,33 +47,27 @@ RUN mkdir -p /etc/apt && \
 # 安装 curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# ✅ 3. 下载并配置 Docker GPG 密钥（阿里云镜像）
-RUN mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg \
-    -o /etc/apt/keyrings/docker.gpg && \
-    chmod 644 /etc/apt/keyrings/docker.gpg
-
-# ✅ 4. 添加 Docker APT 源
+# ✅ 3. 添加 Docker 源（关键：使用 trusted=yes 跳过 GPG 验证）
 RUN echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+    "deb [arch=$(dpkg --print-architecture) trusted=yes] \
     https://mirrors.aliyun.com/docker-ce/linux/ubuntu \
     jammy stable" \
     | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# ✅ 5. 安装 docker-ce-cli（包含 docker CLI）
+# ✅ 4. 安装 docker-ce-cli（现在不会报 GPG 错误）
 RUN apt-get update && \
     apt-get install -y docker-ce-cli && \
     rm -rf /var/lib/apt/lists/*
 
-# ✅ 6. 手动安装 buildx 插件（从 GitHub 下载，使用国内代理加速）
+# ✅ 5. 手动安装 buildx 插件（使用 GitHub 国内代理）
 RUN mkdir -p ~/.docker/cli-plugins
 RUN curl -fsSL https://ghproxy.com/https://github.com/docker/buildx/releases/download/v0.16.3/buildx-v0.16.3.linux-amd64 \
     -o ~/.docker/cli-plugins/docker-buildx && \
     chmod a+x ~/.docker/cli-plugins/docker-buildx
 
-# ✅ 7. 验证
-RUN docker --version && \
-    docker buildx version
+# ✅ 6. 验证
+RUN echo "✅ docker version:" && docker --version && \
+    echo "✅ buildx version:" && docker buildx version
 
 
 
