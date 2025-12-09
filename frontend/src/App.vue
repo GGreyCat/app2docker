@@ -25,6 +25,9 @@
               <button class="btn btn-outline-primary btn-sm" @click="showUserCenter = true">
                 <i class="fas fa-user-circle"></i> 用户中心
               </button>
+              <button class="btn btn-outline-primary btn-sm" @click="activeTab = 'logs'">
+                <i class="fas fa-history"></i> 操作日志
+              </button>
               <button class="btn btn-outline-primary btn-sm" @click="showConfig = true">
                 <i class="fas fa-cog"></i> 配置
               </button>
@@ -78,11 +81,6 @@
                 </button>
               </li>
               <li class="nav-item">
-                <button type="button" class="nav-link" :class="{ active: activeTab === 'logs' }" @click="activeTab = 'logs'">
-                  <i class="fas fa-history"></i> 操作日志
-                </button>
-              </li>
-              <li class="nav-item">
                 <button type="button" class="nav-link" :class="{ active: activeTab === 'docker' }" @click="activeTab = 'docker'">
                   <i class="fas fa-server"></i> Docker 管理
                 </button>
@@ -90,6 +88,11 @@
               <li class="nav-item">
                 <button type="button" class="nav-link" :class="{ active: activeTab === 'resource-package' }" @click="activeTab = 'resource-package'">
                   <i class="fas fa-archive"></i> 资源包
+                </button>
+              </li>
+              <li class="nav-item">
+                <button type="button" class="nav-link" :class="{ active: activeTab === 'host' }" @click="activeTab = 'host'">
+                  <i class="fas fa-server"></i> 主机管理
                 </button>
               </li>
             </ul>
@@ -108,6 +111,7 @@
             <DataSourcePanel v-if="activeTab === 'datasource'" />
             <TaskManager v-if="activeTab === 'tasks'" />
             <ResourcePackagePanel v-if="activeTab === 'resource-package'" />
+            <HostManager v-if="activeTab === 'host'" />
           </div>
         </div>
       </div>
@@ -134,6 +138,7 @@ import DataSourcePanel from './components/DataSourcePanel.vue'
 import DockerManager from './components/DockerManager.vue'
 import ResourcePackagePanel from './components/ResourcePackagePanel.vue'
 import ExportPanel from './components/ExportPanel.vue'
+import HostManager from './components/HostManager.vue'
 import LoginPage from './components/LoginPage.vue'
 import OperationLogs from './components/OperationLogs.vue'
 import PipelinePanel from './components/PipelinePanel.vue'

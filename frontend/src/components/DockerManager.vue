@@ -150,6 +150,36 @@
           <i class="fas fa-exclamation-triangle"></i>
           无法获取 Docker 信息，请检查服务状态
         </div>
+        
+        <!-- 编译方式限制说明 -->
+        <div v-if="dockerInfo" class="alert alert-info alert-sm mb-0 mt-2 py-2">
+          <div class="d-flex align-items-start">
+            <i class="fas fa-info-circle me-2 mt-1"></i>
+            <div class="flex-grow-1">
+              <strong>编译方式说明：</strong>
+              <ul class="mb-0 mt-1 small">
+                <li>
+                  <strong>容器内编译（本地 Docker）：</strong>
+                  通过挂载的 docker.sock 连接本地 Docker，仅支持简单的编译任务，适用于基础项目构建
+                </li>
+                <li>
+                  <strong>TCP 2375 编译：</strong>
+                  通过 TCP 2375 端口连接远程 Docker（明文传输，不安全），支持完整的编译功能，适用于复杂项目构建
+                </li>
+                <li>
+                  <strong>远程 Docker 主机（TLS）：</strong>
+                  通过 TLS 加密连接远程 Docker（安全），支持完整的编译功能，适用于复杂项目构建和生产环境
+                </li>
+              </ul>
+              <div v-if="dockerInfo.builder_type === 'local'" class="mt-2 small text-muted">
+                <i class="fas fa-check-circle text-success"></i> 当前模式：<strong>容器内编译（本地 Docker）</strong>
+              </div>
+              <div v-else-if="dockerInfo.builder_type === 'remote' && dockerInfo.remote_host" class="mt-2 small text-muted">
+                <i class="fas fa-check-circle text-success"></i> 当前模式：<strong>{{ getCurrentBuildMode() }}</strong> ({{ dockerInfo.remote_host }})
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -689,6 +719,25 @@ function getBuilderLabel(type) {
 
 function getStatusBadge(state) {
   return { 'running': 'bg-success', 'exited': 'bg-secondary', 'paused': 'bg-warning', 'created': 'bg-info' }[state] || 'bg-secondary'
+}
+
+// 获取当前编译模式名称
+function getCurrentBuildMode() {
+  if (!dockerInfo.value || dockerInfo.value.builder_type !== 'remote') {
+    return ''
+  }
+  const remoteHost = dockerInfo.value.remote_host || ''
+  // 解析端口号
+  const portMatch = remoteHost.match(/:(\d+)$/)
+  if (portMatch) {
+    const port = parseInt(portMatch[1])
+    if (port === 2375) {
+      return 'TCP 2375 编译'
+    } else if (port === 2376) {
+      return '远程 Docker 主机（TLS）'
+    }
+  }
+  return '远程 Docker 主机'
 }
 
 onMounted(() => {

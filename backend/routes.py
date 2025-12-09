@@ -40,6 +40,7 @@ from backend.handlers import (
     parse_dockerfile_services,
 )
 from backend.resource_package_manager import ResourcePackageManager
+from backend.host_manager import HostManager
 from backend.config import (
     load_config,
     save_config,
@@ -3739,3 +3740,230 @@ async def update_resource_package_content(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"更新资源包内容失败: {str(e)}")
+
+
+# === 主机资源管理 ===
+class HostRequest(BaseModel):
+    name: str
+    host: str
+    port: int = 22
+    username: str = ""
+    password: Optional[str] = None
+    private_key: Optional[str] = None
+    key_password: Optional[str] = None
+    docker_enabled: bool = False
+    description: str = ""
+
+
+class HostUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    private_key: Optional[str] = None
+    key_password: Optional[str] = None
+    docker_enabled: Optional[bool] = None
+    description: Optional[str] = None
+
+
+class SSHTestRequest(BaseModel):
+    host: str
+    port: int = 22
+    username: str = ""
+    password: Optional[str] = None
+    private_key: Optional[str] = None
+    key_password: Optional[str] = None
+
+
+@router.post("/hosts/test-ssh")
+async def test_ssh_connection(request: Request, ssh_test: SSHTestRequest):
+    """测试SSH连接"""
+    try:
+        username = get_current_username(request)
+        manager = HostManager()
+        
+        result = manager.test_ssh_connection(
+            host=ssh_test.host,
+            port=ssh_test.port,
+            username=ssh_test.username,
+            password=ssh_test.password,
+            private_key=ssh_test.private_key,
+            key_password=ssh_test.key_password
+        )
+        
+        # 记录操作日志
+        OperationLogger.log(username, "host_test_ssh", {
+            "host": ssh_test.host,
+            "success": result.get("success", False)
+        })
+        
+        return JSONResponse(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"测试SSH连接失败: {str(e)}")
+
+
+@router.post("/hosts/{host_id}/test-ssh")
+async def test_host_ssh_connection(request: Request, host_id: str):
+    """使用已保存的配置测试SSH连接"""
+    try:
+        username = get_current_username(request)
+        manager = HostManager()
+        
+        # 获取完整的主机信息（包含密码/私钥）
+        host_info = manager.get_host_full(host_id)
+        if not host_info:
+            raise HTTPException(status_code=404, detail="主机不存在")
+        
+        # 使用已保存的配置进行测试
+        result = manager.test_ssh_connection(
+            host=host_info["host"],
+            port=host_info["port"],
+            username=host_info["username"],
+            password=host_info.get("password"),
+            private_key=host_info.get("private_key"),
+            key_password=host_info.get("key_password")
+        )
+        
+        # 记录操作日志
+        OperationLogger.log(username, "host_test_ssh", {
+            "host_id": host_id,
+            "host": host_info["host"],
+            "success": result.get("success", False)
+        })
+        
+        return JSONResponse(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"测试SSH连接失败: {str(e)}")
+
+
+@router.get("/hosts")
+async def list_hosts(request: Request):
+    """获取主机列表"""
+    try:
+        username = get_current_username(request)
+        manager = HostManager()
+        hosts = manager.list_hosts()
+        return JSONResponse({"hosts": hosts})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取主机列表失败: {str(e)}")
+
+
+@router.get("/hosts/{host_id}")
+async def get_host(request: Request, host_id: str):
+    """获取主机详情"""
+    try:
+        username = get_current_username(request)
+        manager = HostManager()
+        host = manager.get_host(host_id)
+        if not host:
+            raise HTTPException(status_code=404, detail="主机不存在")
+        return JSONResponse(host)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取主机详情失败: {str(e)}")
+
+
+@router.post("/hosts")
+async def add_host(request: Request, host_req: HostRequest):
+    """添加主机"""
+    try:
+        username = get_current_username(request)
+        manager = HostManager()
+        
+        host_info = manager.add_host(
+            name=host_req.name,
+            host=host_req.host,
+            port=host_req.port,
+            username=host_req.username,
+            password=host_req.password,
+            private_key=host_req.private_key,
+            key_password=host_req.key_password,
+            docker_enabled=host_req.docker_enabled,
+            description=host_req.description
+        )
+        
+        # 记录操作日志
+        OperationLogger.log(username, "host_add", {
+            "host_id": host_info["host_id"],
+            "name": host_info["name"],
+            "host": host_info["host"]
+        })
+        
+        return JSONResponse({"success": True, "host": host_info})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"添加主机失败: {str(e)}")
+
+
+@router.put("/hosts/{host_id}")
+async def update_host(request: Request, host_id: str, host_req: HostUpdateRequest):
+    """更新主机"""
+    try:
+        username = get_current_username(request)
+        manager = HostManager()
+        
+        host_info = manager.update_host(
+            host_id=host_id,
+            name=host_req.name,
+            host=host_req.host,
+            port=host_req.port,
+            username=host_req.username,
+            password=host_req.password,
+            private_key=host_req.private_key,
+            key_password=host_req.key_password,
+            docker_enabled=host_req.docker_enabled,
+            description=host_req.description
+        )
+        
+        if not host_info:
+            raise HTTPException(status_code=404, detail="主机不存在")
+        
+        # 记录操作日志
+        OperationLogger.log(username, "host_update", {
+            "host_id": host_id,
+            "name": host_info.get("name")
+        })
+        
+        return JSONResponse({"success": True, "host": host_info})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"更新主机失败: {str(e)}")
+
+
+@router.delete("/hosts/{host_id}")
+async def delete_host(request: Request, host_id: str):
+    """删除主机"""
+    try:
+        username = get_current_username(request)
+        manager = HostManager()
+        
+        success = manager.delete_host(host_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="主机不存在")
+        
+        # 记录操作日志
+        OperationLogger.log(username, "host_delete", {
+            "host_id": host_id
+        })
+        
+        return JSONResponse({"success": True, "message": "主机已删除"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除主机失败: {str(e)}")

@@ -4,6 +4,7 @@ croniter==5.0.1
 docker==7.1.0
 fastapi==0.115.6
 idna==3.11
+paramiko==3.4.0
 PyJWT==2.10.1
 python-multipart==0.0.20
 PyYAML==6.0.3

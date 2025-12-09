@@ -19,24 +19,90 @@
             <h6 class="mb-3 text-primary">
               <i class="fas fa-server"></i> Docker 构建配置
             </h6>
-            <div class="row g-3 mb-4">
-              <div class="col-md-12">
-                <div class="form-check form-switch">
-                  <input 
-                    v-model="config.use_remote" 
-                    type="checkbox" 
-                    class="form-check-input" 
-                    id="useRemote"
-                  />
-                  <label class="form-check-label" for="useRemote">
-                    <strong>使用远程 Docker</strong>
-                    <small class="text-muted d-block">启用后将连接远程 Docker 服务器进行构建</small>
-                  </label>
+            
+            <!-- 编译模式选择 -->
+            <div class="mb-4">
+              <label class="form-label fw-bold">
+                <i class="fas fa-cogs"></i> 编译模式 <span class="text-danger">*</span>
+              </label>
+              <div class="alert alert-info alert-sm mb-3">
+                <i class="fas fa-info-circle"></i> 
+                <strong>全局设置：</strong>选择的编译模式将应用于所有构建任务
+              </div>
+              <div class="row g-2">
+                <div class="col-md-4">
+                  <div class="card h-100" :class="{ 'border-primary': buildMode === 'local' }" style="cursor: pointer;" @click="buildMode = 'local'">
+                    <div class="card-body">
+                      <div class="form-check">
+                        <input 
+                          v-model="buildMode" 
+                          type="radio" 
+                          value="local"
+                          class="form-check-input" 
+                          id="buildModeLocal"
+                        />
+                        <label class="form-check-label fw-bold" for="buildModeLocal">
+                          <i class="fas fa-cube text-success"></i> 容器内编译
+                        </label>
+                      </div>
+                      <small class="text-muted d-block mt-2">
+                        通过挂载的 docker.sock 连接本地 Docker<br/>
+                        <span class="text-warning"><i class="fas fa-exclamation-triangle"></i> 仅支持简单编译任务</span>
+                      </small>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="card h-100" :class="{ 'border-primary': buildMode === 'tcp2375' }" style="cursor: pointer;" @click="buildMode = 'tcp2375'">
+                    <div class="card-body">
+                      <div class="form-check">
+                        <input 
+                          v-model="buildMode" 
+                          type="radio" 
+                          value="tcp2375"
+                          class="form-check-input" 
+                          id="buildModeTcp2375"
+                        />
+                        <label class="form-check-label fw-bold" for="buildModeTcp2375">
+                          <i class="fas fa-network-wired text-warning"></i> TCP 2375 编译
+                        </label>
+                      </div>
+                      <small class="text-muted d-block mt-2">
+                        通过 TCP 2375 端口连接远程 Docker<br/>
+                        <span class="text-danger"><i class="fas fa-shield-alt"></i> 明文传输，不安全</span>
+                      </small>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="card h-100" :class="{ 'border-primary': buildMode === 'tls' }" style="cursor: pointer;" @click="buildMode = 'tls'">
+                    <div class="card-body">
+                      <div class="form-check">
+                        <input 
+                          v-model="buildMode" 
+                          type="radio" 
+                          value="tls"
+                          class="form-check-input" 
+                          id="buildModeTls"
+                        />
+                        <label class="form-check-label fw-bold" for="buildModeTls">
+                          <i class="fas fa-lock text-success"></i> 远程 Docker（TLS）
+                        </label>
+                      </div>
+                      <small class="text-muted d-block mt-2">
+                        通过 TLS 加密连接远程 Docker<br/>
+                        <span class="text-success"><i class="fas fa-shield-alt"></i> 安全，推荐生产环境</span>
+                      </small>
+                    </div>
+                  </div>
                 </div>
               </div>
+            </div>
+            
+            <div class="row g-3 mb-4">
               
-              <!-- 远程 Docker 配置（仅在启用远程时显示） -->
-              <template v-if="config.use_remote">
+              <!-- 远程 Docker 配置（仅在选择远程模式时显示） -->
+              <template v-if="buildMode === 'tcp2375' || buildMode === 'tls'">
                 <div class="col-12">
                   <div class="alert alert-info mb-3">
                     <i class="fas fa-info-circle"></i> 
@@ -59,23 +125,19 @@
                     v-model.number="config.remote.port" 
                     type="number" 
                     class="form-control" 
-                    placeholder="2375"
+                    :placeholder="buildMode === 'tls' ? '2376' : '2375'"
                   />
+                  <small class="text-muted">
+                    TCP 2375 模式默认端口：2375<br/>
+                    TLS 模式默认端口：2376
+                  </small>
                 </div>
-                <div class="col-md-6">
-                  <div class="form-check">
-                    <input 
-                      v-model="config.remote.use_tls" 
-                      type="checkbox" 
-                      class="form-check-input" 
-                      id="remoteTls"
-                    />
-                    <label class="form-check-label" for="remoteTls">
-                      使用 TLS 加密连接
-                    </label>
+                <div class="col-md-6" v-if="buildMode === 'tls'">
+                  <div class="alert alert-success alert-sm mb-0">
+                    <i class="fas fa-check-circle"></i> TLS 加密连接已启用
                   </div>
                 </div>
-                <div class="col-md-6" v-if="config.remote.use_tls">
+                <div class="col-md-6" v-if="buildMode === 'tls'">
                   <div class="form-check">
                     <input 
                       v-model="config.remote.verify_tls" 
@@ -88,7 +150,7 @@
                     </label>
                   </div>
                 </div>
-                <div class="col-md-12" v-if="config.remote.use_tls">
+                <div class="col-md-12" v-if="buildMode === 'tls'">
                   <label class="form-label">证书路径</label>
                   <input 
                     v-model="config.remote.cert_path" 
@@ -103,135 +165,10 @@
               </template>
             </div>
 
-            <!-- 镜像仓库配置 -->
-            <h6 class="mb-3 text-primary d-flex justify-content-between align-items-center">
-              <span>
-                <i class="fas fa-box"></i> 镜像仓库配置
-              </span>
-              <button type="button" class="btn btn-sm btn-success" @click="addRegistry">
-                <i class="fas fa-plus"></i> 添加仓库
-              </button>
-            </h6>
-
-            <!-- 仓库列表 -->
-            <div v-if="config.registries && config.registries.length > 0" class="mb-4">
-              <div 
-                v-for="(registry, index) in config.registries" 
-                :key="index"
-                class="card mb-3"
-                :class="{ 'border-primary': registry.active }"
-              >
-                <div class="card-header d-flex justify-content-between align-items-center">
-                  <div class="d-flex align-items-center">
-                    <input 
-                      v-model="registry.active"
-                      type="radio"
-                      :name="'active-registry'"
-                      :checked="registry.active"
-                      @change="setActiveRegistry(index)"
-                      class="form-check-input me-2"
-                    />
-                    <strong>{{ registry.name }}</strong>
-                    <span v-if="registry.active" class="badge bg-primary ms-2">激活</span>
-                  </div>
-                  <button 
-                    type="button" 
-                    class="btn btn-sm btn-danger" 
-                    @click="removeRegistry(index)"
-                    :disabled="config.registries.length === 1"
-                  >
-                    <i class="fas fa-trash"></i>
-                  </button>
-                </div>
-                <div class="card-body">
-                  <div class="row g-3">
-                    <div class="col-md-12">
-                      <label class="form-label">仓库名称</label>
-                      <input 
-                        v-model="registry.name" 
-                        type="text" 
-                        class="form-control" 
-                        placeholder="如：Docker Hub"
-                        required
-                      />
-                    </div>
-                    <div class="col-md-6">
-                      <label class="form-label">Registry 地址</label>
-                      <input 
-                        v-model="registry.registry" 
-                        type="text" 
-                        class="form-control" 
-                        placeholder="docker.io"
-                        required
-                      />
-                    </div>
-                    <div class="col-md-6">
-                      <label class="form-label">镜像前缀（可选）</label>
-                      <input 
-                        v-model="registry.registry_prefix" 
-                        type="text" 
-                        class="form-control" 
-                        placeholder="your-namespace"
-                      />
-                    </div>
-                    <div class="col-md-6">
-                      <label class="form-label">账号</label>
-                      <input 
-                        v-model="registry.username" 
-                        type="text" 
-                        class="form-control" 
-                        placeholder="用户名"
-                      />
-                    </div>
-                    <div class="col-md-6">
-                      <label class="form-label">密码</label>
-                      <div class="input-group">
-                        <input 
-                          v-model="registry.password" 
-                          type="password" 
-                          class="form-control" 
-                          placeholder="密码"
-                        />
-                        <button 
-                          type="button" 
-                          class="btn btn-outline-primary" 
-                          @click="testRegistryLogin(index)"
-                          :disabled="testingRegistry === index"
-                          :title="testingRegistry === index ? '测试中...' : '测试登录'"
-                        >
-                          <i 
-                            :class="testingRegistry === index ? 'fas fa-spinner fa-spin' : 'fas fa-vial'"
-                          ></i>
-                          {{ testingRegistry === index ? '测试中...' : '测试' }}
-                        </button>
-                      </div>
-                      <div v-if="registryTestResult[index]" class="mt-2">
-                        <div 
-                          v-if="registryTestResult[index].success" 
-                          class="alert alert-success alert-sm mb-0 py-1"
-                        >
-                          <i class="fas fa-check-circle"></i> {{ registryTestResult[index].message }}
-                        </div>
-                        <div 
-                          v-else 
-                          class="alert alert-danger alert-sm mb-0 py-1"
-                        >
-                          <i class="fas fa-times-circle"></i> {{ registryTestResult[index].message }}
-                          <div v-if="registryTestResult[index].suggestions" class="mt-1">
-                            <small>
-                              <ul class="mb-0 ps-3">
-                                <li v-for="(suggestion, idx) in registryTestResult[index].suggestions" :key="idx">
-                                  {{ suggestion }}
-                                </li>
-                              </ul>
-                            </small>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <!-- 镜像仓库配置已移至数据源配置页面 -->
+            <div class="alert alert-info mb-4">
+              <i class="fas fa-info-circle"></i> 
+              <strong>提示：</strong>镜像仓库配置已移至<strong>数据源配置页面</strong>的"镜像仓库"标签页，请前往该页面进行配置。
             </div>
 
             <!-- 其他配置 -->
@@ -280,16 +217,6 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const config = ref({
-  registries: [
-    {
-      name: 'Docker Hub',
-      registry: 'docker.io',
-      registry_prefix: '',
-      username: '',
-      password: '',
-      active: true
-    }
-  ],
   expose_port: 8080,
   default_push: false,  // 默认不推送
   use_remote: false,  // 是否使用远程 Docker
@@ -302,9 +229,10 @@ const config = ref({
   }
 })
 
+// 编译模式：'local' | 'tcp2375' | 'tls'
+const buildMode = ref('local')
+
 const saving = ref(false)
-const testingRegistry = ref(null) // 正在测试的registry索引
-const registryTestResult = ref({}) // 测试结果，key为索引
 
 async function loadConfig() {
   try {
@@ -315,29 +243,7 @@ async function loadConfig() {
     const docker = res.data.docker || {}
     const remote = docker.remote || {}
     
-    // 处理仓库列表
-    let registries = docker.registries || []
-    
-    // 如果没有仓库，创建一个默认仓库
-    if (!registries || registries.length === 0) {
-      registries = [{
-        name: 'Docker Hub',
-        registry: 'docker.io',
-        registry_prefix: '',
-        username: '',
-        password: '',
-        active: true
-      }]
-    }
-    
-    // 确保至少有一个仓库被激活
-    const hasActive = registries.some(r => r.active)
-    if (!hasActive && registries.length > 0) {
-      registries[0].active = true
-    }
-    
     config.value = {
-      registries: registries,
       expose_port: docker.expose_port || 8080,
       default_push: docker.default_push === true,  // 布尔值必须严格判断
       use_remote: docker.use_remote === true,
@@ -349,7 +255,18 @@ async function loadConfig() {
         verify_tls: remote.verify_tls !== false  // 默认为 true
       }
     }
+    
+    // 根据配置确定编译模式
+    if (!config.value.use_remote) {
+      buildMode.value = 'local'
+    } else if (config.value.remote.use_tls) {
+      buildMode.value = 'tls'
+    } else {
+      buildMode.value = 'tcp2375'
+    }
+    
     console.log('✅ 配置已加载:', config.value)
+    console.log('✅ 编译模式:', buildMode.value)
   } catch (error) {
     console.error('❌ 加载配置失败:', error)
     const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message
@@ -360,21 +277,29 @@ async function loadConfig() {
 async function save() {
   saving.value = true
   try {
-    // 先保存仓库配置
-    const registriesRes = await axios.post('/api/registries', {
-      registries: config.value.registries
-    })
-    console.log('✅ 仓库配置保存成功:', registriesRes.data)
+    // 根据选择的编译模式更新配置
+    if (buildMode.value === 'local') {
+      config.value.use_remote = false
+    } else {
+      config.value.use_remote = true
+      if (buildMode.value === 'tls') {
+        config.value.remote.use_tls = true
+        // TLS 模式默认端口 2376
+        if (!config.value.remote.port || config.value.remote.port === 2375) {
+          config.value.remote.port = 2376
+        }
+      } else if (buildMode.value === 'tcp2375') {
+        config.value.remote.use_tls = false
+        // TCP 2375 模式默认端口 2375
+        if (!config.value.remote.port || config.value.remote.port === 2376) {
+          config.value.remote.port = 2375
+        }
+      }
+    }
     
-    // 然后保存其他配置
+    // 保存配置
     const formData = new FormData()
     
-    // 添加基础配置（使用激活仓库的配置进行向后兼容）
-    const activeRegistry = config.value.registries.find(r => r.active) || config.value.registries[0]
-    formData.append('registry', activeRegistry.registry)
-    formData.append('registry_prefix', activeRegistry.registry_prefix)
-    formData.append('username', activeRegistry.username)
-    formData.append('password', activeRegistry.password)
     formData.append('expose_port', String(config.value.expose_port))
     formData.append('default_push', config.value.default_push ? 'on' : 'off')
     
@@ -405,96 +330,25 @@ async function save() {
   }
 }
 
-// 添加仓库
-function addRegistry() {
-  config.value.registries.push({
-    name: `仓库 ${config.value.registries.length + 1}`,
-    registry: 'docker.io',
-    registry_prefix: '',
-    username: '',
-    password: '',
-    active: false
-  })
-}
-
-// 移除仓库
-function removeRegistry(index) {
-  if (config.value.registries.length === 1) {
-    alert('至少需要保留一个仓库')
-    return
-  }
-  
-  const wasActive = config.value.registries[index].active
-  config.value.registries.splice(index, 1)
-  
-  // 如果删除的是激活仓库，激活第一个
-  if (wasActive && config.value.registries.length > 0) {
-    config.value.registries[0].active = true
-  }
-}
-
-// 设置激活仓库
-function setActiveRegistry(index) {
-  config.value.registries.forEach((reg, i) => {
-    reg.active = (i === index)
-  })
-}
-
-// 测试Registry登录
-async function testRegistryLogin(index) {
-  const registry = config.value.registries[index]
-  
-  if (!registry.registry) {
-    alert('请先填写Registry地址')
-    return
-  }
-  
-  if (!registry.username || !registry.password) {
-    alert('请先填写用户名和密码')
-    return
-  }
-  
-  testingRegistry.value = index
-  // 清除之前的测试结果
-  registryTestResult.value[index] = null
-  
-  try {
-    const res = await axios.post('/api/registries/test', {
-      name: registry.name,
-      registry: registry.registry,
-      username: registry.username,
-      password: registry.password
-    })
-    
-    registryTestResult.value[index] = {
-      success: res.data.success,
-      message: res.data.message,
-      details: res.data.details,
-      suggestions: res.data.suggestions
-    }
-    
-    if (res.data.success) {
-      console.log('✅ Registry登录测试成功:', res.data)
-    } else {
-      console.warn('⚠️ Registry登录测试失败:', res.data)
-    }
-  } catch (error) {
-    console.error('❌ Registry登录测试异常:', error)
-    const errorData = error.response?.data || {}
-    registryTestResult.value[index] = {
-      success: false,
-      message: errorData.message || errorData.detail || '测试失败',
-      details: errorData.details,
-      suggestions: errorData.suggestions
-    }
-  } finally {
-    testingRegistry.value = null
-  }
-}
 
 function close() {
   emit('update:modelValue', false)
 }
+
+// 监听编译模式变化，自动更新端口
+watch(buildMode, (newMode) => {
+  if (newMode === 'tls') {
+    // TLS 模式默认端口 2376
+    if (!config.value.remote.port || config.value.remote.port === 2375) {
+      config.value.remote.port = 2376
+    }
+  } else if (newMode === 'tcp2375') {
+    // TCP 2375 模式默认端口 2375
+    if (!config.value.remote.port || config.value.remote.port === 2376) {
+      config.value.remote.port = 2375
+    }
+  }
+})
 
 watch(
   () => props.modelValue,

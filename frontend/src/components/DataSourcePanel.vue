@@ -1,34 +1,60 @@
 <template>
   <div class="data-source-panel">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="mb-0">
-        <i class="fas fa-database"></i> Git 数据源管理
-      </h5>
-      <div class="d-flex gap-2">
+    <!-- Tab 导航 -->
+    <ul class="nav nav-tabs mb-3">
+      <li class="nav-item">
         <button 
-          class="btn btn-outline-secondary btn-sm" 
-          @click="loadSources"
-          :disabled="loading"
-          title="刷新列表"
+          type="button" 
+          class="nav-link" 
+          :class="{ active: activeSubTab === 'git' }" 
+          @click="activeSubTab = 'git'"
         >
-          <i class="fas fa-sync-alt" :class="{ 'fa-spin': loading }"></i> 刷新
+          <i class="fas fa-code-branch"></i> Git 数据源
         </button>
-        <button class="btn btn-primary btn-sm" @click="showCreateModal">
-          <i class="fas fa-plus"></i> 新建数据源
+      </li>
+      <li class="nav-item">
+        <button 
+          type="button" 
+          class="nav-link" 
+          :class="{ active: activeSubTab === 'registry' }" 
+          @click="activeSubTab = 'registry'"
+        >
+          <i class="fas fa-box"></i> 镜像仓库
         </button>
-      </div>
-    </div>
+      </li>
+    </ul>
 
-    <!-- 数据源列表 -->
-    <div v-if="loading" class="text-center py-5">
+    <!-- Git 数据源 Tab -->
+    <div v-show="activeSubTab === 'git'">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">
+          <i class="fas fa-database"></i> Git 数据源管理
+        </h5>
+        <div class="d-flex gap-2">
+          <button 
+            class="btn btn-outline-secondary btn-sm" 
+            @click="loadSources"
+            :disabled="loading"
+            title="刷新列表"
+          >
+            <i class="fas fa-sync-alt" :class="{ 'fa-spin': loading }"></i> 刷新
+          </button>
+          <button class="btn btn-primary btn-sm" @click="showCreateModal">
+            <i class="fas fa-plus"></i> 新建数据源
+          </button>
+        </div>
+      </div>
+
+      <!-- 数据源列表 -->
+      <div v-if="loading" class="text-center py-5">
       <span class="spinner-border spinner-border-sm"></span> 加载中...
     </div>
-    <div v-else-if="sources.length === 0" class="text-center py-5 text-muted">
-      <i class="fas fa-inbox fa-3x mb-3"></i>
-      <p class="mb-0">暂无数据源</p>
-      <p class="text-muted small mt-2">在源码构建或流水线中验证 Git 仓库时可保存为数据源</p>
-    </div>
-    <div v-else class="row g-4">
+      <div v-else-if="sources.length === 0" class="text-center py-5 text-muted">
+        <i class="fas fa-inbox fa-3x mb-3"></i>
+        <p class="mb-0">暂无数据源</p>
+        <p class="text-muted small mt-2">在源码构建或流水线中验证 Git 仓库时可保存为数据源</p>
+      </div>
+      <div v-else class="row g-4">
       <div v-for="source in sources" :key="source.source_id" class="col-12 col-md-6 col-xl-4">
         <div class="card h-100 shadow-sm">
           <div class="card-header bg-white">
@@ -117,6 +143,7 @@
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
 
@@ -480,6 +507,150 @@
       </div>
     </div>
     <div v-if="showCommitModal" class="modal-backdrop fade show" style="z-index: 1065;"></div>
+
+    <!-- 镜像仓库 Tab -->
+    <div v-show="activeSubTab === 'registry'">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">
+          <i class="fas fa-box"></i> 镜像仓库配置
+        </h5>
+        <button type="button" class="btn btn-success btn-sm" @click="addRegistry">
+          <i class="fas fa-plus"></i> 添加仓库
+        </button>
+      </div>
+
+      <!-- 仓库列表 -->
+      <div v-if="registries && registries.length > 0" class="mb-4">
+        <div 
+          v-for="(registry, index) in registries" 
+          :key="index"
+          class="card mb-3"
+          :class="{ 'border-primary': registry.active }"
+        >
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center">
+              <input 
+                v-model="registry.active"
+                type="radio"
+                :name="'active-registry'"
+                :checked="registry.active"
+                @change="setActiveRegistry(index)"
+                class="form-check-input me-2"
+              />
+              <strong>{{ registry.name }}</strong>
+              <span v-if="registry.active" class="badge bg-primary ms-2">激活</span>
+            </div>
+            <button 
+              type="button" 
+              class="btn btn-sm btn-danger" 
+              @click="removeRegistry(index)"
+              :disabled="registries.length === 1"
+            >
+              <i class="fas fa-trash"></i>
+            </button>
+          </div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-md-12">
+                <label class="form-label">仓库名称</label>
+                <input 
+                  v-model="registry.name" 
+                  type="text" 
+                  class="form-control" 
+                  placeholder="如：Docker Hub"
+                  required
+                />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Registry 地址</label>
+                <input 
+                  v-model="registry.registry" 
+                  type="text" 
+                  class="form-control" 
+                  placeholder="docker.io"
+                  required
+                />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">镜像前缀（可选）</label>
+                <input 
+                  v-model="registry.registry_prefix" 
+                  type="text" 
+                  class="form-control" 
+                  placeholder="your-namespace"
+                />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">账号</label>
+                <input 
+                  v-model="registry.username" 
+                  type="text" 
+                  class="form-control" 
+                  placeholder="用户名"
+                />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">密码</label>
+                <div class="input-group">
+                  <input 
+                    v-model="registry.password" 
+                    type="password" 
+                    class="form-control" 
+                    placeholder="密码"
+                  />
+                  <button 
+                    type="button" 
+                    class="btn btn-outline-primary" 
+                    @click="testRegistryLogin(index)"
+                    :disabled="testingRegistry === index"
+                    :title="testingRegistry === index ? '测试中...' : '测试登录'"
+                  >
+                    <i 
+                      :class="testingRegistry === index ? 'fas fa-spinner fa-spin' : 'fas fa-vial'"
+                    ></i>
+                    {{ testingRegistry === index ? '测试中...' : '测试' }}
+                  </button>
+                </div>
+                <div v-if="registryTestResult[index]" class="mt-2">
+                  <div 
+                    v-if="registryTestResult[index].success" 
+                    class="alert alert-success alert-sm mb-0 py-1"
+                  >
+                    <i class="fas fa-check-circle"></i> {{ registryTestResult[index].message }}
+                  </div>
+                  <div 
+                    v-else 
+                    class="alert alert-danger alert-sm mb-0 py-1"
+                  >
+                    <i class="fas fa-times-circle"></i> {{ registryTestResult[index].message }}
+                    <div v-if="registryTestResult[index].suggestions" class="mt-1">
+                      <small>
+                        <ul class="mb-0 ps-3">
+                          <li v-for="(suggestion, idx) in registryTestResult[index].suggestions" :key="idx">
+                            {{ suggestion }}
+                          </li>
+                        </ul>
+                      </small>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-else class="text-center py-5 text-muted">
+        <i class="fas fa-box fa-3x mb-3"></i>
+        <p class="mb-0">暂无镜像仓库</p>
+        <p class="text-muted small mt-2">点击"添加仓库"按钮添加镜像仓库配置</p>
+      </div>
+      <div class="d-flex justify-content-end mt-3">
+        <button type="button" class="btn btn-primary" @click="saveRegistries" :disabled="savingRegistries">
+          <i class="fas fa-save"></i> 
+          {{ savingRegistries ? '保存中...' : '保存配置' }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -491,6 +662,8 @@ import axios from 'axios'
 import { onMounted, ref, watch } from 'vue'
 import { Codemirror } from 'vue-codemirror'
 
+const activeSubTab = ref('git')  // 'git' 或 'registry'
+
 const sources = ref([])
 const loading = ref(false)
 const refreshing = ref(null)
@@ -498,6 +671,12 @@ const showModal = ref(false)
 const editingSource = ref(null)
 const verifying = ref(false)
 const isVerified = ref(false)  // 验证状态标识
+
+// 镜像仓库相关状态
+const registries = ref([])
+const savingRegistries = ref(false)
+const testingRegistry = ref(null)
+const registryTestResult = ref({})
 
 // Dockerfile 管理相关状态
 const showDockerfileModal = ref(false)
@@ -567,8 +746,144 @@ watch(() => formData.value.git_url, (newUrl) => {
   }
 })
 
+// 监听 Tab 切换，加载对应数据
+watch(activeSubTab, (newTab) => {
+  if (newTab === 'registry') {
+    loadRegistries()
+  }
+})
+
+// 镜像仓库相关函数
+async function loadRegistries() {
+  try {
+    const res = await axios.get('/api/get-config')
+    const docker = res.data.docker || {}
+    let registriesList = docker.registries || []
+    
+    if (!registriesList || registriesList.length === 0) {
+      registriesList = [{
+        name: 'Docker Hub',
+        registry: 'docker.io',
+        registry_prefix: '',
+        username: '',
+        password: '',
+        active: true
+      }]
+    }
+    
+    const hasActive = registriesList.some(r => r.active)
+    if (!hasActive && registriesList.length > 0) {
+      registriesList[0].active = true
+    }
+    
+    registries.value = registriesList
+  } catch (error) {
+    console.error('加载镜像仓库配置失败:', error)
+    alert('加载镜像仓库配置失败')
+  }
+}
+
+function addRegistry() {
+  registries.value.push({
+    name: `仓库 ${registries.value.length + 1}`,
+    registry: 'docker.io',
+    registry_prefix: '',
+    username: '',
+    password: '',
+    active: false
+  })
+}
+
+function removeRegistry(index) {
+  if (registries.value.length === 1) {
+    alert('至少需要保留一个仓库')
+    return
+  }
+  
+  const wasActive = registries.value[index].active
+  registries.value.splice(index, 1)
+  
+  if (wasActive && registries.value.length > 0) {
+    registries.value[0].active = true
+  }
+}
+
+function setActiveRegistry(index) {
+  registries.value.forEach((reg, i) => {
+    reg.active = (i === index)
+  })
+}
+
+async function testRegistryLogin(index) {
+  const registry = registries.value[index]
+  
+  if (!registry.registry) {
+    alert('请先填写Registry地址')
+    return
+  }
+  
+  if (!registry.username || !registry.password) {
+    alert('请先填写用户名和密码')
+    return
+  }
+  
+  testingRegistry.value = index
+  registryTestResult.value[index] = null
+  
+  try {
+    const res = await axios.post('/api/registries/test', {
+      name: registry.name,
+      registry: registry.registry,
+      username: registry.username,
+      password: registry.password
+    })
+    
+    registryTestResult.value[index] = {
+      success: res.data.success,
+      message: res.data.message,
+      details: res.data.details,
+      suggestions: res.data.suggestions
+    }
+    
+    if (res.data.success) {
+      console.log('✅ Registry登录测试成功:', res.data)
+    } else {
+      console.warn('⚠️ Registry登录测试失败:', res.data)
+    }
+  } catch (error) {
+    console.error('❌ Registry登录测试异常:', error)
+    const errorData = error.response?.data || {}
+    registryTestResult.value[index] = {
+      success: false,
+      message: errorData.message || errorData.detail || '测试失败',
+      details: errorData.details,
+      suggestions: errorData.suggestions
+    }
+  } finally {
+    testingRegistry.value = null
+  }
+}
+
+async function saveRegistries() {
+  savingRegistries.value = true
+  try {
+    const res = await axios.post('/api/registries', {
+      registries: registries.value
+    })
+    console.log('✅ 仓库配置保存成功:', res.data)
+    alert('镜像仓库配置保存成功')
+  } catch (error) {
+    console.error('❌ 保存镜像仓库配置失败:', error)
+    const errorMsg = error.response?.data?.detail || error.response?.data?.error || '保存配置失败'
+    alert(errorMsg)
+  } finally {
+    savingRegistries.value = false
+  }
+}
+
 onMounted(() => {
   loadSources()
+  loadRegistries()
 })
 
 async function loadSources() {
