@@ -24,55 +24,8 @@
     <div v-else>
       <!-- 统计卡片 -->
       <div class="row g-3 mb-4">
-        <!-- 正在运行的任务 -->
-        <div class="col-12 col-md-6 col-lg-4" v-if="runningTasksList.length > 0">
-          <div class="card h-100 shadow-sm border-warning running-tasks-card" @click="goToTasks" style="cursor: pointer;">
-            <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
-              <h6 class="mb-0">
-                <i class="fas fa-spinner fa-spin text-warning"></i> 正在运行的任务
-                <span class="badge bg-warning ms-2">{{ runningTasksList.length }}</span>
-              </h6>
-              <button class="btn btn-sm btn-outline-warning" @click.stop="goToTasks">
-                查看详情 <i class="fas fa-arrow-right ms-1"></i>
-              </button>
-            </div>
-            <div class="card-body">
-              <div class="list-group list-group-flush">
-                <div 
-                  v-for="task in runningTasksList.slice(0, 5)" 
-                  :key="task.task_id" 
-                  class="list-group-item px-0 py-2 border-0"
-                >
-                  <div class="d-flex justify-content-between align-items-start">
-                    <div class="flex-grow-1">
-                      <div class="d-flex align-items-center mb-1">
-                        <code class="small me-2">{{ task.task_id?.substring(0, 8) || '-' }}</code>
-                        <span class="badge" :class="getTaskTypeBadge(task.task_category)">
-                          {{ getTaskTypeLabel(task.task_category) }}
-                        </span>
-                      </div>
-                      <div v-if="task.image || task.task_name" class="text-muted small">
-                        {{ task.image || task.task_name || '-' }}
-                        <span v-if="task.tag" class="ms-1">:{{ task.tag }}</span>
-                      </div>
-                    </div>
-                    <div class="text-end">
-                      <span class="badge bg-warning text-dark">
-                        <i class="fas fa-spinner fa-spin"></i> 运行中
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div v-if="runningTasksList.length > 5" class="list-group-item px-0 py-2 border-0 text-center text-muted small">
-                  还有 {{ runningTasksList.length - 5 }} 个任务运行中...
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- 任务统计 -->
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-md-4">
           <div class="card h-100 shadow-sm border-primary">
             <div class="card-body">
               <div class="d-flex align-items-center">
@@ -103,7 +56,7 @@
         </div>
 
         <!-- 流水线统计 -->
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-md-4">
           <div class="card h-100 shadow-sm border-info">
             <div class="card-body">
               <div class="d-flex align-items-center">
@@ -134,7 +87,7 @@
         </div>
 
         <!-- 数据源统计 -->
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-md-4">
           <div class="card h-100 shadow-sm border-success">
             <div class="card-body">
               <div class="d-flex align-items-center">
@@ -161,7 +114,7 @@
         </div>
 
         <!-- 镜像仓库统计 -->
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-md-4">
           <div class="card h-100 shadow-sm border-warning">
             <div class="card-body">
               <div class="d-flex align-items-center">
@@ -456,9 +409,7 @@ const emit = defineEmits(['navigate'])
 
 const loading = ref(false)
 const stats = ref(null)
-const runningTasksList = ref([])
 const systemInfo = ref(null)
-let refreshTimer = null
 
 // 加载仪表盘数据
 async function loadDashboard() {
@@ -513,15 +464,6 @@ async function loadDashboard() {
     const exportStorage = (exportStats.total_size_mb || 0) * 1024 * 1024 // MB to bytes
     const totalStorage = buildStorage + exportStorage
 
-    // 获取正在运行的任务
-    const running = tasks
-      .filter(t => t.status === 'running')
-      .sort((a, b) => {
-        const timeA = new Date(a.created_at || 0).getTime()
-        const timeB = new Date(b.created_at || 0).getTime()
-        return timeB - timeA
-      })
-
     stats.value = {
       totalTasks,
       runningTasks,
@@ -538,8 +480,6 @@ async function loadDashboard() {
       exportStorage,
       totalStorage
     }
-
-    runningTasksList.value = running
     
     // 加载系统信息
     if (dockerInfoRes && dockerInfoRes.data) {
@@ -629,54 +569,8 @@ function getStatusBadge(status) {
   return map[status] || 'bg-secondary'
 }
 
-// 跳转到任务管理页面
-function goToTasks() {
-  emit('navigate', 'tasks', { status: 'running' })
-}
-
-// 定时刷新运行中的任务
-function startRefreshTimer() {
-  // 清除之前的定时器
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-  }
-  
-  // 每10秒刷新一次运行中的任务
-  refreshTimer = setInterval(async () => {
-    if (!loading.value) {
-      try {
-        const tasksRes = await axios.get('/api/tasks')
-        const tasks = tasksRes.data.tasks || []
-        const running = tasks
-          .filter(t => t.status === 'running')
-          .sort((a, b) => {
-            const timeA = new Date(a.created_at || 0).getTime()
-            const timeB = new Date(b.created_at || 0).getTime()
-            return timeB - timeA
-          })
-        runningTasksList.value = running
-        
-        // 更新统计中的运行任务数
-        if (stats.value) {
-          stats.value.runningTasks = running.length
-          stats.value.totalTasks = tasks.length
-        }
-      } catch (error) {
-        console.error('刷新运行任务失败:', error)
-      }
-    }
-  }, 10000) // 10秒刷新一次
-}
-
 onMounted(() => {
   loadDashboard()
-  startRefreshTimer()
-})
-
-onUnmounted(() => {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-  }
 })
 </script>
 
@@ -738,21 +632,4 @@ code {
   background-color: #f8f9fa !important;
 }
 
-.running-tasks-card {
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.running-tasks-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
-  border-color: #ffc107 !important;
-}
-
-.running-tasks-card .list-group-item {
-  transition: background-color 0.2s;
-}
-
-.running-tasks-card .list-group-item:hover {
-  background-color: #fff3cd;
-}
 </style>
