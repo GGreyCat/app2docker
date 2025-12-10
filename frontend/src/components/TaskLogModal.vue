@@ -69,28 +69,35 @@
               </div>
             </div>
             
-            <!-- 任务概况（仅已完成/失败/停止时显示） -->
+            <!-- 任务概况按钮（仅已完成/失败/停止时显示） -->
             <div 
               v-if="task && (task.status === 'failed' || task.status === 'completed' || task.status === 'stopped')" 
-              class="p-3 border-bottom" 
-              :class="getStatusSummaryClass(task.status)"
+              class="p-2 border-bottom bg-light"
             >
-              <div class="d-flex align-items-center mb-2">
+              <button 
+                type="button" 
+                class="btn btn-sm w-100 text-start"
+                :class="showTaskSummary ? 'btn-outline-primary' : 'btn-outline-secondary'"
+                @click="showTaskSummary = !showTaskSummary"
+              >
                 <i :class="getStatusIcon(task.status)" class="me-2"></i>
                 <strong>{{ getStatusText(task.status) }}</strong>
-              </div>
-              <div v-if="task.status === 'failed' && task.error" class="mt-2">
-                <strong>错误信息：</strong>
-                <pre class="mb-0 mt-1 p-2 bg-dark text-light rounded" style="font-size: 0.85rem; max-height: 150px; overflow-y: auto;">{{ task.error }}</pre>
-              </div>
-              <div v-if="task.status === 'completed'" class="mt-2 small">
-                <div><strong>创建时间：</strong>{{ formatTime(task.created_at) }}</div>
-                <div v-if="task.completed_at"><strong>完成时间：</strong>{{ formatTime(task.completed_at) }}</div>
-                <div v-if="task.completed_at"><strong>耗时：</strong>{{ calculateDuration(task.created_at, task.completed_at) }}</div>
-              </div>
-              <div v-if="task.status === 'stopped'" class="mt-2 small">
-                <div><strong>创建时间：</strong>{{ formatTime(task.created_at) }}</div>
-                <div v-if="task.completed_at"><strong>停止时间：</strong>{{ formatTime(task.completed_at) }}</div>
+                <i class="fas float-end mt-1" :class="showTaskSummary ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+              </button>
+              <div v-if="showTaskSummary" class="mt-2 p-3 rounded" :class="getStatusSummaryClass(task.status)">
+                <div v-if="task.status === 'failed' && task.error" class="mb-3">
+                  <strong>错误信息：</strong>
+                  <pre class="mb-0 mt-1 p-2 bg-dark text-light rounded" style="font-size: 0.85rem; max-height: 150px; overflow-y: auto;">{{ task.error }}</pre>
+                </div>
+                <div v-if="task.status === 'completed'" class="small">
+                  <div class="mb-1"><strong>创建时间：</strong>{{ formatTime(task.created_at) }}</div>
+                  <div v-if="task.completed_at" class="mb-1"><strong>完成时间：</strong>{{ formatTime(task.completed_at) }}</div>
+                  <div v-if="task.completed_at"><strong>耗时：</strong>{{ calculateDuration(task.created_at, task.completed_at) }}</div>
+                </div>
+                <div v-if="task.status === 'stopped'" class="small">
+                  <div class="mb-1"><strong>创建时间：</strong>{{ formatTime(task.created_at) }}</div>
+                  <div v-if="task.completed_at"><strong>停止时间：</strong>{{ formatTime(task.completed_at) }}</div>
+                </div>
               </div>
             </div>
             
@@ -136,6 +143,7 @@ const logContainer = ref(null)
 const logPollingInterval = ref(null)
 const autoScroll = ref(true)
 const refreshingLogs = ref(false)
+const showTaskSummary = ref(false) // 任务概况是否展开
 
 // 计算任务是否正在运行
 const isTaskRunning = computed(() => {
