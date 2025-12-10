@@ -2301,8 +2301,10 @@ class BuildManager:
 
             log(f"✅ 已复制 {copied_count} 个文件/目录，跳过 {excluded_count} 个\n")
 
-            # 检查项目中是否存在 Dockerfile（使用自定义文件名）
-            project_dockerfile_path = os.path.join(source_dir, dockerfile_name)
+            # 检查项目中是否存在 Dockerfile（使用自定义文件名或路径）
+            # 规范化路径分隔符（Git 路径使用 /，但 Windows 使用 \）
+            normalized_dockerfile_name = dockerfile_name.replace('/', os.sep).replace('\\', os.sep)
+            project_dockerfile_path = os.path.join(source_dir, normalized_dockerfile_name)
             has_project_dockerfile = os.path.exists(project_dockerfile_path)
 
             # 决定使用项目中的 Dockerfile 还是模板

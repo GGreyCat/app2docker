@@ -316,7 +316,7 @@
             </label>
           </div>
           <div v-if="buildConfig.useProjectDockerfile" class="mt-2">
-            <label class="form-label">Dockerfile 文件名</label>
+            <label class="form-label">Dockerfile 文件</label>
             <div v-if="scanningDockerfiles" class="mb-2">
               <span class="spinner-border spinner-border-sm me-2"></span>
               <small class="text-muted">正在扫描项目中的 Dockerfile...</small>
@@ -326,13 +326,13 @@
               class="form-select form-select-sm"
               :disabled="scanningDockerfiles"
             >
-              <option value="Dockerfile">Dockerfile（默认）</option>
+              <option value="Dockerfile">Dockerfile（默认，根目录）</option>
               <option
                 v-for="dockerfile in availableDockerfiles"
-                :key="dockerfile"
-                :value="dockerfile"
+                :key="dockerfile.path"
+                :value="dockerfile.path"
               >
-                {{ dockerfile }}
+                {{ dockerfile.path }} {{ dockerfile.path !== dockerfile.name ? `(${dockerfile.name})` : '' }}
               </option>
             </select>
             <small v-if="dockerfilesError" class="text-danger d-block mt-1">
@@ -1990,20 +1990,29 @@ async function scanProjectDockerfiles() {
     });
 
     if (response.data && response.data.dockerfiles) {
-      // 提取文件名（从路径中提取）
-      const dockerfileNames = response.data.dockerfiles.map(path => {
-        // 如果路径包含目录，只取文件名
+      // 保存完整路径信息（包含路径和文件名）
+      const dockerfileList = response.data.dockerfiles.map(path => {
         const parts = path.split('/');
-        return parts[parts.length - 1];
+        return {
+          path: path,  // 完整路径，如 "frontend/Dockerfile"
+          name: parts[parts.length - 1]  // 文件名，如 "Dockerfile"
+        };
       });
       
-      // 去重并排序
-      availableDockerfiles.value = [...new Set(dockerfileNames)].sort();
+      // 按路径排序
+      dockerfileList.sort((a, b) => {
+        // 根目录的 Dockerfile 优先
+        if (a.path === 'Dockerfile') return -1;
+        if (b.path === 'Dockerfile') return 1;
+        return a.path.localeCompare(b.path);
+      });
       
-      // 如果扫描到 Dockerfile，默认选择第一个（如果不是默认的 Dockerfile）
-      if (availableDockerfiles.value.length > 0 && 
-          !availableDockerfiles.value.includes('Dockerfile')) {
-        buildConfig.value.dockerfileName = availableDockerfiles.value[0];
+      availableDockerfiles.value = dockerfileList;
+      
+      // 如果扫描到 Dockerfile，默认选择第一个（优先选择根目录的 Dockerfile）
+      if (availableDockerfiles.value.length > 0) {
+        const rootDockerfile = availableDockerfiles.value.find(df => df.path === 'Dockerfile');
+        buildConfig.value.dockerfileName = rootDockerfile ? 'Dockerfile' : availableDockerfiles.value[0].path;
       } else {
         buildConfig.value.dockerfileName = 'Dockerfile';
       }
