@@ -15,39 +15,44 @@ PIPELINES_FILE = "data/pipelines.json"
 
 class PipelineManager:
     """流水线管理器"""
-    
+
     def __init__(self):
         self.lock = threading.RLock()
         self.pipelines = {}
         self._load_pipelines()
-    
+
     def _load_pipelines(self):
         """从文件加载流水线配置"""
         if not os.path.exists(PIPELINES_FILE):
             return
-        
+
         try:
-            with open(PIPELINES_FILE, 'r', encoding='utf-8') as f:
+            with open(PIPELINES_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                self.pipelines = data.get('pipelines', {})
+                self.pipelines = data.get("pipelines", {})
                 print(f"✅ 加载了 {len(self.pipelines)} 个流水线配置")
         except Exception as e:
             print(f"⚠️ 加载流水线配置失败: {e}")
             self.pipelines = {}
-    
+
     def _save_pipelines(self):
         """保存流水线配置到文件"""
         try:
             os.makedirs(os.path.dirname(PIPELINES_FILE), exist_ok=True)
-            with open(PIPELINES_FILE, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'pipelines': self.pipelines,
-                    'updated_at': datetime.now().isoformat()
-                }, f, ensure_ascii=False, indent=2)
+            with open(PIPELINES_FILE, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "pipelines": self.pipelines,
+                        "updated_at": datetime.now().isoformat(),
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
         except Exception as e:
             print(f"❌ 保存流水线配置失败: {e}")
             raise
-    
+
     def create_pipeline(
         self,
         name: str,
@@ -79,7 +84,7 @@ class PipelineManager:
     ) -> str:
         """
         创建流水线配置
-        
+
         Args:
             name: 流水线名称
             git_url: Git 仓库地址
@@ -98,19 +103,19 @@ class PipelineManager:
             enabled: 是否启用
             description: 描述
             cron_expression: Cron 表达式（用于定时触发）
-        
+
         Returns:
             pipeline_id: 流水线 ID
         """
         pipeline_id = str(uuid.uuid4())
-        
+
         # 生成 Webhook Token（用于 URL）
         webhook_token = str(uuid.uuid4())
-        
+
         # 如果没有提供 webhook_secret，生成一个
         if not webhook_secret:
             webhook_secret = str(uuid.uuid4())
-        
+
         pipeline = {
             "pipeline_id": pipeline_id,
             "name": name,
@@ -148,6 +153,7 @@ class PipelineManager:
             "next_run_time": None,  # 下次执行时间
             # 任务绑定
             "current_task_id": None,  # 当前正在执行的任务ID
+            "task_queue": [],  # 任务队列（等待执行的任务列表）
             "task_history": [],  # 任务历史记录列表
             # 元数据
             "created_at": datetime.now().isoformat(),
@@ -155,18 +161,18 @@ class PipelineManager:
             "last_triggered_at": None,
             "trigger_count": 0,
         }
-        
+
         with self.lock:
             self.pipelines[pipeline_id] = pipeline
             self._save_pipelines()
-        
+
         return pipeline_id
-    
+
     def get_pipeline(self, pipeline_id: str) -> Optional[Dict]:
         """获取流水线配置"""
         with self.lock:
             return self.pipelines.get(pipeline_id)
-    
+
     def get_pipeline_by_token(self, webhook_token: str) -> Optional[Dict]:
         """通过 Webhook Token 获取流水线配置"""
         with self.lock:
@@ -174,29 +180,29 @@ class PipelineManager:
                 if pipeline.get("webhook_token") == webhook_token:
                     return pipeline
             return None
-    
+
     def list_pipelines(self, enabled: bool = None) -> List[Dict]:
         """
         列出所有流水线配置
-        
+
         Args:
             enabled: 过滤条件，仅返回启用/禁用的流水线
-        
+
         Returns:
             流水线列表
         """
         with self.lock:
             pipelines = list(self.pipelines.values())
-            
+
             # 过滤启用状态
             if enabled is not None:
                 pipelines = [p for p in pipelines if p.get("enabled") == enabled]
-            
+
             # 按创建时间倒序排列
             pipelines.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-            
+
             return pipelines
-    
+
     def update_pipeline(
         self,
         pipeline_id: str,
@@ -229,16 +235,16 @@ class PipelineManager:
     ) -> bool:
         """
         更新流水线配置
-        
+
         Returns:
             True 表示更新成功，False 表示流水线不存在
         """
         with self.lock:
             if pipeline_id not in self.pipelines:
                 return False
-            
+
             pipeline = self.pipelines[pipeline_id]
-            
+
             # 更新字段
             if name is not None:
                 pipeline["name"] = name
@@ -292,37 +298,37 @@ class PipelineManager:
                 pipeline["push_mode"] = push_mode
             if resource_package_configs is not None:
                 pipeline["resource_package_configs"] = resource_package_configs
-            
+
             # 更新时间
             pipeline["updated_at"] = datetime.now().isoformat()
-            
+
             self._save_pipelines()
             return True
-    
+
     def delete_pipeline(self, pipeline_id: str) -> bool:
         """
         删除流水线配置
-        
+
         Returns:
             True 表示删除成功，False 表示流水线不存在
         """
         with self.lock:
             if pipeline_id not in self.pipelines:
                 return False
-            
+
             del self.pipelines[pipeline_id]
             self._save_pipelines()
             return True
-    
+
     def record_trigger(
-        self, 
-        pipeline_id: str, 
+        self,
+        pipeline_id: str,
         task_id: str = None,
         trigger_source: str = "unknown",
-        trigger_info: dict = None
+        trigger_info: dict = None,
     ):
         """记录流水线触发
-        
+
         Args:
             pipeline_id: 流水线 ID
             task_id: 任务 ID，如果提供则绑定到流水线
@@ -334,14 +340,14 @@ class PipelineManager:
                 pipeline = self.pipelines[pipeline_id]
                 pipeline["last_triggered_at"] = datetime.now().isoformat()
                 pipeline["trigger_count"] = pipeline.get("trigger_count", 0) + 1
-                
+
                 if task_id:
                     pipeline["current_task_id"] = task_id
-                    
+
                     # 记录到任务历史
                     if "task_history" not in pipeline:
                         pipeline["task_history"] = []
-                    
+
                     history_entry = {
                         "task_id": task_id,
                         "trigger_source": trigger_source,
@@ -349,16 +355,16 @@ class PipelineManager:
                         "trigger_info": trigger_info or {},
                     }
                     pipeline["task_history"].append(history_entry)
-                    
+
                     # 限制历史记录数量（保留最近100条）
                     if len(pipeline["task_history"]) > 100:
                         pipeline["task_history"] = pipeline["task_history"][-100:]
-                
+
                 self._save_pipelines()
-    
+
     def get_pipeline_running_task(self, pipeline_id: str) -> Optional[str]:
         """获取流水线当前正在执行的任务ID
-        
+
         Returns:
             任务ID，如果没有运行中的任务则返回 None
         """
@@ -366,10 +372,10 @@ class PipelineManager:
             if pipeline_id in self.pipelines:
                 return self.pipelines[pipeline_id].get("current_task_id")
             return None
-    
+
     def unbind_task(self, pipeline_id: str):
         """解绑流水线的任务绑定
-        
+
         Args:
             pipeline_id: 流水线 ID
         """
@@ -377,13 +383,95 @@ class PipelineManager:
             if pipeline_id in self.pipelines:
                 self.pipelines[pipeline_id]["current_task_id"] = None
                 self._save_pipelines()
-    
+
+    def add_task_to_queue(self, pipeline_id: str, task_config: dict) -> str:
+        """将任务添加到队列
+
+        Args:
+            pipeline_id: 流水线 ID
+            task_config: 任务配置信息（用于后续创建任务）
+
+        Returns:
+            queue_id: 队列项ID
+        """
+        import uuid
+
+        queue_id = str(uuid.uuid4())
+
+        with self.lock:
+            if pipeline_id in self.pipelines:
+                pipeline = self.pipelines[pipeline_id]
+                if "task_queue" not in pipeline:
+                    pipeline["task_queue"] = []
+
+                queue_item = {
+                    "queue_id": queue_id,
+                    "task_config": task_config,
+                    "created_at": datetime.now().isoformat(),
+                }
+                pipeline["task_queue"].append(queue_item)
+                self._save_pipelines()
+
+        return queue_id
+
+    def get_queue_length(self, pipeline_id: str) -> int:
+        """获取队列长度
+
+        Args:
+            pipeline_id: 流水线 ID
+
+        Returns:
+            队列长度
+        """
+        with self.lock:
+            if pipeline_id in self.pipelines:
+                pipeline = self.pipelines[pipeline_id]
+                return len(pipeline.get("task_queue", []))
+            return 0
+
+    def get_next_queued_task(self, pipeline_id: str) -> Optional[dict]:
+        """获取队列中的下一个任务配置
+
+        Args:
+            pipeline_id: 流水线 ID
+
+        Returns:
+            队列项配置，如果没有则返回 None
+        """
+        with self.lock:
+            if pipeline_id in self.pipelines:
+                pipeline = self.pipelines[pipeline_id]
+                queue = pipeline.get("task_queue", [])
+                if queue:
+                    return queue[0]
+            return None
+
+    def remove_queued_task(self, pipeline_id: str, queue_id: str = None):
+        """从队列中移除任务
+
+        Args:
+            pipeline_id: 流水线 ID
+            queue_id: 队列项ID，如果为None则移除第一个
+        """
+        with self.lock:
+            if pipeline_id in self.pipelines:
+                pipeline = self.pipelines[pipeline_id]
+                queue = pipeline.get("task_queue", [])
+                if queue:
+                    if queue_id:
+                        pipeline["task_queue"] = [
+                            q for q in queue if q.get("queue_id") != queue_id
+                        ]
+                    else:
+                        pipeline["task_queue"] = queue[1:]
+                    self._save_pipelines()
+
     def find_pipeline_by_task(self, task_id: str) -> Optional[str]:
         """根据任务ID查找绑定的流水线ID
-        
+
         Args:
             task_id: 任务 ID
-            
+
         Returns:
             流水线 ID，如果没有绑定则返回 None
         """
@@ -392,23 +480,23 @@ class PipelineManager:
                 if pipeline.get("current_task_id") == task_id:
                     return pipeline_id
             return None
-    
+
     def verify_webhook_signature(
         self,
         payload: bytes,
         signature: str,
         secret: str,
-        signature_header: str = "sha256"
+        signature_header: str = "sha256",
     ) -> bool:
         """
         验证 Webhook 签名（支持 GitHub/GitLab/Gitee 等平台）
-        
+
         Args:
             payload: 请求体（原始字节）
             signature: 签名字符串
             secret: 密钥
             signature_header: 签名算法（sha1 或 sha256）
-        
+
         Returns:
             True 表示签名验证通过
         """
@@ -417,7 +505,7 @@ class PipelineManager:
             # GitHub: sha256=xxx
             # GitLab: xxx
             # Gitee: xxx
-            
+
             if "=" in signature:
                 # GitHub 格式: sha256=xxx
                 algo, sig = signature.split("=", 1)
@@ -425,7 +513,7 @@ class PipelineManager:
                 # GitLab/Gitee 格式: xxx
                 algo = signature_header
                 sig = signature
-            
+
             # 计算 HMAC
             if algo.lower() == "sha1":
                 mac = hmac.new(secret.encode(), payload, hashlib.sha1)
@@ -434,18 +522,21 @@ class PipelineManager:
             else:
                 print(f"❌ 不支持的签名算法: {algo}")
                 return False
-            
+
             expected_sig = mac.hexdigest()
-            
+
             # 常量时间比较，防止时序攻击
             result = hmac.compare_digest(expected_sig, sig)
-            
+
             if not result:
-                print(f"❌ 签名不匹配: expected={expected_sig[:8]}..., got={sig[:8]}..., algo={algo}")
-            
+                print(
+                    f"❌ 签名不匹配: expected={expected_sig[:8]}..., got={sig[:8]}..., algo={algo}"
+                )
+
             return result
         except Exception as e:
             print(f"❌ Webhook 签名验证异常: {e}")
             import traceback
+
             traceback.print_exc()
             return False

@@ -3349,6 +3349,14 @@ async def list_pipelines(
             # 添加成功/失败统计
             pipeline["success_count"] = success_count
             pipeline["failed_count"] = failed_count
+            
+            # 添加队列信息
+            queue_length = manager.get_queue_length(pipeline_id)
+            pipeline["queue_length"] = queue_length
+            if queue_length > 0:
+                pipeline["has_queued_tasks"] = True
+            else:
+                pipeline["has_queued_tasks"] = False
 
         return JSONResponse({"pipelines": pipelines, "total": len(pipelines)})
     except Exception as e:
@@ -3565,9 +3573,53 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
             build_manager = BuildManager()
             task = build_manager.task_manager.get_task(current_task_id)
             if task and task.get("status") in ["pending", "running"]:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"流水线已有正在执行的任务（任务ID: {current_task_id[:8]}）",
+                # 有任务正在运行，将新任务加入队列
+                task_config = {
+                    "username": username,
+                    "git_url": pipeline["git_url"],
+                    "image_name": pipeline.get("image_name") or "manual-build",
+                    "tag": pipeline.get("tag", "latest"),
+                    "should_push": pipeline.get("push", False),
+                    "selected_template": pipeline.get("template", ""),
+                    "project_type": pipeline.get("project_type", "jar"),
+                    "template_params": pipeline.get("template_params", {}),
+                    "branch": pipeline.get("branch"),
+                    "sub_path": pipeline.get("sub_path"),
+                    "use_project_dockerfile": pipeline.get("use_project_dockerfile", True),
+                    "dockerfile_name": pipeline.get("dockerfile_name", "Dockerfile"),
+                    "source_id": pipeline.get("source_id"),
+                    "selected_services": pipeline.get("selected_services"),
+                    "service_push_config": pipeline.get("service_push_config"),
+                    "service_template_params": pipeline.get("service_template_params"),
+                    "push_mode": pipeline.get("push_mode", "multi"),
+                    "resource_package_ids": pipeline.get("resource_package_configs"),
+                }
+                queue_id = manager.add_task_to_queue(pipeline_id, task_config)
+                queue_length = manager.get_queue_length(pipeline_id)
+                
+                # 记录操作日志
+                OperationLogger.log(
+                    username,
+                    "pipeline_run_queued",
+                    {
+                        "pipeline_id": pipeline_id,
+                        "pipeline_name": pipeline.get("name"),
+                        "queue_id": queue_id,
+                        "queue_length": queue_length,
+                        "branch": pipeline.get("branch"),
+                        "trigger_source": "manual",
+                    },
+                )
+                
+                return JSONResponse(
+                    {
+                        "message": "构建任务已加入队列",
+                        "status": "queued",
+                        "queue_id": queue_id,
+                        "queue_length": queue_length,
+                        "pipeline": pipeline.get("name"),
+                        "branch": pipeline.get("branch"),
+                    }
                 )
             else:
                 # 任务已完成或不存在，解绑
@@ -3628,6 +3680,7 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
         return JSONResponse(
             {
                 "message": "构建任务已启动",
+                "status": "running",
                 "task_id": task_id,
                 "pipeline": pipeline.get("name"),
                 "branch": pipeline.get("branch"),
@@ -3854,12 +3907,44 @@ async def webhook_trigger(webhook_token: str, request: Request):
             build_manager = BuildManager()
             task = build_manager.task_manager.get_task(current_task_id)
             if task and task.get("status") in ["pending", "running"]:
+                # 有任务正在运行，将新任务加入队列
                 print(
-                    f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，忽略本次触发"
+                    f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，将本次触发加入队列"
                 )
+                
+                # 准备任务配置（稍后使用）
+                task_config = {
+                    "trigger_source": "webhook",
+                    "git_url": pipeline["git_url"],
+                    "image_name": pipeline.get("image_name") or "webhook-build",
+                    "tag": None,  # 稍后计算
+                    "should_push": pipeline.get("push", False),
+                    "selected_template": pipeline.get("template", ""),
+                    "project_type": pipeline.get("project_type", "jar"),
+                    "template_params": pipeline.get("template_params", {}),
+                    "branch": branch,
+                    "sub_path": pipeline.get("sub_path"),
+                    "use_project_dockerfile": pipeline.get("use_project_dockerfile", True),
+                    "dockerfile_name": pipeline.get("dockerfile_name", "Dockerfile"),
+                    "source_id": pipeline.get("source_id"),
+                    "selected_services": pipeline.get("selected_services"),
+                    "service_push_config": pipeline.get("service_push_config"),
+                    "service_template_params": pipeline.get("service_template_params"),
+                    "push_mode": pipeline.get("push_mode", "multi"),
+                    "resource_package_ids": pipeline.get("resource_package_configs"),
+                    "webhook_branch": webhook_branch,
+                    "branch_tag_mapping": pipeline.get("branch_tag_mapping", {}),
+                }
+                
+                queue_id = manager.add_task_to_queue(pipeline_id, task_config)
+                queue_length = manager.get_queue_length(pipeline_id)
+                
                 return JSONResponse(
                     {
-                        "message": "流水线已有正在执行的任务，忽略本次触发",
+                        "message": "流水线已有正在执行的任务，本次触发已加入队列",
+                        "status": "queued",
+                        "queue_id": queue_id,
+                        "queue_length": queue_length,
                         "current_task_id": current_task_id,
                         "pipeline": pipeline.get("name"),
                     }

@@ -60,11 +60,12 @@
               <button 
                 class="btn btn-outline-success" 
                 @click="runPipeline(pipeline)"
-                :disabled="running === pipeline.pipeline_id"
+                :disabled="running === pipeline.pipeline_id || queuedPipelines.has(pipeline.pipeline_id)"
                 title="手动运行"
               >
                 <i class="fas fa-play"></i>
                 <span v-if="running === pipeline.pipeline_id" class="spinner-border spinner-border-sm ms-1"></span>
+                <span v-else-if="queuedPipelines.has(pipeline.pipeline_id)" class="badge bg-warning ms-1">排队中</span>
               </button>
               <button 
                 class="btn btn-outline-secondary" 
@@ -192,6 +193,9 @@
                     </span>
                     <span v-else-if="pipeline.last_build.status === 'pending'" class="badge bg-warning">
                       <i class="fas fa-clock"></i> 等待中
+                    </span>
+                    <span v-else-if="queuedPipelines.has(pipeline.pipeline_id)" class="badge bg-info">
+                      <i class="fas fa-list"></i> 排队中
                     </span>
                     <button 
                       v-if="pipeline.last_build && pipeline.last_build.task_id && pipeline.last_build.status !== 'deleted'"
@@ -1345,6 +1349,8 @@ const selectedSourceId = ref('')
 const loading = ref(false)
 const saving = ref(false)  // 正在保存流水线
 const running = ref(null)  // 正在运行的流水线ID
+const debounceTimers = ref({})  // 防抖定时器
+const queuedPipelines = ref(new Set())  // 排队中的流水线ID集合
 const showModal = ref(false)
 const showWebhookModal = ref(false)
 const showHistoryModal = ref(false)
@@ -1463,6 +1469,22 @@ async function loadPipelines() {
   try {
     const res = await axios.get('/api/pipelines')
     pipelines.value = res.data.pipelines || []
+    
+    // 更新排队状态：检查每个流水线的任务状态
+    queuedPipelines.value.clear()
+    pipelines.value.forEach(pipeline => {
+      // 使用后端返回的队列信息
+      if (pipeline.has_queued_tasks || (pipeline.queue_length && pipeline.queue_length > 0)) {
+        queuedPipelines.value.add(pipeline.pipeline_id)
+      } else if (pipeline.last_build && pipeline.last_build.status === 'pending') {
+        // 如果最后构建是 pending，且有正在运行的任务，说明在排队
+        const currentTaskStatus = pipeline.current_task_status
+        if (currentTaskStatus === 'running' || currentTaskStatus === 'pending') {
+          // 有任务正在运行，pending 的任务在排队
+          queuedPipelines.value.add(pipeline.pipeline_id)
+        }
+      }
+    })
   } catch (error) {
     console.error('加载流水线列表失败:', error)
     alert('加载流水线列表失败')
@@ -1970,29 +1992,65 @@ async function deletePipeline(pipeline) {
   }
 }
 
-// 手动运行流水线
+// 手动运行流水线（带防抖）
 async function runPipeline(pipeline) {
-  if (running.value) return
+  const pipelineId = pipeline.pipeline_id
   
-  if (!confirm(`确定要运行流水线 "${pipeline.name}" 吗？`)) {
+  // 防抖：如果已经在处理中，直接返回
+  if (running.value === pipelineId || queuedPipelines.value.has(pipelineId)) {
     return
   }
   
-  running.value = pipeline.pipeline_id
-  try {
-    const res = await axios.post(`/api/pipelines/${pipeline.pipeline_id}/run`)
+  // 清除之前的防抖定时器
+  if (debounceTimers.value[pipelineId]) {
+    clearTimeout(debounceTimers.value[pipelineId])
+  }
+  
+  // 设置防抖定时器（500ms）
+  debounceTimers.value[pipelineId] = setTimeout(async () => {
+    // 再次检查是否已经在处理中
+    if (running.value === pipelineId || queuedPipelines.value.has(pipelineId)) {
+      return
+    }
     
-    if (res.data.task_id) {
-      alert(`流水线已启动！\n任务 ID: ${res.data.task_id}\n分支: ${res.data.branch || '默认'}`)
+    if (!confirm(`确定要运行流水线 "${pipeline.name}" 吗？`)) {
+      delete debounceTimers.value[pipelineId]
+      return
+    }
+    
+    running.value = pipelineId
+    try {
+      const res = await axios.post(`/api/pipelines/${pipelineId}/run`)
+      
+      // 检查任务状态
+      if (res.data.status === 'queued') {
+        // 任务已加入队列
+        queuedPipelines.value.add(pipelineId)
+        const queueInfo = res.data.queue_length ? `（队列位置: ${res.data.queue_length}）` : ''
+        alert(`流水线已加入队列！${queueInfo}\n分支: ${res.data.branch || '默认'}`)
+      } else if (res.data.task_id) {
+        // 任务立即运行
+        alert(`流水线已启动！\n任务 ID: ${res.data.task_id}\n分支: ${res.data.branch || '默认'}`)
+      }
       // 刷新流水线列表（更新触发次数和时间）
       loadPipelines()
+    } catch (error) {
+      console.error('运行流水线失败:', error)
+      const errorMsg = error.response?.data?.detail || '运行流水线失败'
+      
+      // 如果是409冲突（已有任务运行），说明任务已加入队列
+      if (error.response?.status === 409) {
+        queuedPipelines.value.add(pipelineId)
+        alert(`流水线已加入队列！\n${errorMsg}`)
+        loadPipelines()
+      } else {
+        alert(errorMsg)
+      }
+    } finally {
+      running.value = null
+      delete debounceTimers.value[pipelineId]
     }
-  } catch (error) {
-    console.error('运行流水线失败:', error)
-    alert(error.response?.data?.detail || '运行流水线失败')
-  } finally {
-    running.value = null
-  }
+  }, 500)
 }
 
 function showWebhookUrl(pipeline) {

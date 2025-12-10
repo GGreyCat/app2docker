@@ -3149,6 +3149,109 @@ logs/
             return (False, error_msg)
 
 
+# ============ 队列处理函数 ============
+def _process_next_queued_task(pipeline_manager, pipeline_id: str):
+    """处理队列中的下一个任务（相同流水线）
+    
+    Args:
+        pipeline_manager: PipelineManager 实例
+        pipeline_id: 流水线 ID
+    """
+    try:
+        # 检查是否有队列中的任务
+        queued_task = pipeline_manager.get_next_queued_task(pipeline_id)
+        if not queued_task:
+            return
+        
+        # 检查当前是否还有运行中的任务（防止并发问题）
+        current_task_id = pipeline_manager.get_pipeline_running_task(pipeline_id)
+        if current_task_id:
+            # 检查任务是否真的在运行
+            build_manager = BuildManager()
+            task = build_manager.task_manager.get_task(current_task_id)
+            if task and task.get("status") in ["pending", "running"]:
+                # 还有任务在运行，不处理队列
+                return
+            else:
+                # 任务已完成或不存在，解绑
+                pipeline_manager.unbind_task(pipeline_id)
+        
+        # 获取任务配置
+        task_config = queued_task.get("task_config", {})
+        
+        # 计算标签（如果是 webhook 触发，需要重新计算标签映射）
+        tag = task_config.get("tag", "latest")
+        if task_config.get("trigger_source") == "webhook":
+            # 重新计算标签映射
+            branch_tag_mapping = task_config.get("branch_tag_mapping", {})
+            webhook_branch = task_config.get("webhook_branch")
+            branch = task_config.get("branch")
+            branch_for_tag_mapping = webhook_branch if webhook_branch else branch
+            
+            if branch_for_tag_mapping and branch_tag_mapping:
+                # 优先精确匹配
+                if branch_for_tag_mapping in branch_tag_mapping:
+                    tag = branch_tag_mapping[branch_for_tag_mapping]
+                else:
+                    # 尝试通配符匹配
+                    import fnmatch
+                    for pattern, mapped_tag in branch_tag_mapping.items():
+                        if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
+                            tag = mapped_tag
+                            break
+        elif not tag or tag == "latest":
+            # 手动触发时，如果没有指定标签，使用默认值
+            pipeline = pipeline_manager.get_pipeline(pipeline_id)
+            if pipeline:
+                tag = pipeline.get("tag", "latest")
+        
+        # 启动构建任务
+        build_manager = BuildManager()
+        task_id = build_manager.start_build_from_source(
+            git_url=task_config.get("git_url"),
+            image_name=task_config.get("image_name") or "manual-build",
+            tag=tag,
+            should_push=task_config.get("should_push", False),
+            selected_template=task_config.get("selected_template", ""),
+            project_type=task_config.get("project_type", "jar"),
+            template_params=task_config.get("template_params", {}),
+            push_registry=None,
+            branch=task_config.get("branch"),
+            sub_path=task_config.get("sub_path"),
+            use_project_dockerfile=task_config.get("use_project_dockerfile", True),
+            dockerfile_name=task_config.get("dockerfile_name", "Dockerfile"),
+            source_id=task_config.get("source_id"),
+            pipeline_id=pipeline_id,
+            selected_services=task_config.get("selected_services"),
+            service_push_config=task_config.get("service_push_config"),
+            service_template_params=task_config.get("service_template_params"),
+            push_mode=task_config.get("push_mode", "multi"),
+            resource_package_ids=task_config.get("resource_package_ids"),
+        )
+        
+        # 从队列中移除已处理的任务
+        pipeline_manager.remove_queued_task(pipeline_id, queued_task.get("queue_id"))
+        
+        # 记录触发并绑定任务
+        pipeline_manager.record_trigger(
+            pipeline_id,
+            task_id,
+            trigger_source=task_config.get("trigger_source", "manual"),
+            trigger_info={
+                "username": task_config.get("username", "system"),
+                "branch": task_config.get("branch"),
+                "from_queue": True,  # 标记来自队列
+            },
+        )
+        
+        print(f"✅ 队列任务已启动: 流水线 {pipeline_id[:8]}, 任务 {task_id[:8]}")
+        
+    except Exception as e:
+        print(f"⚠️ 处理队列任务失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 # ============ 构建任务管理器 ============
 class BuildTaskManager:
     """构建任务管理器 - 管理镜像构建任务，支持异步构建和日志存储"""
@@ -3387,7 +3490,7 @@ class BuildTaskManager:
                 if status in ("completed", "failed", "stopped"):
                     self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
 
-                    # 任务完成、失败或停止时，解绑流水线
+                    # 任务完成、失败或停止时，解绑流水线并处理队列
                     try:
                         from backend.pipeline_manager import PipelineManager
 
@@ -3398,8 +3501,13 @@ class BuildTaskManager:
                             print(
                                 f"✅ 任务 {task_id[:8]} 已结束，解绑流水线 {pipeline_id[:8]}"
                             )
+                            
+                            # 处理队列中的下一个任务（相同流水线）
+                            _process_next_queued_task(pipeline_manager, pipeline_id)
                     except Exception as e:
                         print(f"⚠️ 解绑流水线失败: {e}")
+                        import traceback
+                        traceback.print_exc()
         self._save_tasks()
 
     def stop_task(self, task_id: str) -> bool:
