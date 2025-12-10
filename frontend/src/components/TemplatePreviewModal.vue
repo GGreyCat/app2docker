@@ -51,57 +51,101 @@
               </div>
             </div>
 
-            <!-- 模板信息：参数和服务阶段 -->
-            <div class="row mb-3" v-if="templateInfo">
-              <div class="col-md-6" v-if="templateInfo.params && templateInfo.params.length > 0">
-                <div class="card border-primary">
-                  <div class="card-header bg-primary bg-opacity-10 py-2">
-                    <small class="fw-bold">
-                      <i class="fas fa-sliders-h"></i> 模板参数 ({{ templateInfo.params.length }})
-                    </small>
-                  </div>
-                  <div class="card-body p-2">
-                    <div class="small">
-                      <div v-for="param in templateInfo.params" :key="param.name" class="mb-1">
-                        <code>{{ param.name }}</code>
-                        <span v-if="param.default" class="text-muted"> (默认: {{ param.default }})</span>
-                        <span v-if="param.required" class="badge bg-danger badge-sm ms-1">必填</span>
+            <!-- 模板信息：参数和服务阶段 - Tab 布局 -->
+            <div v-if="templateInfo && (templateInfo.params?.length > 0 || templateInfo.services?.length > 0)" class="mb-3">
+              <ul class="nav nav-tabs mb-3" role="tablist">
+                <li class="nav-item" v-if="templateInfo.params && templateInfo.params.length > 0">
+                  <button 
+                    class="nav-link" 
+                    :class="{ active: activeTab === 'params' }"
+                    @click="activeTab = 'params'"
+                    type="button"
+                  >
+                    <i class="fas fa-sliders-h"></i> 模板参数 
+                    <span class="badge bg-primary ms-1">{{ templateInfo.params.length }}</span>
+                  </button>
+                </li>
+                <li class="nav-item" v-if="templateInfo.services && templateInfo.services.length > 0">
+                  <button 
+                    class="nav-link" 
+                    :class="{ active: activeTab === 'services' }"
+                    @click="activeTab = 'services'"
+                    type="button"
+                  >
+                    <i class="fas fa-server"></i> 服务阶段 
+                    <span class="badge bg-info ms-1">{{ templateInfo.services.length }}</span>
+                  </button>
+                </li>
+              </ul>
+              
+              <div class="tab-content">
+                <!-- 模板参数 Tab -->
+                <div 
+                  v-if="templateInfo.params && templateInfo.params.length > 0"
+                  class="tab-pane fade" 
+                  :class="{ 'show active': activeTab === 'params' }"
+                >
+                  <div class="card border-primary">
+                    <div class="card-body p-3">
+                      <div class="row g-2">
+                        <div 
+                          v-for="param in templateInfo.params" 
+                          :key="param.name" 
+                          class="col-md-6 col-lg-4"
+                        >
+                          <div class="card bg-light h-100">
+                            <div class="card-body p-2">
+                              <div class="d-flex align-items-start justify-content-between">
+                                <div class="flex-grow-1">
+                                  <code class="text-primary fw-bold">{{ param.name }}</code>
+                                  <div v-if="param.default" class="text-muted small mt-1">
+                                    默认值: <code class="text-dark">{{ param.default }}</code>
+                                  </div>
+                                </div>
+                                <span v-if="param.required" class="badge bg-danger ms-2">必填</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-              <div class="col-md-6" v-if="templateInfo.services && templateInfo.services.length > 0">
-                <div class="card border-info">
-                  <div class="card-header bg-info bg-opacity-10 py-2">
-                    <small class="fw-bold">
-                      <i class="fas fa-server"></i> 服务阶段 ({{ templateInfo.services.length }})
-                    </small>
-                  </div>
-                  <div class="card-body p-2">
-                    <div class="table-responsive">
-                      <table class="table table-sm table-bordered mb-0">
-                        <thead>
-                          <tr>
-                            <th>服务名称</th>
-                            <th>端口</th>
-                            <th>用户</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr v-for="service in templateInfo.services" :key="service.name">
-                            <td><code>{{ service.name }}</code></td>
-                            <td>
-                              <span v-if="service.port" class="badge bg-secondary">{{ service.port }}</span>
-                              <span v-else class="text-muted">-</span>
-                            </td>
-                            <td>
-                              <span v-if="service.user" class="badge bg-secondary">{{ service.user }}</span>
-                              <span v-else class="text-muted">-</span>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
+                
+                <!-- 服务阶段 Tab -->
+                <div 
+                  v-if="templateInfo.services && templateInfo.services.length > 0"
+                  class="tab-pane fade" 
+                  :class="{ 'show active': activeTab === 'services' }"
+                >
+                  <div class="card border-info">
+                    <div class="card-body p-3">
+                      <div class="table-responsive">
+                        <table class="table table-hover table-sm mb-0">
+                          <thead class="table-light">
+                            <tr>
+                              <th style="width: 40%;">服务名称</th>
+                              <th style="width: 30%;">端口</th>
+                              <th style="width: 30%;">用户</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="service in templateInfo.services" :key="service.name">
+                              <td>
+                                <code class="text-primary">{{ service.name }}</code>
+                              </td>
+                              <td>
+                                <span v-if="service.port" class="badge bg-secondary">{{ service.port }}</span>
+                                <span v-else class="text-muted">-</span>
+                              </td>
+                              <td>
+                                <span v-if="service.user" class="badge bg-info">{{ service.user }}</span>
+                                <span v-else class="text-muted">-</span>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -154,6 +198,7 @@ const loading = ref(false)
 const content = ref('')
 const templateData = ref(null)
 const templateInfo = ref(null)  // 模板信息（参数和服务阶段）
+const activeTab = ref('params')  // 当前激活的 tab
 
 // CodeMirror 扩展配置（只读模式）
 const extensions = [
@@ -165,6 +210,8 @@ watch(() => props.modelValue, async (show) => {
   if (show && props.template) {
     loading.value = true
     templateInfo.value = null
+    // 重置 tab，优先显示参数 tab，如果没有参数则显示服务 tab
+    activeTab.value = 'params'
     
     try {
       // 加载模板内容
@@ -183,6 +230,11 @@ watch(() => props.modelValue, async (show) => {
         templateInfo.value = {
           params: infoRes.data.params || [],
           services: infoRes.data.services || []
+        }
+        // 如果没有参数但有服务，默认显示服务 tab
+        if ((!templateInfo.value.params || templateInfo.value.params.length === 0) && 
+            templateInfo.value.services && templateInfo.value.services.length > 0) {
+          activeTab.value = 'services'
         }
       } catch (infoError) {
         console.error('加载模板信息失败:', infoError)
@@ -237,5 +289,48 @@ function close() {
 
 .modal-backdrop.show {
   opacity: 0.5;
+}
+
+.nav-tabs {
+  border-bottom: 2px solid #dee2e6;
+}
+
+.nav-tabs .nav-link {
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #6c757d;
+  padding: 0.75rem 1.25rem;
+  transition: all 0.2s;
+}
+
+.nav-tabs .nav-link:hover {
+  border-bottom-color: #dee2e6;
+  color: #0d6efd;
+}
+
+.nav-tabs .nav-link.active {
+  color: #0d6efd;
+  border-bottom-color: #0d6efd;
+  background-color: transparent;
+  font-weight: 500;
+}
+
+.tab-content {
+  min-height: 150px;
+}
+
+.tab-pane {
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

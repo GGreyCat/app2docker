@@ -66,6 +66,12 @@
               <button class="btn btn-outline-danger py-0" @click="clearLog" title="清空">
                 <i class="fas fa-trash"></i>
               </button>
+              <button class="btn btn-outline-info py-0" @click="scrollToTop" title="滚动到顶部">
+                <i class="fas fa-arrow-up"></i>
+              </button>
+              <button class="btn btn-outline-info py-0" @click="scrollToBottom" title="滚动到底部">
+                <i class="fas fa-arrow-down"></i>
+              </button>
             </div>
             <div class="log-stats">
               {{ logs.length }} 行 | {{ filteredLogs.length }} 显示
@@ -204,6 +210,29 @@ function downloadLog() {
   a.download = `app2docker-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.log`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// 滚动到顶部
+function scrollToTop() {
+  if (logContainer.value) {
+    autoScroll.value = false  // 滚动到顶部时关闭自动滚动
+    nextTick(() => {
+      if (logContainer.value) {
+        logContainer.value.scrollTop = 0
+      }
+    })
+  }
+}
+
+// 滚动到底部
+function scrollToBottom() {
+  if (logContainer.value) {
+    nextTick(() => {
+      if (logContainer.value) {
+        logContainer.value.scrollTop = logContainer.value.scrollHeight
+      }
+    })
+  }
 }
 
 function close() {

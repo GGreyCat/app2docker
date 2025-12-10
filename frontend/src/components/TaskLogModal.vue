@@ -44,6 +44,22 @@
                 >
                   <i class="fas fa-copy"></i> 复制
                 </button>
+                <button 
+                  type="button" 
+                  class="btn btn-sm btn-outline-info"
+                  @click="scrollToTop"
+                  title="滚动到顶部"
+                >
+                  <i class="fas fa-arrow-up"></i> 到顶
+                </button>
+                <button 
+                  type="button" 
+                  class="btn btn-sm btn-outline-info"
+                  @click="scrollToBottom"
+                  title="滚动到底部"
+                >
+                  <i class="fas fa-arrow-down"></i> 到底
+                </button>
                 <span v-if="isTaskRunning" class="text-muted small">
                   <i class="fas fa-info-circle"></i> 正在自动刷新日志...
                 </span>
@@ -128,9 +144,21 @@ const isTaskRunning = computed(() => {
   return status === 'running' || status === 'pending'
 })
 
+// 滚动日志到顶部
+function scrollToTop() {
+  if (logContainer.value) {
+    autoScroll.value = false  // 滚动到顶部时关闭自动滚动
+    nextTick(() => {
+      if (logContainer.value) {
+        logContainer.value.scrollTop = 0
+      }
+    })
+  }
+}
+
 // 滚动日志到底部
 function scrollToBottom() {
-  if (logContainer.value && autoScroll.value) {
+  if (logContainer.value) {
     nextTick(() => {
       if (logContainer.value) {
         logContainer.value.scrollTop = logContainer.value.scrollHeight

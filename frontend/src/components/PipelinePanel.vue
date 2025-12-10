@@ -1068,6 +1068,12 @@
                   <button type="button" class="btn btn-sm btn-outline-secondary ms-2" @click="copyLogs">
                     <i class="fas fa-copy"></i> 复制日志
                   </button>
+                  <button type="button" class="btn btn-sm btn-outline-info ms-2" @click="scrollLogToTop" title="滚动到顶部">
+                    <i class="fas fa-arrow-up"></i> 到顶
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-info ms-2" @click="scrollLogToBottom" title="滚动到底部">
+                    <i class="fas fa-arrow-down"></i> 到底
+                  </button>
                 </div>
               </div>
               <pre 
@@ -2236,8 +2242,20 @@ async function fetchTaskLogs(taskId, silent = false) {
 }
 
 // 滚动日志到底部
+// 滚动日志到顶部
+function scrollLogToTop() {
+  if (logContainer.value) {
+    autoScroll.value = false  // 滚动到顶部时关闭自动滚动
+    nextTick(() => {
+      if (logContainer.value) {
+        logContainer.value.scrollTop = 0
+      }
+    })
+  }
+}
+
 function scrollLogToBottom() {
-  if (logContainer.value && autoScroll.value) {
+  if (logContainer.value) {
     nextTick(() => {
       if (logContainer.value) {
         logContainer.value.scrollTop = logContainer.value.scrollHeight
