@@ -3265,11 +3265,6 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
         )
 
         return JSONResponse({"pipeline_id": pipeline_id, "message": "流水线创建成功"})
-    except ValueError as e:
-        # 名称重复等验证错误
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
     except Exception as e:
         import traceback
 
@@ -3529,9 +3524,6 @@ async def update_pipeline(
         OperationLogger.log(username, "pipeline_update", {"pipeline_id": pipeline_id})
 
         return JSONResponse({"message": "流水线更新成功"})
-    except ValueError as e:
-        # 名称重复等验证错误
-        raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:

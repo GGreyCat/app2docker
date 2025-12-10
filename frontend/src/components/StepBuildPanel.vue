@@ -316,19 +316,7 @@
             </label>
           </div>
           <div v-if="buildConfig.useProjectDockerfile" class="mt-2">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <label class="form-label mb-0">Dockerfile 文件名</label>
-              <button
-                type="button"
-                class="btn btn-sm btn-outline-secondary"
-                @click="scanDockerfiles"
-                :disabled="!buildConfig.sourceId || !buildConfig.branch || scanningDockerfiles"
-                title="重新扫描项目中的 Dockerfile"
-              >
-                <i class="fas fa-sync-alt" :class="{ 'fa-spin': scanningDockerfiles }"></i>
-                扫描 Dockerfile
-              </button>
-            </div>
+            <label class="form-label">Dockerfile 文件名</label>
             <select
               v-model="buildConfig.dockerfileName"
               class="form-select form-select-sm"
@@ -342,14 +330,6 @@
                 {{ dockerfile }}
               </option>
             </select>
-            <div class="form-text small text-muted" v-if="availableDockerfiles.length > 0">
-              <i class="fas fa-info-circle"></i>
-              已扫描到 {{ availableDockerfiles.length }} 个 Dockerfile 文件
-            </div>
-            <div class="form-text small text-warning" v-else-if="buildConfig.sourceId && buildConfig.branch">
-              <i class="fas fa-exclamation-triangle"></i>
-              未扫描到 Dockerfile，将使用默认的 Dockerfile
-            </div>
           </div>
         </div>
 
@@ -1607,7 +1587,6 @@ const branchesAndTags = ref({
   default_branch: null,
 });
 const availableDockerfiles = ref([]);
-const scanningDockerfiles = ref(false);
 
 // 模板相关
 const templates = ref([]);
@@ -1713,15 +1692,6 @@ function nextStep() {
       currentStep.value = 3;
     }
 
-    // 进入步骤3时，如果使用项目 Dockerfile，扫描 Dockerfile
-    if (currentStep.value === 3 && buildConfig.value.sourceType === 'git') {
-      // 确保有分支信息后再扫描
-      const branch = buildConfig.value.branch || branchesAndTags.value.default_branch;
-      if (buildConfig.value.sourceId && branch && availableDockerfiles.value.length === 0) {
-        await scanDockerfiles();
-      }
-    }
-
     // 步骤3完成后，自动分析模板
     if (currentStep.value === 4) {
       analyzeTemplate();
@@ -1795,7 +1765,6 @@ async function onSourceSelected() {
     repoVerified.value = false;
     branchesAndTags.value = { branches: [], tags: [], default_branch: null };
     buildConfig.value.branch = "";
-    availableDockerfiles.value = [];
     return;
   }
 
@@ -1810,102 +1779,11 @@ async function onSourceSelected() {
     };
     repoVerified.value = true;
     buildConfig.value.branch = source.default_branch || "";
-    // 扫描 Dockerfile
-    await scanDockerfiles();
   }
 }
 
-async function onBranchChanged() {
-  // 分支变化时重新扫描 Dockerfile
-  if (buildConfig.value.sourceId) {
-    // 如果没有选择分支，使用默认分支
-    const branch = buildConfig.value.branch || branchesAndTags.value.default_branch;
-    if (branch) {
-      await scanDockerfiles();
-    }
-  }
-}
-
-// 扫描项目中的 Dockerfile
-async function scanDockerfiles() {
-  if (!buildConfig.value.sourceId) {
-    availableDockerfiles.value = [];
-    return;
-  }
-  
-  // 如果没有选择分支，使用默认分支
-  const branch = buildConfig.value.branch || branchesAndTags.value.default_branch;
-  if (!branch) {
-    availableDockerfiles.value = [];
-    return;
-  }
-
-  scanningDockerfiles.value = true;
-  try {
-    const source = gitSources.value.find(
-      (s) => s.source_id === buildConfig.value.sourceId
-    );
-    if (!source || !source.git_url) {
-      availableDockerfiles.value = [];
-      return;
-    }
-
-    // 调用验证 API 扫描 Dockerfile
-    const branch = buildConfig.value.branch || branchesAndTags.value.default_branch;
-    const res = await axios.post("/api/verify-git-repo", {
-      git_url: source.git_url,
-      source_id: buildConfig.value.sourceId,
-      branch: branch,
-    });
-
-    // 提取 Dockerfile 文件名列表
-    const dockerfiles = res.data.dockerfiles || {};
-    const dockerfileNames = Object.keys(dockerfiles).sort();
-    
-    // 将相对路径转换为文件名（如果路径包含目录，只显示文件名）
-    // 但需要保留完整路径信息，以便后续使用
-    const dockerfileMap = new Map();
-    dockerfileNames.forEach(path => {
-      const parts = path.split(/[/\\]/);
-      const fileName = parts[parts.length - 1];
-      // 如果文件名相同，保留完整路径
-      if (!dockerfileMap.has(fileName)) {
-        dockerfileMap.set(fileName, path);
-      } else {
-        // 如果文件名重复，保留最短路径（通常是根目录的）
-        const existingPath = dockerfileMap.get(fileName);
-        if (path.split(/[/\\]/).length < existingPath.split(/[/\\]/).length) {
-          dockerfileMap.set(fileName, path);
-        }
-      }
-    });
-    
-    availableDockerfiles.value = Array.from(dockerfileMap.keys()).sort();
-
-    // 如果有扫描到的 Dockerfile，且当前选择的是默认的 Dockerfile，检查是否存在
-    if (availableDockerfiles.value.length > 0) {
-      // 如果默认的 Dockerfile 不在列表中，使用第一个
-      if (!availableDockerfiles.value.includes(buildConfig.value.dockerfileName)) {
-        // 检查是否有名为 "Dockerfile" 的文件
-        if (availableDockerfiles.value.includes("Dockerfile")) {
-          buildConfig.value.dockerfileName = "Dockerfile";
-        } else {
-          // 使用第一个 Dockerfile
-          buildConfig.value.dockerfileName = availableDockerfiles.value[0];
-        }
-      }
-    } else {
-      // 如果没有扫描到 Dockerfile，重置为默认值
-      buildConfig.value.dockerfileName = "Dockerfile";
-    }
-  } catch (error) {
-    console.error("扫描 Dockerfile 失败:", error);
-    availableDockerfiles.value = [];
-    // 扫描失败不影响流程，只是没有可选的 Dockerfile
-    alert(error.response?.data?.detail || "扫描 Dockerfile 失败");
-  } finally {
-    scanningDockerfiles.value = false;
-  }
+function onBranchChanged() {
+  // 分支变化时的处理
 }
 
 function formatGitUrl(url) {
