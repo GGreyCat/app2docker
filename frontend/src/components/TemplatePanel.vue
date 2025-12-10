@@ -146,7 +146,6 @@
       v-if="showParseModal" 
       class="modal fade show d-block" 
       tabindex="-1"
-      @click.self="closeParseModal"
       style="z-index: 1055;"
     >
       <div class="modal-dialog modal-lg">

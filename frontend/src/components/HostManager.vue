@@ -107,7 +107,7 @@
     </div>
 
     <!-- 添加/编辑主机模态框 -->
-    <div v-if="showAddModal || showEditModal" class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" @click.self="closeModal">
+    <div v-if="showAddModal || showEditModal" class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">

@@ -178,7 +178,7 @@
             
             <!-- 构建状态区域 -->
             <div class="border-top pt-3 mt-3">
-              <!-- 最后构建 -->
+              <!-- 最后构建状态 -->
               <div class="mb-3">
                 <div class="d-flex align-items-center justify-content-between mb-2">
                   <span class="text-muted fw-semibold" style="font-size: 0.9rem;">
@@ -229,7 +229,7 @@
                   <span v-else class="text-muted" style="font-size: 0.85rem;">暂无构建</span>
                 </div>
                 <!-- 构建详情 -->
-                <div v-if="pipeline.last_build" class="d-flex justify-content-between align-items-center ms-3">
+                <div v-if="pipeline.last_build" class="d-flex justify-content-between align-items-center ms-3 mb-2">
                   <small class="text-muted" :title="formatDateTime(pipeline.last_build.completed_at || pipeline.last_build.created_at)" style="font-size: 0.8rem;">
                     <i class="fas fa-calendar-alt me-1"></i>
                     {{ formatDateTime(pipeline.last_build.completed_at || pipeline.last_build.created_at) }}
@@ -241,28 +241,37 @@
                 </div>
               </div>
               
-              <!-- 最后触发 -->
-              <div class="mb-2">
-                <div class="d-flex align-items-center justify-content-between mb-1">
-                  <span class="text-muted fw-semibold" style="font-size: 0.9rem;">
-                    <i class="fas fa-bolt me-1"></i>最后触发
-                  </span>
-                  <div class="text-muted small" v-if="pipeline.last_triggered_at" :title="formatDateTime(pipeline.last_triggered_at)" style="font-size: 0.8rem;">
-                    {{ formatDateTime(pipeline.last_triggered_at) }}
+              <!-- 统计指标 -->
+              <div class="row g-2">
+                <div class="col-4">
+                  <div class="bg-light rounded p-2 text-center">
+                    <div class="text-muted mb-1" style="font-size: 0.75rem;">
+                      <i class="fas fa-chart-line"></i> 触发次数
+                    </div>
+                    <div class="fw-bold" style="font-size: 1.1rem; color: #0d6efd;">
+                      {{ pipeline.trigger_count || 0 }}
+                    </div>
                   </div>
-                  <div class="text-muted small" v-else style="font-size: 0.8rem;">-</div>
                 </div>
-              </div>
-            </div>
-            
-            <!-- 统计信息 -->
-            <div class="border-top pt-2 mt-2">
-              <div class="row text-center">
-                <div class="col-12">
-                  <div class="text-muted mb-1" style="font-size: 0.85rem;">
-                    <i class="fas fa-chart-line me-1"></i>触发次数
+                <div class="col-4">
+                  <div class="bg-light rounded p-2 text-center">
+                    <div class="text-muted mb-1" style="font-size: 0.75rem;">
+                      <i class="fas fa-check-circle"></i> 成功
+                    </div>
+                    <div class="fw-bold" style="font-size: 1.1rem; color: #198754;">
+                      {{ pipeline.success_count || 0 }}
+                    </div>
                   </div>
-                  <div class="fw-bold" style="font-size: 1.2rem;">{{ pipeline.trigger_count || 0 }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="bg-light rounded p-2 text-center">
+                    <div class="text-muted mb-1" style="font-size: 0.75rem;">
+                      <i class="fas fa-times-circle"></i> 失败
+                    </div>
+                    <div class="fw-bold" style="font-size: 1.1rem; color: #dc3545;">
+                      {{ pipeline.failed_count || 0 }}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -272,7 +281,7 @@
     </div>
 
     <!-- 创建/编辑流水线模态框 -->
-    <div v-if="showModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="closeModal">
+    <div v-if="showModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">
@@ -960,7 +969,7 @@
     <div v-if="showModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
 
     <!-- Webhook URL 模态框 -->
-    <div v-if="showWebhookModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="showWebhookModal = false">
+    <div v-if="showWebhookModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1">
       <div class="modal-dialog">
         <div class="modal-content">
           <div class="modal-header">
@@ -1000,7 +1009,7 @@
     <div v-if="showWebhookModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
 
     <!-- 日志查看模态框 -->
-    <div v-if="showLogModal" class="modal fade show d-block" style="z-index: 1070;" tabindex="-1" @click.self="closeLogModal">
+    <div v-if="showLogModal" class="modal fade show d-block" style="z-index: 1070;" tabindex="-1">
       <div class="modal-dialog modal-xl" style="max-width: 90%;">
         <div class="modal-content">
           <div class="modal-header" :class="getLogStatusHeaderClass(selectedTask?.status)">
@@ -1074,10 +1083,10 @@
         </div>
       </div>
     </div>
-    <div v-if="showLogModal" class="modal-backdrop fade show" style="z-index: 1065;" @click="closeLogModal"></div>
+    <div v-if="showLogModal" class="modal-backdrop fade show" style="z-index: 1065;"></div>
 
     <!-- 历史构建模态框 -->
-    <div v-if="showHistoryModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="closeHistoryModal">
+    <div v-if="showHistoryModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1">
       <div class="modal-dialog modal-xl">
         <div class="modal-content">
           <div class="modal-header">
@@ -1262,7 +1271,7 @@
     <div v-if="showHistoryModal" class="modal-backdrop fade show" style="z-index: 1045;"></div>
 
     <!-- 资源包选择模态框 -->
-    <div v-if="showResourcePackageModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1" @click.self="showResourcePackageModal = false">
+    <div v-if="showResourcePackageModal" class="modal fade show" style="display: block; z-index: 1050;" tabindex="-1">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">

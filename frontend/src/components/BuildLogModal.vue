@@ -4,7 +4,6 @@
       v-if="modelValue"
       class="modal fade show d-block" 
       tabindex="-1"
-      @click.self="close"
     >
       <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">

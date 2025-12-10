@@ -5,7 +5,6 @@
       class="modal fade show d-block" 
       style="z-index: 1070;"
       tabindex="-1"
-      @click.self="close"
     >
       <div class="modal-dialog modal-xl" style="max-width: 90%;">
         <div class="modal-content">
@@ -95,7 +94,7 @@
       </div>
     </div>
     
-    <div v-if="modelValue" class="modal-backdrop fade show" style="z-index: 1065;" @click="close"></div>
+    <div v-if="modelValue" class="modal-backdrop fade show" style="z-index: 1065;"></div>
   </div>
 </template>
 

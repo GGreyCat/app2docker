@@ -318,7 +318,7 @@
 
 
     <!-- 加入流水线模态框 -->
-    <div v-if="showPipelineModal && selectedPipelineTask" class="modal fade show" style="display: block;" tabindex="-1" @click.self="closePipelineModal">
+    <div v-if="showPipelineModal && selectedPipelineTask" class="modal fade show" style="display: block;" tabindex="-1">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header bg-success text-white">
@@ -461,7 +461,7 @@
         </div>
       </div>
     </div>
-    <div v-if="showPipelineModal" class="modal-backdrop fade show" @click="closePipelineModal"></div>
+    <div v-if="showPipelineModal" class="modal-backdrop fade show"></div>
   </div>
 </template>
 

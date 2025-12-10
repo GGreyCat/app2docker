@@ -66,13 +66,13 @@
                 </button>
               </li>
               <li class="nav-item">
-                <button type="button" class="nav-link" :class="{ active: activeTab === 'template' }" @click="activeTab = 'template'">
-                  <i class="fas fa-layer-group"></i> 模板管理
+                <button type="button" class="nav-link" :class="{ active: activeTab === 'registry' }" @click="activeTab = 'registry'">
+                  <i class="fas fa-box"></i> 镜像仓库
                 </button>
               </li>
               <li class="nav-item">
-                <button type="button" class="nav-link" :class="{ active: activeTab === 'docker' }" @click="activeTab = 'docker'">
-                  <i class="fas fa-server"></i> Docker 管理
+                <button type="button" class="nav-link" :class="{ active: activeTab === 'template' }" @click="activeTab = 'template'">
+                  <i class="fas fa-layer-group"></i> 模板管理
                 </button>
               </li>
               <li class="nav-item">
@@ -83,6 +83,11 @@
               <li class="nav-item">
                 <button type="button" class="nav-link" :class="{ active: activeTab === 'host' }" @click="activeTab = 'host'">
                   <i class="fas fa-server"></i> 主机管理
+                </button>
+              </li>
+              <li class="nav-item">
+                <button type="button" class="nav-link" :class="{ active: activeTab === 'docker' }" @click="activeTab = 'docker'">
+                  <i class="fas fa-server"></i> Docker 管理
                 </button>
               </li>
             </ul>
@@ -97,6 +102,7 @@
             <DockerManager v-if="activeTab === 'docker'" />
             <PipelinePanel v-if="activeTab === 'pipeline'" />
             <DataSourcePanel v-if="activeTab === 'datasource'" />
+            <RegistryPanel v-if="activeTab === 'registry'" />
             <TaskManager v-if="activeTab === 'tasks'" />
             <ResourcePackagePanel v-if="activeTab === 'resource-package'" />
             <HostManager v-if="activeTab === 'host'" />
@@ -123,6 +129,7 @@ import { useModalEscape } from './composables/useModalEscape'
 import ConfigModal from './components/ConfigModal.vue'
 import DataSourcePanel from './components/DataSourcePanel.vue'
 import DockerManager from './components/DockerManager.vue'
+import RegistryPanel from './components/RegistryPanel.vue'
 import ResourcePackagePanel from './components/ResourcePackagePanel.vue'
 import ExportPanel from './components/ExportPanel.vue'
 import HostManager from './components/HostManager.vue'

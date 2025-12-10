@@ -3310,10 +3310,19 @@ async def list_pipelines(
                 task_type="build_from_source"
             )
             last_task = None
+            success_count = 0
+            failed_count = 0
             for task in all_tasks:
                 # 检查任务是否属于该流水线
                 task_pipeline_id = task.get("pipeline_id")
                 if task_pipeline_id == pipeline_id:
+                    # 统计成功和失败数量
+                    task_status = task.get("status")
+                    if task_status == "completed":
+                        success_count += 1
+                    elif task_status == "failed":
+                        failed_count += 1
+                    
                     # 查找所有状态的任务，取最新的一个
                     if not last_task or task.get("created_at", "") > last_task.get(
                         "created_at", ""
@@ -3336,6 +3345,10 @@ async def list_pipelines(
             else:
                 pipeline["last_build"] = None
                 pipeline["last_build_success"] = None
+            
+            # 添加成功/失败统计
+            pipeline["success_count"] = success_count
+            pipeline["failed_count"] = failed_count
 
         return JSONResponse({"pipelines": pipelines, "total": len(pipelines)})
     except Exception as e:

@@ -3,7 +3,6 @@
     class="modal fade" 
     :class="{ show: modelValue, 'd-block': modelValue }"
     tabindex="-1"
-    @click.self="close"
   >
     <div class="modal-dialog modal-xl">
       <div class="modal-content">
