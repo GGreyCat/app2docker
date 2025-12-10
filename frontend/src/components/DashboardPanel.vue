@@ -25,7 +25,7 @@
       <!-- 统计卡片 -->
       <div class="row g-3 mb-4">
         <!-- 任务统计 -->
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-3">
           <div class="card h-100 shadow-sm border-primary">
             <div class="card-body">
               <div class="d-flex align-items-center">
@@ -56,7 +56,7 @@
         </div>
 
         <!-- 流水线统计 -->
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-3">
           <div class="card h-100 shadow-sm border-info">
             <div class="card-body">
               <div class="d-flex align-items-center">
@@ -87,7 +87,7 @@
         </div>
 
         <!-- 数据源统计 -->
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-3">
           <div class="card h-100 shadow-sm border-success">
             <div class="card-body">
               <div class="d-flex align-items-center">
@@ -114,7 +114,7 @@
         </div>
 
         <!-- 镜像仓库统计 -->
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-3">
           <div class="card h-100 shadow-sm border-warning">
             <div class="card-body">
               <div class="d-flex align-items-center">
