@@ -3176,6 +3176,7 @@ class UpdatePipelineRequest(BaseModel):
     use_project_dockerfile: Optional[bool] = None
     dockerfile_name: Optional[str] = None
     webhook_secret: Optional[str] = None
+    webhook_token: Optional[str] = None
     enabled: Optional[bool] = None
     description: Optional[str] = None
     cron_expression: Optional[str] = None
@@ -3239,6 +3240,7 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
             use_project_dockerfile=request.use_project_dockerfile,
             dockerfile_name=request.dockerfile_name,
             webhook_secret=request.webhook_secret,
+            webhook_token=request.webhook_token,
             enabled=request.enabled,
             description=request.description,
             cron_expression=request.cron_expression,
@@ -3503,6 +3505,7 @@ async def update_pipeline(
             use_project_dockerfile=request.use_project_dockerfile,
             dockerfile_name=request.dockerfile_name,
             webhook_secret=request.webhook_secret,
+            webhook_token=request.webhook_token,
             enabled=request.enabled,
             description=request.description,
             cron_expression=request.cron_expression,

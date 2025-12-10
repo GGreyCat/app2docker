@@ -2309,15 +2309,17 @@ class BuildManager:
 
             # 决定使用项目中的 Dockerfile 还是模板
             if has_project_dockerfile and use_project_dockerfile:
+                # 计算相对路径，用于日志显示
+                dockerfile_relative_path = os.path.relpath(project_dockerfile_path, source_dir)
                 log(
-                    f"📄 检测到项目中的 Dockerfile ({dockerfile_name})，使用项目中的 Dockerfile\n"
+                    f"📄 检测到项目中的 Dockerfile: {dockerfile_relative_path}，使用项目中的 Dockerfile\n"
                 )
                 # 复制项目中的 Dockerfile 到构建上下文
                 # 重要：无论原始文件名是什么，都统一复制为 "Dockerfile"
                 # 这样可以避免 buildx 的文件名识别问题，确保构建时使用默认文件名
                 dockerfile_path = os.path.join(build_context, "Dockerfile")
                 shutil.copy2(project_dockerfile_path, dockerfile_path)
-                log(f"✅ 已使用项目中的 Dockerfile ({dockerfile_name})，复制为 Dockerfile\n")
+                log(f"✅ 已从 {dockerfile_relative_path} 复制到构建上下文的 Dockerfile\n")
             else:
                 if has_project_dockerfile and not use_project_dockerfile:
                     log(f"📋 项目中有 Dockerfile，但用户选择使用模板\n")

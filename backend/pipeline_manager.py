@@ -69,6 +69,7 @@ class PipelineManager:
         use_project_dockerfile: bool = True,
         dockerfile_name: str = "Dockerfile",  # Dockerfile文件名，默认Dockerfile
         webhook_secret: str = None,
+        webhook_token: str = None,  # Webhook Token（用于 URL），留空自动生成
         enabled: bool = True,
         description: str = "",
         cron_expression: str = None,
@@ -110,7 +111,15 @@ class PipelineManager:
         pipeline_id = str(uuid.uuid4())
 
         # 生成 Webhook Token（用于 URL）
-        webhook_token = str(uuid.uuid4())
+        # 如果提供了 webhook_token，使用提供的；否则自动生成
+        if not webhook_token:
+            webhook_token = str(uuid.uuid4())
+        
+        # 检查 token 是否已被其他流水线使用
+        with self.lock:
+            for existing_pipeline in self.pipelines.values():
+                if existing_pipeline.get("webhook_token") == webhook_token:
+                    raise ValueError(f"Webhook Token '{webhook_token}' 已被其他流水线使用")
 
         # 如果没有提供 webhook_secret，生成一个
         if not webhook_secret:
@@ -220,6 +229,7 @@ class PipelineManager:
         use_project_dockerfile: bool = None,
         dockerfile_name: str = None,
         webhook_secret: str = None,
+        webhook_token: str = None,
         enabled: bool = None,
         description: str = None,
         cron_expression: str = None,

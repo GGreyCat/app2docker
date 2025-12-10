@@ -775,13 +775,43 @@
                   id="webhook-pane"
                 >
                   <div class="mb-3">
+                    <label class="form-label">Webhook Token（用于 URL）</label>
+                    <div class="input-group input-group-sm">
+                      <input 
+                        v-model="formData.webhook_token" 
+                        type="text" 
+                        class="form-control font-monospace"
+                        placeholder="留空自动生成"
+                      >
+                      <button 
+                        class="btn btn-outline-secondary" 
+                        type="button"
+                        @click="regenerateWebhookToken"
+                        title="重新生成 Token"
+                      >
+                        <i class="fas fa-sync-alt"></i> 重新生成
+                      </button>
+                    </div>
+                    <small class="text-muted">用于构建 Webhook URL，留空将自动生成 UUID</small>
+                  </div>
+                  <div class="mb-3">
                     <label class="form-label">Webhook 密钥</label>
-                    <input 
-                      v-model="formData.webhook_secret" 
-                      type="text" 
-                      class="form-control form-control-sm"
-                      placeholder="留空自动生成"
-                    >
+                    <div class="input-group input-group-sm">
+                      <input 
+                        v-model="formData.webhook_secret" 
+                        type="text" 
+                        class="form-control font-monospace"
+                        placeholder="留空自动生成"
+                      >
+                      <button 
+                        class="btn btn-outline-secondary" 
+                        type="button"
+                        @click="regenerateWebhookSecret"
+                        title="重新生成密钥"
+                      >
+                        <i class="fas fa-sync-alt"></i> 重新生成
+                      </button>
+                    </div>
                     <small class="text-muted">用于验证 Webhook 签名（可选）</small>
                   </div>
                   <div class="mb-3">
@@ -1399,7 +1429,8 @@ const formData = ref({
   image_name: '',
   tag: 'latest',
   push: false,
-  webhook_secret: '',
+  webhook_token: '',  // Webhook Token（用于 URL）
+  webhook_secret: '',  // Webhook 密钥
   webhook_branch_strategy: 'use_push',  // Webhook分支策略
   branch_tag_mapping: [],  // 分支标签映射
   enabled: true,
@@ -1565,6 +1596,7 @@ function editPipeline(pipeline) {
     image_name: pipeline.image_name || '',
     tag: pipeline.tag || 'latest',
     push: pipeline.push || false,
+    webhook_token: pipeline.webhook_token || '',
     webhook_secret: pipeline.webhook_secret || '',
     webhook_branch_strategy: getWebhookBranchStrategy(pipeline),
     branch_tag_mapping: pipeline.branch_tag_mapping ? Object.entries(pipeline.branch_tag_mapping).map(([branch, tag]) => ({ branch, tag })) : [],
@@ -1694,6 +1726,13 @@ async function savePipeline() {
         : null,
       resource_package_configs: formData.value.resource_package_configs && formData.value.resource_package_configs.length > 0
         ? formData.value.resource_package_configs
+        : null,
+      // Webhook 配置：如果为空字符串，传递 null 让后端自动生成
+      webhook_token: formData.value.webhook_token && formData.value.webhook_token.trim() 
+        ? formData.value.webhook_token.trim() 
+        : null,
+      webhook_secret: formData.value.webhook_secret && formData.value.webhook_secret.trim() 
+        ? formData.value.webhook_secret.trim() 
         : null
     }
     // 移除webhook_branch_strategy，因为后端不需要这个字段
@@ -2055,8 +2094,34 @@ async function runPipeline(pipeline) {
 
 function showWebhookUrl(pipeline) {
   const baseUrl = window.location.origin
-  webhookUrl.value = `${baseUrl}/api/webhook/${pipeline.webhook_token}`
+  const token = pipeline.webhook_token || '未设置'
+  webhookUrl.value = token !== '未设置' ? `${baseUrl}/api/webhook/${token}` : '请先设置 Webhook Token'
   showWebhookModal.value = true
+}
+
+// 重新生成 Webhook Token
+function regenerateWebhookToken() {
+  if (confirm('确定要重新生成 Webhook Token 吗？重新生成后需要更新 Git 平台的 Webhook URL。')) {
+    // 生成新的 UUID
+    formData.value.webhook_token = generateUUID()
+  }
+}
+
+// 重新生成 Webhook Secret
+function regenerateWebhookSecret() {
+  if (confirm('确定要重新生成 Webhook 密钥吗？重新生成后需要更新 Git 平台的 Webhook Secret。')) {
+    // 生成新的 UUID
+    formData.value.webhook_secret = generateUUID()
+  }
+}
+
+// 生成 UUID（简单版本）
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
 }
 
 function copyWebhookUrl() {

@@ -1324,7 +1324,7 @@ async function rebuildTask(task) {
       template_params: taskConfig.template_params ? (typeof taskConfig.template_params === 'string' ? taskConfig.template_params : JSON.stringify(taskConfig.template_params)) : (task.template_params ? JSON.stringify(task.template_params) : undefined),
       sub_path: taskConfig.sub_path || task.sub_path || '',
       use_project_dockerfile: taskConfig.use_project_dockerfile !== false && task.use_project_dockerfile !== false,
-      dockerfile_name: taskConfig.dockerfile_name || task.dockerfile_name || 'Dockerfile',
+      dockerfile_name: taskConfig.dockerfile_name || task.dockerfile_name || task.dockerfileName || 'Dockerfile',
       push: (taskConfig.push || task.should_push) ? 'on' : 'off',  // API 使用 'on'/'off' 字符串
       source_id: taskConfig.source_id || task.source_id || null,
       selected_services: taskConfig.selected_services || task.selected_services || null,
