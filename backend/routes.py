@@ -4260,6 +4260,138 @@ async def get_dockerfiles(source_id: str, http_request: Request):
         )
 
 
+@router.post("/git-sources/scan-dockerfiles")
+async def scan_dockerfiles(
+    git_url: str = Body(..., embed=True, description="Git 仓库地址"),
+    branch: str = Body(..., embed=True, description="分支名称"),
+    source_id: Optional[str] = Body(
+        None, embed=True, description="数据源 ID（如果提供，将使用数据源的认证信息）"
+    ),
+    username: Optional[str] = Body(None, embed=True, description="Git 用户名（可选）"),
+    password: Optional[str] = Body(None, embed=True, description="Git 密码（可选）"),
+    http_request: Request = None,
+):
+    """扫描 Git 仓库指定分支的 Dockerfile"""
+    import subprocess
+    import tempfile
+    import shutil
+    import os
+    from urllib.parse import urlparse, urlunparse
+
+    try:
+        get_current_username(http_request)  # 验证登录
+
+        # 如果提供了 source_id，从数据源获取认证信息
+        if source_id:
+            source_manager = GitSourceManager()
+            source = source_manager.get_source(source_id, include_password=False)
+            if source:
+                auth_config = source_manager.get_auth_config(source_id)
+                if auth_config.get("username"):
+                    username = username or auth_config.get("username")
+                if auth_config.get("password"):
+                    password = password or auth_config.get("password")
+
+        # 如果提供了用户名和密码，嵌入到 URL 中
+        clone_url = git_url
+        if username and password and git_url.startswith("https://"):
+            parsed = urlparse(git_url)
+            clone_url = urlunparse(
+                (
+                    parsed.scheme,
+                    f"{username}:{password}@{parsed.netloc}",
+                    parsed.path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment,
+                )
+            )
+
+        # 临时克隆仓库以扫描 Dockerfile
+        temp_dir = tempfile.mkdtemp()
+        dockerfiles = {}
+
+        try:
+            # 准备克隆命令
+            clone_cmd = [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                branch,
+                clone_url,
+                temp_dir,
+            ]
+
+            clone_result = subprocess.run(
+                clone_cmd, capture_output=True, text=True, timeout=60
+            )
+
+            if clone_result.returncode == 0:
+                # 扫描 Dockerfile（递归查找）
+                for root, dirs, files in os.walk(temp_dir):
+                    # 跳过 .git 目录
+                    if ".git" in root.split(os.sep):
+                        continue
+
+                    for file in files:
+                        # 检查是否是 Dockerfile（不区分大小写，支持多种命名）
+                        file_lower = file.lower()
+                        if file_lower.startswith("dockerfile") or file_lower.endswith(
+                            ".dockerfile"
+                        ):
+                            file_path = os.path.join(root, file)
+                            relative_path = os.path.relpath(file_path, temp_dir)
+
+                            try:
+                                with open(file_path, "r", encoding="utf-8") as f:
+                                    dockerfiles[relative_path] = file  # 只保存文件名，不保存内容
+                                    print(f"✅ 扫描到 Dockerfile: {relative_path}")
+                            except Exception as e:
+                                print(f"⚠️ 读取 Dockerfile 失败 {relative_path}: {e}")
+            else:
+                error_msg = clone_result.stderr.strip()
+                if (
+                    "Authentication failed" in error_msg
+                    or "Permission denied" in error_msg
+                    or "fatal: could not read Username" in error_msg
+                ):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="仓库访问被拒绝，请检查认证信息是否正确",
+                    )
+                elif "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"分支 '{branch}' 不存在或仓库不存在",
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=400, detail=f"无法克隆仓库: {error_msg}"
+                    )
+        finally:
+            # 清理临时目录
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        # 返回 Dockerfile 文件名列表（按路径排序）
+        dockerfile_paths = sorted(dockerfiles.keys())
+        return JSONResponse(
+            {
+                "dockerfiles": dockerfile_paths,
+                "dockerfile_map": dockerfiles,  # 路径到文件名的映射
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, detail=f"扫描 Dockerfile 失败: {str(e)}"
+        )
+
+
 @router.get("/git-sources/{source_id}/dockerfiles/{dockerfile_path:path}")
 async def get_dockerfile(source_id: str, dockerfile_path: str, http_request: Request):
     """获取指定 Dockerfile 的内容"""

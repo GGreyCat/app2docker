@@ -317,9 +317,14 @@
           </div>
           <div v-if="buildConfig.useProjectDockerfile" class="mt-2">
             <label class="form-label">Dockerfile 文件名</label>
+            <div v-if="scanningDockerfiles" class="mb-2">
+              <span class="spinner-border spinner-border-sm me-2"></span>
+              <small class="text-muted">正在扫描项目中的 Dockerfile...</small>
+            </div>
             <select
               v-model="buildConfig.dockerfileName"
               class="form-select form-select-sm"
+              :disabled="scanningDockerfiles"
             >
               <option value="Dockerfile">Dockerfile（默认）</option>
               <option
@@ -330,6 +335,12 @@
                 {{ dockerfile }}
               </option>
             </select>
+            <small v-if="dockerfilesError" class="text-danger d-block mt-1">
+              <i class="fas fa-exclamation-triangle"></i> {{ dockerfilesError }}
+            </small>
+            <small v-else-if="availableDockerfiles.length > 0" class="text-muted d-block mt-1">
+              <i class="fas fa-check-circle"></i> 已扫描到 {{ availableDockerfiles.length }} 个 Dockerfile
+            </small>
           </div>
         </div>
 
@@ -1550,7 +1561,7 @@
 
 <script setup>
 import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 const currentStep = ref(1);
 const building = ref(false);
@@ -1587,6 +1598,8 @@ const branchesAndTags = ref({
   default_branch: null,
 });
 const availableDockerfiles = ref([]);
+const scanningDockerfiles = ref(false);
+const dockerfilesError = ref("");
 
 // 模板相关
 const templates = ref([]);
@@ -1928,12 +1941,79 @@ async function loadTemplateParams() {
   }
 }
 
-function onUseProjectDockerfileChange() {
+async function onUseProjectDockerfileChange() {
   if (!buildConfig.value.useProjectDockerfile) {
     loadTemplateParams();
+    availableDockerfiles.value = [];
+    dockerfilesError.value = "";
   } else {
     templateParams.value = [];
     buildConfig.value.templateParams = {};
+    // 扫描项目中的 Dockerfile
+    await scanProjectDockerfiles();
+  }
+}
+
+// 扫描项目中的 Dockerfile
+async function scanProjectDockerfiles() {
+  if (buildConfig.value.sourceType !== 'git' || !buildConfig.value.sourceId) {
+    return;
+  }
+
+  scanningDockerfiles.value = true;
+  dockerfilesError.value = "";
+  availableDockerfiles.value = [];
+
+  try {
+    // 获取数据源信息
+    const source = gitSources.value.find(
+      (s) => s.source_id === buildConfig.value.sourceId
+    );
+    if (!source) {
+      dockerfilesError.value = "数据源不存在";
+      return;
+    }
+
+    const gitUrl = source.git_url;
+    const branch = buildConfig.value.branch || branchesAndTags.value.default_branch || 'main';
+
+    if (!branch) {
+      dockerfilesError.value = "请先选择分支";
+      return;
+    }
+
+    // 调用 API 扫描 Dockerfile
+    const response = await axios.post('/api/git-sources/scan-dockerfiles', {
+      git_url: gitUrl,
+      branch: branch,
+      source_id: buildConfig.value.sourceId
+    });
+
+    if (response.data && response.data.dockerfiles) {
+      // 提取文件名（从路径中提取）
+      const dockerfileNames = response.data.dockerfiles.map(path => {
+        // 如果路径包含目录，只取文件名
+        const parts = path.split('/');
+        return parts[parts.length - 1];
+      });
+      
+      // 去重并排序
+      availableDockerfiles.value = [...new Set(dockerfileNames)].sort();
+      
+      // 如果扫描到 Dockerfile，默认选择第一个（如果不是默认的 Dockerfile）
+      if (availableDockerfiles.value.length > 0 && 
+          !availableDockerfiles.value.includes('Dockerfile')) {
+        buildConfig.value.dockerfileName = availableDockerfiles.value[0];
+      } else {
+        buildConfig.value.dockerfileName = 'Dockerfile';
+      }
+    }
+  } catch (error) {
+    console.error('扫描 Dockerfile 失败:', error);
+    dockerfilesError.value = error.response?.data?.detail || '扫描 Dockerfile 失败';
+    availableDockerfiles.value = [];
+  } finally {
+    scanningDockerfiles.value = false;
   }
 }
 
@@ -2846,6 +2926,23 @@ function getBuildModeLabel() {
   }
   return "未知";
 }
+
+// 监听分支变化，如果选择了使用项目 Dockerfile，重新扫描
+watch(
+  () => [buildConfig.value.branch, buildConfig.value.useProjectDockerfile, buildConfig.value.sourceId],
+  ([newBranch, useProjectDockerfile, sourceId], [oldBranch, oldUseProjectDockerfile, oldSourceId]) => {
+    // 当分支改变且选择了使用项目 Dockerfile 时，重新扫描
+    if (
+      useProjectDockerfile &&
+      sourceId &&
+      newBranch &&
+      newBranch !== oldBranch &&
+      buildConfig.value.sourceType === 'git'
+    ) {
+      scanProjectDockerfiles();
+    }
+  }
+);
 
 onMounted(() => {
   loadTemplates();
