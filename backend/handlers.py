@@ -1978,12 +1978,22 @@ class BuildManager:
             log("\n🎉🎉🎉 所有操作已完成！🎉🎉🎉\n")
             # 更新任务状态为完成
             self.task_manager.update_task_status(task_id, "completed")
+            # 从任务字典中移除已完成的线程
+            with self.lock:
+                if task_id in self.tasks:
+                    del self.tasks[task_id]
+                    print(f"✅ 任务 {task_id[:8]} 线程已清理")
 
         except Exception as e:
             clean_msg = re.sub(r"[\x00-\x1F\x7F]", " ", str(e)).strip()
             log(f"\n❌ 构建异常: {clean_msg}\n")
             # 更新任务状态为失败
             self.task_manager.update_task_status(task_id, "failed", error=clean_msg)
+            # 从任务字典中移除失败的线程
+            with self.lock:
+                if task_id in self.tasks:
+                    del self.tasks[task_id]
+                    print(f"✅ 任务 {task_id[:8]} 线程已清理（失败）")
             import traceback
 
             traceback.print_exc()
@@ -3051,6 +3061,11 @@ logs/
             log(f"✅ 所有操作已完成\n")
             # 更新任务状态为完成
             self.task_manager.update_task_status(task_id, "completed")
+            # 从任务字典中移除已完成的线程
+            with self.lock:
+                if task_id in self.tasks:
+                    del self.tasks[task_id]
+                    print(f"✅ 任务 {task_id[:8]} 线程已清理")
 
         except Exception as e:
             import traceback
@@ -3080,6 +3095,12 @@ logs/
             except Exception as status_error:
                 print(f"⚠️ 更新任务状态失败: {status_error}")
                 print(f"任务ID: {task_id}, 错误: {error_msg}")
+            
+            # 从任务字典中移除失败的线程
+            with self.lock:
+                if task_id in self.tasks:
+                    del self.tasks[task_id]
+                    print(f"✅ 任务 {task_id[:8]} 线程已清理（异常失败）")
 
             traceback.print_exc()
         finally:
