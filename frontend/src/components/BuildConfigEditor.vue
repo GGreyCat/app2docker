@@ -94,11 +94,10 @@
             <div class="col-md-6">
               <label class="form-label">项目类型 <span class="text-danger">*</span></label>
               <select v-model="formData.project_type" class="form-select form-select-sm">
-                <option value="jar">Java (JAR)</option>
-                <option value="nodejs">Node.js</option>
-                <option value="python">Python</option>
-                <option value="go">Go</option>
-                <option value="rust">Rust</option>
+                <option value="jar">Java 应用（JAR）</option>
+                <option value="nodejs">Node.js 应用</option>
+                <option value="python">Python 应用</option>
+                <option value="go">Go 应用</option>
                 <option value="web">静态网站</option>
               </select>
             </div>

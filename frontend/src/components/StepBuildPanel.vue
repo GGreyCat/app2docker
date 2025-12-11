@@ -1672,15 +1672,15 @@ const projectTypes = computed(() => {
     nodejs: "Node.js 应用",
     python: "Python 应用",
     go: "Go 应用",
-    rust: "Rust 应用",
+    web: "静态网站",
   };
 
   const orderMap = {
     jar: 1,
     nodejs: 2,
     python: 3,
-    rust: 4,
-    go: 5,
+    go: 4,
+    web: 5,
   };
 
   const result = [];
@@ -1699,8 +1699,8 @@ const projectTypes = computed(() => {
       { value: "jar", label: "Java 应用（JAR）", order: 1 },
       { value: "nodejs", label: "Node.js 应用", order: 2 },
       { value: "python", label: "Python 应用", order: 3 },
-      { value: "rust", label: "Rust 应用", order: 4 },
-      { value: "go", label: "Go 应用", order: 5 },
+      { value: "go", label: "Go 应用", order: 4 },
+      { value: "web", label: "静态网站", order: 5 },
     ];
   }
 
@@ -1996,7 +1996,7 @@ function getProjectTypeIcon(type) {
     nodejs: "fab fa-node-js",
     python: "fab fa-python",
     go: "fas fa-code",
-    rust: "fas fa-cog",
+    web: "fas fa-globe",
   };
   return iconMap[type] || "fas fa-cube";
 }
@@ -2007,7 +2007,7 @@ function getProjectTypeLabel(type) {
     nodejs: "Node.js",
     python: "Python",
     go: "Go",
-    rust: "Rust",
+    web: "静态网站",
   };
   return labelMap[type] || type;
 }

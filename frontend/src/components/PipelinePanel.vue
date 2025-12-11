@@ -499,10 +499,10 @@
                         <div class="col-md-6">
                           <label class="form-label">项目类型 <span class="text-danger">*</span></label>
                           <select v-model="formData.project_type" class="form-select form-select-sm">
-                            <option value="jar">Java (JAR)</option>
-                            <option value="nodejs">Node.js</option>
-                            <option value="python">Python</option>
-                            <option value="go">Go</option>
+                            <option value="jar">Java 应用（JAR）</option>
+                            <option value="nodejs">Node.js 应用</option>
+                            <option value="python">Python 应用</option>
+                            <option value="go">Go 应用</option>
                             <option value="web">静态网站</option>
                           </select>
                         </div>
@@ -3184,27 +3184,25 @@ function copyToClipboard(text, label) {
 }
 
 function getProjectTypeIcon(type) {
-  const icons = {
-    'jar': 'fab fa-java',
-    'nodejs': 'fab fa-node-js',
-    'python': 'fab fa-python',
-    'go': 'fab fa-golang',
-    'rust': 'fas fa-cog',
-    'static': 'fas fa-globe'
-  }
-  return icons[type] || 'fas fa-file-code'
+  const iconMap = {
+    jar: "fab fa-java",
+    nodejs: "fab fa-node-js",
+    python: "fab fa-python",
+    go: "fas fa-code",
+    web: "fas fa-globe",
+  };
+  return iconMap[type] || "fas fa-cube";
 }
 
 function getProjectTypeLabel(type) {
-  const labels = {
-    'jar': 'Java 应用',
-    'nodejs': 'Node.js 应用',
-    'python': 'Python 应用',
-    'go': 'Go 应用',
-    'rust': 'Rust 应用',
-    'static': '静态网站'
-  }
-  return labels[type] || type
+  const labelMap = {
+    jar: "Java 应用（JAR）",
+    nodejs: "Node.js 应用",
+    python: "Python 应用",
+    go: "Go 应用",
+    web: "静态网站",
+  };
+  return labelMap[type] || type;
 }
 
 function getProjectTypeBadgeClass(type) {
@@ -3213,8 +3211,7 @@ function getProjectTypeBadgeClass(type) {
     'nodejs': 'bg-success',
     'python': 'bg-info',
     'go': 'bg-primary',
-    'rust': 'bg-dark',
-    'static': 'bg-secondary'
+    'web': 'bg-secondary'
   }
   return classes[type] || 'bg-secondary'
 }

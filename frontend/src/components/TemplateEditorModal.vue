@@ -35,21 +35,18 @@
             </div>
             <div class="col-md-6">
               <label class="form-label">项目类型 <span class="text-danger">*</span></label>
-              <input 
+              <select 
                 v-model="form.projectType" 
-                list="project-types-editor"
-                class="form-control"
-                placeholder="选择或输入项目类型"
+                class="form-select"
                 :disabled="!canChangeProjectType"
-                @input="validateProjectType"
-              />
-              <datalist id="project-types-editor">
+                @change="validateProjectType"
+              >
                 <option value="jar">Java 应用（JAR）</option>
                 <option value="nodejs">Node.js 应用</option>
                 <option value="python">Python 应用</option>
-                <option value="rust">Rust 应用</option>
                 <option value="go">Go 应用</option>
-              </datalist>
+                <option value="web">静态网站</option>
+              </select>
               <div v-if="!canChangeProjectType" class="form-text text-warning">
                 <i class="fas fa-lock"></i> 内置模板的项目类型不可修改
               </div>
@@ -57,7 +54,7 @@
                 <i class="fas fa-info-circle"></i> 修改项目类型后，模板将移动到新目录
               </div>
               <div v-else class="form-text">
-                <i class="fas fa-lightbulb"></i> 可选择预设类型或自定义输入（如 python、go 等）
+                <i class="fas fa-lightbulb"></i> 请从下拉列表中选择项目类型
               </div>
             </div>
           </div>

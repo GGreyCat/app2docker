@@ -2,7 +2,7 @@
 
 🚀 **一键将应用打包成 Docker 镜像的可视化平台**
 
-支持 Java、Node.js、Python、Go、静态网站等多种应用类型，提供 Web 界面操作，无需编写 Dockerfile。
+支持 Java（JAR）、Node.js、Python、Go、静态网站等多种应用类型，提供 Web 界面操作，无需编写 Dockerfile。
 
 ![输入图片说明](img.png)
 
@@ -32,7 +32,7 @@ docker run -d \
 
 **分步构建流程**：
 
-- 支持 Java（.jar）、Node.js、Python、Go、静态网站
+- 支持 Java（JAR）、Node.js、Python、Go、静态网站
 - 选择数据源（文件上传或 Git 数据源）
 - 确认分支（Git 源）
 - 选择项目类型和模板
