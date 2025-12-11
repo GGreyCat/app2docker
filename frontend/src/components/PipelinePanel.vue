@@ -60,12 +60,16 @@
               <button 
                 class="btn btn-outline-success" 
                 @click="runPipeline(pipeline)"
-                :disabled="running === pipeline.pipeline_id || queuedPipelines.has(pipeline.pipeline_id)"
                 title="手动运行"
               >
                 <i class="fas fa-play"></i>
                 <span v-if="running === pipeline.pipeline_id" class="spinner-border spinner-border-sm ms-1"></span>
-                <span v-else-if="queuedPipelines.has(pipeline.pipeline_id)" class="badge bg-warning ms-1">排队中</span>
+                <span v-else-if="pipeline.queue_length && pipeline.queue_length > 0" class="badge bg-info ms-1">
+                  {{ pipeline.queue_length }}个排队
+                </span>
+                <span v-else-if="pipeline.current_task_status === 'running' || pipeline.current_task_status === 'pending'" class="badge bg-primary ms-1">
+                  运行中
+                </span>
               </button>
               <button 
                 class="btn btn-outline-secondary" 
@@ -194,8 +198,8 @@
                     <span v-else-if="pipeline.last_build.status === 'pending'" class="badge bg-warning">
                       <i class="fas fa-clock"></i> 等待中
                     </span>
-                    <span v-else-if="queuedPipelines.has(pipeline.pipeline_id)" class="badge bg-info">
-                      <i class="fas fa-list"></i> 排队中
+                    <span v-else-if="pipeline.queue_length && pipeline.queue_length > 0" class="badge bg-info">
+                      <i class="fas fa-list"></i> {{ pipeline.queue_length }}个排队
                     </span>
                     <button 
                       v-if="pipeline.last_build && pipeline.last_build.task_id && pipeline.last_build.status !== 'deleted'"
@@ -1959,19 +1963,12 @@ async function loadPipelines() {
     const res = await axios.get('/api/pipelines')
     pipelines.value = res.data.pipelines || []
     
-    // 更新排队状态：检查每个流水线的任务状态
+    // 更新排队状态：仅用于显示提示，不用于禁用按钮
     queuedPipelines.value.clear()
     pipelines.value.forEach(pipeline => {
       // 使用后端返回的队列信息
       if (pipeline.has_queued_tasks || (pipeline.queue_length && pipeline.queue_length > 0)) {
         queuedPipelines.value.add(pipeline.pipeline_id)
-      } else if (pipeline.last_build && pipeline.last_build.status === 'pending') {
-        // 如果最后构建是 pending，且有正在运行的任务，说明在排队
-        const currentTaskStatus = pipeline.current_task_status
-        if (currentTaskStatus === 'running' || currentTaskStatus === 'pending') {
-          // 有任务正在运行，pending 的任务在排队
-          queuedPipelines.value.add(pipeline.pipeline_id)
-        }
       }
     })
   } catch (error) {
@@ -3356,11 +3353,6 @@ async function deletePipeline(pipeline) {
 async function runPipeline(pipeline) {
   const pipelineId = pipeline.pipeline_id
   
-  // 防抖：如果已经在处理中，直接返回
-  if (running.value === pipelineId || queuedPipelines.value.has(pipelineId)) {
-    return
-  }
-  
   // 清除之前的防抖定时器
   if (debounceTimers.value[pipelineId]) {
     clearTimeout(debounceTimers.value[pipelineId])
@@ -3368,12 +3360,11 @@ async function runPipeline(pipeline) {
   
   // 设置防抖定时器（500ms）
   debounceTimers.value[pipelineId] = setTimeout(async () => {
-    // 再次检查是否已经在处理中
-    if (running.value === pipelineId || queuedPipelines.value.has(pipelineId)) {
-      return
-    }
+    // 显示确认对话框，提示排队信息
+    const queueInfo = pipeline.queue_length > 0 ? `\n当前已有 ${pipeline.queue_length} 个任务在排队` : ''
+    const runningInfo = (pipeline.current_task_status === 'running' || pipeline.current_task_status === 'pending') ? '\n当前有任务正在运行，新任务将加入队列' : ''
     
-    if (!confirm(`确定要运行流水线 "${pipeline.name}" 吗？`)) {
+    if (!confirm(`确定要运行流水线 "${pipeline.name}" 吗？${queueInfo}${runningInfo}`)) {
       delete debounceTimers.value[pipelineId]
       return
     }
@@ -3385,7 +3376,6 @@ async function runPipeline(pipeline) {
       // 检查任务状态
       if (res.data.status === 'queued') {
         // 任务已加入队列
-        queuedPipelines.value.add(pipelineId)
         const queueInfo = res.data.queue_length ? `（队列位置: ${res.data.queue_length}）` : ''
         alert(`流水线已加入队列！${queueInfo}\n分支: ${res.data.branch || '默认'}`)
       } else if (res.data.task_id) {
@@ -3400,7 +3390,6 @@ async function runPipeline(pipeline) {
       
       // 如果是409冲突（已有任务运行），说明任务已加入队列
       if (error.response?.status === 409) {
-        queuedPipelines.value.add(pipelineId)
         alert(`流水线已加入队列！\n${errorMsg}`)
         loadPipelines()
       } else {
