@@ -225,41 +225,8 @@
               <span v-else>-</span>
             </td>
             <td class="text-end">
-              <div class="btn-group btn-group-sm">
-                <button 
-                  v-if="task.task_category === 'build' && task.status === 'completed' && task.task_type === 'build_from_source' && !task.pipeline_id"
-                  class="btn btn-sm btn-outline-success"
-                  @click="addToPipeline(task)"
-                  :title="'加入流水线'"
-                >
-                  <i class="fas fa-plus-circle"></i> 流水线
-                </button>
-                <button 
-                  v-if="task.task_category === 'build' && task.status === 'failed' && task.task_type === 'build_from_source'"
-                  class="btn btn-sm btn-outline-primary"
-                  @click="rebuildTask(task)"
-                  :disabled="rebuilding === task.task_id"
-                  :title="'重新构建'"
-                >
-                  <i class="fas fa-redo"></i> 重建
-                  <span v-if="rebuilding === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
-                </button>
-                <button 
-                  v-if="task.task_category === 'build' && task.task_type === 'build_from_source'"
-                  class="btn btn-sm btn-outline-secondary"
-                  @click="viewTaskConfig(task)"
-                  :title="'查看任务配置JSON'"
-                >
-                  <i class="fas fa-code"></i> JSON
-                </button>
-                <button 
-                  v-if="task.task_category === 'build' && task.task_type === 'build_from_source'"
-                  class="btn btn-sm btn-outline-success"
-                  @click="saveAsPipeline(task)"
-                  :title="'另存为流水线'"
-                >
-                  <i class="fas fa-save"></i> 流水线
-                </button>
+              <div class="btn-group btn-group-sm" role="group">
+                <!-- 主要操作：日志和下载 -->
                 <button 
                   v-if="task.task_category === 'build'"
                   class="btn btn-sm btn-outline-info"
@@ -268,16 +235,6 @@
                   :title="'查看构建日志'"
                 >
                   <i class="fas fa-terminal"></i> 日志
-                </button>
-                <button 
-                  v-if="task.task_category === 'export' && task.status === 'failed'"
-                  class="btn btn-sm btn-outline-primary"
-                  @click="retryExportTask(task)"
-                  :disabled="retrying === task.task_id"
-                  :title="'重试导出任务'"
-                >
-                  <i class="fas fa-redo"></i> 重试
-                  <span v-if="retrying === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
                 </button>
                 <button 
                   v-if="task.task_category === 'export' && task.status === 'completed'"
@@ -289,6 +246,66 @@
                   <i class="fas fa-download"></i>
                   <span v-if="downloading === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
                 </button>
+                
+                <!-- 更多操作下拉菜单 -->
+                <div v-if="hasMoreActions(task)" class="btn-group btn-group-sm">
+                  <button 
+                    type="button" 
+                    class="btn btn-sm btn-outline-secondary dropdown-toggle" 
+                    data-bs-toggle="dropdown"
+                    aria-expanded="false"
+                  >
+                    <i class="fas fa-ellipsis-v"></i> 更多
+                  </button>
+                  <ul class="dropdown-menu dropdown-menu-end">
+                    <!-- 构建任务的更多操作 -->
+                    <template v-if="task.task_category === 'build'">
+                      <li v-if="task.status === 'completed' && !task.pipeline_id && task.task_type === 'build_from_source'">
+                        <a class="dropdown-item" href="#" @click.prevent="addToPipeline(task)">
+                          <i class="fas fa-plus-circle text-success"></i> 加入流水线
+                        </a>
+                      </li>
+                      <li>
+                        <a class="dropdown-item" href="#" @click.prevent="saveAsPipeline(task)">
+                          <i class="fas fa-save text-primary"></i> 另存为流水线
+                        </a>
+                      </li>
+                      <li v-if="task.status === 'failed'">
+                        <a 
+                          class="dropdown-item" 
+                          href="#" 
+                          @click.prevent="rebuildTask(task)"
+                          :class="{ 'disabled': rebuilding === task.task_id }"
+                        >
+                          <i class="fas fa-redo text-primary"></i> 重新构建
+                          <span v-if="rebuilding === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
+                        </a>
+                      </li>
+                      <li>
+                        <a class="dropdown-item" href="#" @click.prevent="viewTaskConfig(task)">
+                          <i class="fas fa-code text-secondary"></i> 查看配置JSON
+                        </a>
+                      </li>
+                    </template>
+                    
+                    <!-- 导出任务的更多操作 -->
+                    <template v-if="task.task_category === 'export'">
+                      <li v-if="task.status === 'failed'">
+                        <a 
+                          class="dropdown-item" 
+                          href="#" 
+                          @click.prevent="retryExportTask(task)"
+                          :class="{ 'disabled': retrying === task.task_id }"
+                        >
+                          <i class="fas fa-redo text-primary"></i> 重试导出
+                          <span v-if="retrying === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
+                        </a>
+                      </li>
+                    </template>
+                  </ul>
+                </div>
+                
+                <!-- 停止/删除按钮 -->
                 <button 
                   class="btn btn-sm"
                   :class="(task.status === 'running' || task.status === 'pending') ? 'btn-outline-warning' : 'btn-outline-danger'"
@@ -705,6 +722,19 @@ function resetPage() {
 // handleLogsOrError 函数已移除，统一使用 viewLogs 函数
 // 错误弹窗相关函数已移除，错误信息现在显示在日志顶部
 
+// 判断任务是否有更多操作（用于显示/隐藏"更多"下拉菜单）
+function hasMoreActions(task) {
+  if (task.task_category === 'build') {
+    // 构建任务：至少有"另存为流水线"或"查看配置JSON"或"重新构建"或"加入流水线"等操作
+    // 这些操作都放在"更多"菜单中，所以只要有构建任务就显示
+    return true
+  } else if (task.task_category === 'export') {
+    // 导出任务：失败状态时需要显示"重试"
+    return task.status === 'failed'
+  }
+  return false
+}
+
 function formatTime(isoString) {
   if (!isoString) return '-'
   const date = new Date(isoString)
@@ -916,7 +946,7 @@ async function saveAsPipeline(task) {
     // 填充流水线表单
     pipelineForm.value = {
       name: `${task.image || '任务'}_${task.tag || 'latest'}_${new Date().toISOString().slice(0, 10)}`,
-      description: `从任务 ${task.task_id.slice(0, 8)} 创建`,
+      description: `从任务 ${task.task_id.slice(0, 8)} 创建${task.source === '流水线' ? '（流水线触发）' : ''}`,
       git_url: config.git_url || '',
       branch: config.branch || '',
       image_name: config.image_name || task.image || '',
@@ -928,12 +958,12 @@ async function saveAsPipeline(task) {
       use_project_dockerfile: config.use_project_dockerfile !== false,
       dockerfile_name: config.dockerfile_name || 'Dockerfile',
       source_id: config.source_id || null,
-      push: config.should_push || false,
+      push: config.should_push || config.push || false,
       selected_services: config.selected_services || null,
       service_push_config: config.service_push_config || null,
       service_template_params: config.service_template_params || null,
       push_mode: config.push_mode || 'multi',
-      resource_package_configs: config.resource_package_ids || null,
+      resource_package_configs: config.resource_package_configs || config.resource_package_ids || null,
       trigger_webhook: true,
       trigger_schedule: false,
       cron_expression: '',

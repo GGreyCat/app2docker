@@ -868,30 +868,53 @@
                           </h6>
                           <div class="alert alert-info mb-3">
                             <i class="fas fa-info-circle"></i> 
-                            <strong>多服务模式：</strong>每个服务的镜像名称将自动生成为 <code>{{ formData.image_name || 'myapp/demo' }}/服务名</code>，标签使用全局标签 <code>{{ formData.tag || 'latest' }}</code>
+                            <strong>多服务模式：</strong>可以为每个服务设置独立的镜像名称和标签。留空时，镜像名称将自动生成为 <code>{{ formData.image_name || 'myapp/demo' }}/服务名</code>，标签使用全局标签 <code>{{ formData.tag || 'latest' }}</code>
                           </div>
                           <div class="table-responsive">
                             <table class="table table-sm table-bordered">
                               <thead>
                                 <tr>
-                                  <th style="width: 25%">服务名</th>
-                                  <th style="width: 40%">镜像名称（自动生成）</th>
+                                  <th style="width: 20%">服务名</th>
+                                  <th style="width: 35%">镜像名称</th>
                                   <th style="width: 15%">标签</th>
                                   <th style="width: 10%">推送</th>
-                                  <th style="width: 10%">操作</th>
+                                  <th style="width: 20%">操作</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 <tr v-for="serviceName in formData.selected_services" :key="serviceName">
                                   <td><code>{{ serviceName }}</code></td>
                                   <td>
-                                    <code class="text-primary">{{ getServiceDefaultImageName(serviceName) }}</code>
+                                    <div class="d-flex align-items-center gap-1">
+                                      <input
+                                        type="text"
+                                        v-model="getServiceConfig(serviceName).imageName"
+                                        :placeholder="getServiceDefaultImageName(serviceName)"
+                                        class="form-control form-control-sm"
+                                        @blur="onServiceImageNameBlur(serviceName)"
+                                      />
+                                      <button
+                                        v-if="getServiceConfig(serviceName).imageName"
+                                        type="button"
+                                        class="btn btn-link btn-sm p-0"
+                                        style="font-size: 0.75rem; flex-shrink: 0"
+                                        @click="resetServiceImageName(serviceName)"
+                                        title="恢复默认"
+                                      >
+                                        <i class="fas fa-undo"></i>
+                                      </button>
+                                    </div>
                                     <small class="text-muted d-block mt-1" style="font-size: 0.7rem;">
-                                      <i class="fas fa-info-circle"></i> 基于全局镜像名称自动生成
+                                      <i class="fas fa-info-circle"></i> 默认: {{ getServiceDefaultImageName(serviceName) }}
                                     </small>
                                   </td>
                                   <td>
-                                    <code class="text-secondary">{{ formData.tag || 'latest' }}</code>
+                                    <input
+                                      type="text"
+                                      v-model="getServiceConfig(serviceName).tag"
+                                      :placeholder="formData.tag || 'latest'"
+                                      class="form-control form-control-sm"
+                                    />
                                   </td>
                                   <td class="text-center">
                                     <input
@@ -2163,26 +2186,51 @@ async function savePipeline() {
         : formData.value.selected_services && formData.value.selected_services.length > 0
         ? formData.value.selected_services
         : null,
-      // 规范化服务推送配置（确保所有配置都是对象格式，只保留 push 字段）
+      // 规范化服务推送配置（确保所有配置都是对象格式，包含 push、imageName 和 tag 字段）
       service_push_config: (() => {
-        const config = formData.value.service_push_config
-        if (!config || Object.keys(config).length === 0) {
+        // 只处理已选择的服务
+        const selectedServices = formData.value.push_mode === 'single' && formData.value.selected_service 
+          ? [formData.value.selected_service] 
+          : (formData.value.selected_services || [])
+        
+        if (selectedServices.length === 0) {
           return null
         }
-        // 确保所有配置都是对象格式，只保留 push 字段（imageName 和 tag 由全局配置自动生成）
+        
+        const config = formData.value.service_push_config || {}
         const normalized = {}
-        Object.keys(config).forEach(serviceName => {
+        
+        selectedServices.forEach(serviceName => {
           const value = config[serviceName]
           if (typeof value === 'boolean') {
+            // 旧格式：只有push字段
             normalized[serviceName] = {
-              push: value
+              push: value,
+              imageName: getServiceDefaultImageName(serviceName),
+              tag: formData.value.tag || 'latest'
             }
           } else if (value && typeof value === 'object') {
+            // 获取最终镜像名（自定义或默认）
+            const customImageName = value.imageName && value.imageName.trim()
+            const finalImageName = customImageName || getServiceDefaultImageName(serviceName)
+            // 获取最终标签（自定义或全局）
+            const finalTag = (value.tag && value.tag.trim()) || formData.value.tag || 'latest'
+            
             normalized[serviceName] = {
-              push: value.push !== undefined ? value.push : false
+              push: value.push !== undefined ? value.push : false,
+              imageName: finalImageName,
+              tag: finalTag
+            }
+          } else {
+            // 新服务，使用默认值
+            normalized[serviceName] = {
+              push: false,
+              imageName: getServiceDefaultImageName(serviceName),
+              tag: formData.value.tag || 'latest'
             }
           }
         })
+        
         return Object.keys(normalized).length > 0 ? normalized : null
       })(),
       service_template_params: formData.value.service_template_params && Object.keys(formData.value.service_template_params).length > 0
@@ -2685,17 +2733,20 @@ function initializeServiceConfigs() {
   formData.value.selected_services.forEach(serviceName => {
     if (formData.value.service_push_config[serviceName] === undefined || 
         typeof formData.value.service_push_config[serviceName] === 'boolean') {
-      // 如果是布尔值（旧格式），转换为对象格式（只保留 push 字段）
+      // 如果是布尔值（旧格式），转换为对象格式
       const oldValue = formData.value.service_push_config[serviceName]
       formData.value.service_push_config[serviceName] = {
-        push: typeof oldValue === 'boolean' ? oldValue : false
+        push: typeof oldValue === 'boolean' ? oldValue : false,
+        imageName: '',
+        tag: ''
       }
     } else if (formData.value.service_push_config[serviceName] && typeof formData.value.service_push_config[serviceName] === 'object') {
-      // 确保对象格式只包含 push 字段，移除 imageName 和 tag（这些由全局配置自动生成）
+      // 确保对象格式包含所有字段
+      const config = formData.value.service_push_config[serviceName]
       formData.value.service_push_config[serviceName] = {
-        push: formData.value.service_push_config[serviceName].push !== undefined 
-          ? formData.value.service_push_config[serviceName].push 
-          : false
+        push: config.push !== undefined ? config.push : false,
+        imageName: config.imageName !== undefined ? config.imageName : '',
+        tag: config.tag !== undefined ? config.tag : ''
       }
     }
   })
@@ -2730,14 +2781,17 @@ function toggleService(serviceName) {
         typeof formData.value.service_push_config[serviceName] === 'boolean') {
       const oldValue = formData.value.service_push_config[serviceName]
       formData.value.service_push_config[serviceName] = {
-        push: typeof oldValue === 'boolean' ? oldValue : false
+        push: typeof oldValue === 'boolean' ? oldValue : false,
+        imageName: '',
+        tag: ''
       }
     } else if (formData.value.service_push_config[serviceName] && typeof formData.value.service_push_config[serviceName] === 'object') {
-      // 确保只保留 push 字段
+      // 确保包含所有字段
+      const config = formData.value.service_push_config[serviceName]
       formData.value.service_push_config[serviceName] = {
-        push: formData.value.service_push_config[serviceName].push !== undefined 
-          ? formData.value.service_push_config[serviceName].push 
-          : false
+        push: config.push !== undefined ? config.push : false,
+        imageName: config.imageName !== undefined ? config.imageName : '',
+        tag: config.tag !== undefined ? config.tag : ''
       }
     }
   }
@@ -2757,14 +2811,17 @@ function onServiceSelectionChange() {
         typeof formData.value.service_push_config[serviceName] === 'boolean') {
       const oldValue = formData.value.service_push_config[serviceName]
       formData.value.service_push_config[serviceName] = {
-        push: typeof oldValue === 'boolean' ? oldValue : false
+        push: typeof oldValue === 'boolean' ? oldValue : false,
+        imageName: '',
+        tag: ''
       }
     } else if (formData.value.service_push_config[serviceName] && typeof formData.value.service_push_config[serviceName] === 'object') {
-      // 确保只保留 push 字段
+      // 确保包含所有字段
+      const config = formData.value.service_push_config[serviceName]
       formData.value.service_push_config[serviceName] = {
-        push: formData.value.service_push_config[serviceName].push !== undefined 
-          ? formData.value.service_push_config[serviceName].push 
-          : false
+        push: config.push !== undefined ? config.push : false,
+        imageName: config.imageName !== undefined ? config.imageName : '',
+        tag: config.tag !== undefined ? config.tag : ''
       }
     }
   })
@@ -2793,7 +2850,7 @@ function removeService(serviceName) {
   }
 }
 
-// 获取服务配置对象（确保返回对象格式，只包含 push 字段）
+// 获取服务配置对象（确保返回对象格式，包含 push、imageName 和 tag 字段）
 function getServiceConfig(serviceName) {
   if (!formData.value.service_push_config) {
     formData.value.service_push_config = {}
@@ -2803,15 +2860,17 @@ function getServiceConfig(serviceName) {
       typeof formData.value.service_push_config[serviceName] === 'boolean') {
     const oldValue = formData.value.service_push_config[serviceName]
     formData.value.service_push_config[serviceName] = {
-      push: typeof oldValue === 'boolean' ? oldValue : false
+      push: typeof oldValue === 'boolean' ? oldValue : false,
+      imageName: '',
+      tag: ''
     }
   } else if (formData.value.service_push_config[serviceName] && typeof formData.value.service_push_config[serviceName] === 'object') {
-    // 确保只包含 push 字段，移除 imageName 和 tag（这些由全局配置自动生成）
+    // 确保包含所有字段
     const config = formData.value.service_push_config[serviceName]
-    if (config.imageName !== undefined || config.tag !== undefined) {
-      formData.value.service_push_config[serviceName] = {
-        push: config.push !== undefined ? config.push : false
-      }
+    formData.value.service_push_config[serviceName] = {
+      push: config.push !== undefined ? config.push : false,
+      imageName: config.imageName !== undefined ? config.imageName : '',
+      tag: config.tag !== undefined ? config.tag : ''
     }
   }
   return formData.value.service_push_config[serviceName]
@@ -2828,7 +2887,22 @@ function getServiceDefaultImageName(serviceName) {
   return `${prefix}/${serviceName}`
 }
 
-// 规范化服务推送配置（将旧格式的布尔值转换为新格式的对象，只保留 push 字段）
+// 服务镜像名输入框失焦处理
+function onServiceImageNameBlur(serviceName) {
+  const config = getServiceConfig(serviceName)
+  // 如果用户清空了自定义镜像名，确保使用默认值
+  if (!config.imageName || !config.imageName.trim()) {
+    config.imageName = ''
+  }
+}
+
+// 恢复默认镜像名
+function resetServiceImageName(serviceName) {
+  const config = getServiceConfig(serviceName)
+  config.imageName = ''
+}
+
+// 规范化服务推送配置（将旧格式的布尔值转换为新格式的对象，保留 push、imageName 和 tag 字段）
 function normalizeServicePushConfig(config) {
   if (!config || typeof config !== 'object') {
     return {}
@@ -2839,12 +2913,16 @@ function normalizeServicePushConfig(config) {
     // 如果是布尔值（旧格式），转换为对象格式
     if (typeof value === 'boolean') {
       normalized[serviceName] = {
-        push: value
+        push: value,
+        imageName: '',
+        tag: ''
       }
     } else if (value && typeof value === 'object') {
-      // 已经是对象格式，只保留 push 字段（imageName 和 tag 由全局配置自动生成）
+      // 已经是对象格式，保留所有字段
       normalized[serviceName] = {
-        push: value.push !== undefined ? value.push : false
+        push: value.push !== undefined ? value.push : false,
+        imageName: value.imageName !== undefined ? value.imageName : '',
+        tag: value.tag !== undefined ? value.tag : ''
       }
     }
   })
@@ -2980,6 +3058,23 @@ const filteredTemplates = computed(() => {
 
 // 构建配置JSON（基于统一的任务配置结构）
 const buildConfigJson = computed(() => {
+  // 构建服务推送配置（与StepBuildPanel格式一致）
+  const servicePushConfig = {}
+  if (formData.value.push_mode === 'multi' && formData.value.selected_services && formData.value.selected_services.length > 0) {
+    formData.value.selected_services.forEach(serviceName => {
+      const config = getServiceConfig(serviceName)
+      const customImageName = config.imageName && config.imageName.trim()
+      const finalImageName = customImageName || getServiceDefaultImageName(serviceName)
+      const finalTag = (config.tag && config.tag.trim()) || formData.value.tag || 'latest'
+      
+      servicePushConfig[serviceName] = {
+        push: config.push || false,
+        imageName: finalImageName,
+        tag: finalTag
+      }
+    })
+  }
+  
   const config = {
     git_url: formData.value.git_url || '',
     image_name: formData.value.image_name || '',
@@ -2994,7 +3089,7 @@ const buildConfigJson = computed(() => {
     dockerfile_name: formData.value.dockerfile_name || 'Dockerfile',
     source_id: formData.value.source_id || null,
     selected_services: formData.value.selected_services || [],
-    service_push_config: formData.value.service_push_config || {},
+    service_push_config: Object.keys(servicePushConfig).length > 0 ? servicePushConfig : {},
     service_template_params: formData.value.service_template_params || {},
     push_mode: formData.value.push_mode || 'multi',
     resource_package_ids: (formData.value.resource_package_configs || []).map(pkg => pkg.package_id || pkg),
