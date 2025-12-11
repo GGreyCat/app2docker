@@ -119,6 +119,15 @@ class PipelineScheduler:
             pipeline_id = pipeline.get("pipeline_id")
             pipeline_name = pipeline.get("name", "unknown")
             
+            # 检查防抖（5秒内重复触发直接加入队列）
+            if self.pipeline_manager.check_debounce(pipeline_id, debounce_seconds=5):
+                from backend.handlers import pipeline_to_task_config
+                task_config = pipeline_to_task_config(pipeline, trigger_source="cron")
+                queue_id = self.pipeline_manager.add_task_to_queue(pipeline_id, task_config)
+                queue_length = self.pipeline_manager.get_queue_length(pipeline_id)
+                print(f"⚠️ 流水线 {pipeline_name} 触发过于频繁（防抖），将本次定时触发加入队列，队列长度: {queue_length}")
+                return
+            
             # 检查是否有正在运行的任务
             current_task_id = self.pipeline_manager.get_pipeline_running_task(pipeline_id)
             if current_task_id:
@@ -128,7 +137,12 @@ class PipelineScheduler:
                 
                 task = self.build_manager.task_manager.get_task(current_task_id)
                 if task and task.get("status") in ["pending", "running"]:
-                    print(f"⚠️ 流水线 {pipeline_name} 已有正在执行的任务 {current_task_id[:8]}，忽略本次定时触发")
+                    # 有任务正在运行，将新任务加入队列
+                    from backend.handlers import pipeline_to_task_config
+                    task_config = pipeline_to_task_config(pipeline, trigger_source="cron")
+                    queue_id = self.pipeline_manager.add_task_to_queue(pipeline_id, task_config)
+                    queue_length = self.pipeline_manager.get_queue_length(pipeline_id)
+                    print(f"⚠️ 流水线 {pipeline_name} 已有正在执行的任务 {current_task_id[:8]}，将本次定时触发加入队列，队列长度: {queue_length}")
                     return
                 else:
                     # 任务已完成或不存在，解绑
@@ -154,7 +168,7 @@ class PipelineScheduler:
                 trigger_source="cron",
                 trigger_info={
                     "cron_expression": pipeline.get("cron_expression"),
-                    "branch": branch,
+                    "branch": pipeline.get("branch"),
                 }
             )
             

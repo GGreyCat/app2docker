@@ -3678,6 +3678,39 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
         if not pipeline:
             raise HTTPException(status_code=404, detail="流水线不存在")
 
+        # 检查防抖（5秒内重复触发直接加入队列）
+        if manager.check_debounce(pipeline_id, debounce_seconds=5):
+            from backend.handlers import pipeline_to_task_config
+            task_config = pipeline_to_task_config(pipeline, trigger_source="manual")
+            task_config["username"] = username
+            queue_id = manager.add_task_to_queue(pipeline_id, task_config)
+            queue_length = manager.get_queue_length(pipeline_id)
+            
+            OperationLogger.log(
+                username,
+                "pipeline_run_queued",
+                {
+                    "pipeline_id": pipeline_id,
+                    "pipeline_name": pipeline.get("name"),
+                    "queue_id": queue_id,
+                    "queue_length": queue_length,
+                    "branch": pipeline.get("branch"),
+                    "trigger_source": "manual",
+                    "reason": "debounce",
+                },
+            )
+            
+            return JSONResponse(
+                {
+                    "message": "触发过于频繁，任务已加入队列",
+                    "status": "queued",
+                    "queue_id": queue_id,
+                    "queue_length": queue_length,
+                    "pipeline": pipeline.get("name"),
+                    "branch": pipeline.get("branch"),
+                }
+            )
+
         # 检查是否有正在运行的任务
         current_task_id = manager.get_pipeline_running_task(pipeline_id)
         if current_task_id:
@@ -3974,8 +4007,48 @@ async def webhook_trigger(webhook_token: str, request: Request):
                         f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (忽略推送分支: {webhook_branch})"
                     )
 
-        # 检查是否有正在运行的任务
+        # 检查防抖（5秒内重复触发直接加入队列）
         pipeline_id = pipeline["pipeline_id"]
+        if manager.check_debounce(pipeline_id, debounce_seconds=5):
+            from backend.handlers import pipeline_to_task_config
+            branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
+            tag = pipeline.get("tag", "latest")
+            branch_for_tag_mapping = webhook_branch if webhook_branch else branch
+            if branch_for_tag_mapping and branch_tag_mapping:
+                if branch_for_tag_mapping in branch_tag_mapping:
+                    tag = branch_tag_mapping[branch_for_tag_mapping]
+                else:
+                    import fnmatch
+                    for pattern, mapped_tag in branch_tag_mapping.items():
+                        if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
+                            tag = mapped_tag
+                            break
+            task_config = pipeline_to_task_config(
+                pipeline, 
+                trigger_source="webhook", 
+                branch=branch, 
+                tag=tag,
+                webhook_branch=webhook_branch,
+                branch_tag_mapping=branch_tag_mapping
+            )
+            queue_id = manager.add_task_to_queue(pipeline_id, task_config)
+            queue_length = manager.get_queue_length(pipeline_id)
+            
+            print(
+                f"⚠️ 流水线 {pipeline.get('name')} 触发过于频繁（防抖），将本次触发加入队列"
+            )
+            
+            return JSONResponse(
+                {
+                    "message": "触发过于频繁，任务已加入队列",
+                    "status": "queued",
+                    "queue_id": queue_id,
+                    "queue_length": queue_length,
+                    "pipeline": pipeline.get("name"),
+                }
+            )
+
+        # 检查是否有正在运行的任务
         current_task_id = manager.get_pipeline_running_task(pipeline_id)
         if current_task_id:
             # 检查任务是否真的在运行

@@ -420,6 +420,8 @@ class PipelineManager:
                     "created_at": datetime.now().isoformat(),
                 }
                 pipeline["task_queue"].append(queue_item)
+                # 更新最后触发时间（用于防抖）
+                pipeline["last_triggered_at"] = datetime.now().isoformat()
                 self._save_pipelines()
 
         return queue_id
@@ -490,6 +492,34 @@ class PipelineManager:
                 if pipeline.get("current_task_id") == task_id:
                     return pipeline_id
             return None
+
+    def check_debounce(self, pipeline_id: str, debounce_seconds: int = 5) -> bool:
+        """检查是否在防抖时间内
+        
+        Args:
+            pipeline_id: 流水线 ID
+            debounce_seconds: 防抖时间（秒），默认5秒
+        
+        Returns:
+            True 表示在防抖时间内，False 表示可以触发
+        """
+        with self.lock:
+            if pipeline_id not in self.pipelines:
+                return False
+            
+            pipeline = self.pipelines[pipeline_id]
+            last_triggered_at = pipeline.get("last_triggered_at")
+            
+            if not last_triggered_at:
+                return False
+            
+            try:
+                last_triggered = datetime.fromisoformat(last_triggered_at)
+                now = datetime.now()
+                elapsed = (now - last_triggered).total_seconds()
+                return elapsed < debounce_seconds
+            except Exception:
+                return False
 
     def verify_webhook_signature(
         self,
