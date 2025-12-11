@@ -477,7 +477,7 @@
                               v-if="formData.source_id || formData.git_url"
                               class="btn btn-outline-secondary btn-sm" 
                               type="button"
-                              @click="refreshBranches"
+                              @click="refreshBranches(true)"
                               :disabled="refreshingBranches"
                               title="刷新分支列表"
                             >
@@ -1624,6 +1624,7 @@
 <script setup>
 import axios from 'axios'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { clearGitCache, getGitCache, getGitInfoWithCache } from '../utils/gitCache.js'
 
 const pipelines = ref([])
 const templates = ref([])
@@ -1781,6 +1782,25 @@ async function onSourceSelected() {
     formData.value.git_url = source.git_url
     formData.value.source_id = source.source_id
     
+    // 先尝试从缓存获取
+    const cached = getGitCache(source.git_url, sourceId)
+    if (cached) {
+      branchesAndTags.value = cached
+      repoVerified.value = true
+      
+      // 设置默认分支（如果当前没有选择分支，或选择的分支不在列表中）
+      if (!formData.value.branch || !cached.branches.includes(formData.value.branch)) {
+        formData.value.branch = cached.default_branch || cached.branches[0] || ''
+      }
+      
+      // 如果使用项目 Dockerfile，自动扫描 Dockerfile
+      if (formData.value.use_project_dockerfile && formData.value.branch) {
+        scanDockerfiles()
+        loadServices()
+      }
+      return
+    }
+    
     // 如果数据源有分支信息，使用数据源的分支列表和默认分支
     if (source.branches && source.branches.length > 0) {
       branchesAndTags.value = {
@@ -1802,6 +1822,12 @@ async function onSourceSelected() {
       }
     } else if (source.default_branch && !formData.value.branch) {
       formData.value.branch = source.default_branch
+      // 尝试从缓存获取（如果API数据源没有缓存，尝试从URL缓存获取）
+      const urlCached = getGitCache(source.git_url, null)
+      if (urlCached) {
+        branchesAndTags.value = urlCached
+        repoVerified.value = true
+      }
     }
   }
 }
@@ -1820,8 +1846,23 @@ watch(() => formData.value.git_url, () => {
       formData.value.source_id = source.source_id
     }
     
-    // 如果数据源有分支信息，加载分支列表
-    if (source.branches && source.branches.length > 0) {
+    // 先尝试从缓存获取
+    const cached = getGitCache(source.git_url, source.source_id)
+    if (cached) {
+      branchesAndTags.value = cached
+      repoVerified.value = true
+      
+      // 如果数据源有默认分支且当前没有选择分支，设置默认分支
+      if (!formData.value.branch || !cached.branches.includes(formData.value.branch)) {
+        formData.value.branch = cached.default_branch || cached.branches[0] || ''
+      }
+      
+      // 如果使用项目 Dockerfile 且有分支，自动扫描 Dockerfile
+      if (formData.value.use_project_dockerfile && formData.value.branch) {
+        scanDockerfiles()
+      }
+    } else if (source.branches && source.branches.length > 0) {
+      // 如果数据源有分支信息，加载分支列表
       branchesAndTags.value = {
         branches: source.branches || [],
         tags: source.tags || [],
@@ -2313,7 +2354,7 @@ function closeModal() {
 }
 
 // 刷新分支列表
-async function refreshBranches() {
+async function refreshBranches(forceRefresh = true) {
   const sourceId = formData.value.source_id
   if (!sourceId) {
     if (!formData.value.git_url) {
@@ -2323,16 +2364,31 @@ async function refreshBranches() {
     // 如果没有数据源但有 Git URL，使用 verify-git-repo API
     try {
       refreshingBranches.value = true
-      const response = await axios.post('/api/verify-git-repo', {
-        git_url: formData.value.git_url,
-        source_id: null
-      })
       
-      if (response.data && response.data.branches) {
+      // 如果强制刷新，先清除缓存
+      if (forceRefresh) {
+        clearGitCache(formData.value.git_url, null)
+      }
+      
+      // 使用缓存机制获取Git信息
+      const data = await getGitInfoWithCache(
+        async () => {
+          const response = await axios.post('/api/verify-git-repo', {
+            git_url: formData.value.git_url,
+            source_id: null
+          })
+          return response.data
+        },
+        formData.value.git_url,
+        null,
+        forceRefresh
+      )
+      
+      if (data && data.branches) {
         branchesAndTags.value = {
-          branches: response.data.branches || [],
-          tags: response.data.tags || [],
-          default_branch: response.data.default_branch || null,
+          branches: data.branches || [],
+          tags: data.tags || [],
+          default_branch: data.default_branch || null,
         }
         repoVerified.value = true
         
@@ -2360,18 +2416,31 @@ async function refreshBranches() {
 
   refreshingBranches.value = true
   try {
-    // 调用验证Git仓库的API来刷新分支列表
-    const response = await axios.post('/api/verify-git-repo', {
-      git_url: source.git_url,
-      source_id: sourceId,
-    })
+    // 如果强制刷新，先清除缓存
+    if (forceRefresh) {
+      clearGitCache(source.git_url, sourceId)
+    }
+    
+    // 使用缓存机制获取Git信息
+    const data = await getGitInfoWithCache(
+      async () => {
+        const response = await axios.post('/api/verify-git-repo', {
+          git_url: source.git_url,
+          source_id: sourceId,
+        })
+        return response.data
+      },
+      source.git_url,
+      sourceId,
+      forceRefresh
+    )
 
-    if (response.data && response.data.branches) {
+    if (data && data.branches) {
       // 更新分支和标签列表
       branchesAndTags.value = {
-        branches: response.data.branches || [],
-        tags: response.data.tags || [],
-        default_branch: response.data.default_branch || null,
+        branches: data.branches || [],
+        tags: data.tags || [],
+        default_branch: data.default_branch || null,
       }
       repoVerified.value = true
 

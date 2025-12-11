@@ -119,14 +119,14 @@
         <thead class="table-light">
           <tr>
             <th style="width: 100px;">类型</th>
-            <th style="width: 200px;">镜像/任务</th>
-            <th style="width: 100px;">标签</th>
-            <th style="width: 100px;">来源</th>
-            <th style="width: 120px;">状态</th>
-            <th style="width: 150px;">创建时间</th>
-            <th style="width: 100px;">时长</th>
-            <th style="width: 100px;">文件大小</th>
-            <th style="width: 200px;" class="text-end">操作</th>
+            <th style="width: 180px;">镜像/任务</th>
+            <th style="width: 80px;">标签</th>
+            <th style="width: 90px;">来源</th>
+            <th style="width: 100px;">状态</th>
+            <th style="width: 140px;">创建时间</th>
+            <th style="width: 90px;">时长</th>
+            <th style="width: 90px;">文件大小</th>
+            <th style="width: auto; min-width: 200px;" class="text-end">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -225,85 +225,75 @@
               <span v-else>-</span>
             </td>
             <td class="text-end">
-              <div class="btn-group btn-group-sm" role="group">
-                <!-- 主要操作：日志和下载 -->
-                <button 
-                  v-if="task.task_category === 'build'"
-                  class="btn btn-sm btn-outline-info"
-                  @click="viewLogs(task)"
-                  :disabled="viewingLogs === task.task_id"
-                  :title="'查看构建日志'"
-                >
-                  <i class="fas fa-terminal"></i> 日志
-                </button>
-                <button 
-                  v-if="task.task_category === 'export' && task.status === 'completed'"
-                  class="btn btn-sm btn-success"
-                  @click="downloadTask(task)"
-                  :disabled="downloading === task.task_id"
-                  :title="'下载导出文件'"
-                >
-                  <i class="fas fa-download"></i>
-                  <span v-if="downloading === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
-                </button>
-                
-                <!-- 更多操作下拉菜单 -->
-                <div v-if="hasMoreActions(task)" class="btn-group btn-group-sm">
+              <div class="d-flex gap-1 justify-content-end flex-wrap">
+                <!-- 构建任务操作 -->
+                <template v-if="task.task_category === 'build'">
                   <button 
-                    type="button" 
-                    class="btn btn-sm btn-outline-secondary dropdown-toggle" 
-                    data-bs-toggle="dropdown"
-                    aria-expanded="false"
+                    class="btn btn-sm btn-outline-info"
+                    @click="viewLogs(task)"
+                    :disabled="viewingLogs === task.task_id"
+                    :title="'查看构建日志'"
                   >
-                    <i class="fas fa-ellipsis-v"></i> 更多
+                    <i class="fas fa-terminal"></i>
                   </button>
-                  <ul class="dropdown-menu dropdown-menu-end">
-                    <!-- 构建任务的更多操作 -->
-                    <template v-if="task.task_category === 'build'">
-                      <li v-if="task.status === 'completed' && !task.pipeline_id && task.task_type === 'build_from_source'">
-                        <a class="dropdown-item" href="#" @click.prevent="addToPipeline(task)">
-                          <i class="fas fa-plus-circle text-success"></i> 加入流水线
-                        </a>
-                      </li>
-                      <li>
-                        <a class="dropdown-item" href="#" @click.prevent="saveAsPipeline(task)">
-                          <i class="fas fa-save text-primary"></i> 另存为流水线
-                        </a>
-                      </li>
-                      <li v-if="task.status === 'failed'">
-                        <a 
-                          class="dropdown-item" 
-                          href="#" 
-                          @click.prevent="rebuildTask(task)"
-                          :class="{ 'disabled': rebuilding === task.task_id }"
-                        >
-                          <i class="fas fa-redo text-primary"></i> 重新构建
-                          <span v-if="rebuilding === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
-                        </a>
-                      </li>
-                      <li>
-                        <a class="dropdown-item" href="#" @click.prevent="viewTaskConfig(task)">
-                          <i class="fas fa-code text-secondary"></i> 查看配置JSON
-                        </a>
-                      </li>
-                    </template>
-                    
-                    <!-- 导出任务的更多操作 -->
-                    <template v-if="task.task_category === 'export'">
-                      <li v-if="task.status === 'failed'">
-                        <a 
-                          class="dropdown-item" 
-                          href="#" 
-                          @click.prevent="retryExportTask(task)"
-                          :class="{ 'disabled': retrying === task.task_id }"
-                        >
-                          <i class="fas fa-redo text-primary"></i> 重试导出
-                          <span v-if="retrying === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
-                        </a>
-                      </li>
-                    </template>
-                  </ul>
-                </div>
+                  <button 
+                    v-if="task.status === 'completed' && !task.pipeline_id && task.task_type === 'build_from_source'"
+                    class="btn btn-sm btn-outline-success"
+                    @click="addToPipeline(task)"
+                    :title="'加入流水线'"
+                  >
+                    <i class="fas fa-plus-circle"></i>
+                  </button>
+                  <button 
+                    v-if="task.source !== '流水线' && !task.pipeline_id"
+                    class="btn btn-sm btn-outline-primary"
+                    @click="saveAsPipeline(task)"
+                    :title="'另存为流水线'"
+                  >
+                    <i class="fas fa-save"></i>
+                  </button>
+                  <button 
+                    v-if="task.status === 'failed'"
+                    class="btn btn-sm btn-outline-warning"
+                    @click="rebuildTask(task)"
+                    :disabled="rebuilding === task.task_id"
+                    :title="'重新构建'"
+                  >
+                    <i class="fas fa-redo"></i>
+                    <span v-if="rebuilding === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
+                  </button>
+                  <button 
+                    class="btn btn-sm btn-outline-secondary"
+                    @click="viewTaskConfig(task)"
+                    :title="'查看配置JSON'"
+                  >
+                    <i class="fas fa-code"></i>
+                  </button>
+                </template>
+                
+                <!-- 导出任务操作 -->
+                <template v-if="task.task_category === 'export'">
+                  <button 
+                    v-if="task.status === 'completed'"
+                    class="btn btn-sm btn-success"
+                    @click="downloadTask(task)"
+                    :disabled="downloading === task.task_id"
+                    :title="'下载导出文件'"
+                  >
+                    <i class="fas fa-download"></i>
+                    <span v-if="downloading === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
+                  </button>
+                  <button 
+                    v-if="task.status === 'failed'"
+                    class="btn btn-sm btn-outline-warning"
+                    @click="retryExportTask(task)"
+                    :disabled="retrying === task.task_id"
+                    :title="'重试导出'"
+                  >
+                    <i class="fas fa-redo"></i>
+                    <span v-if="retrying === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
+                  </button>
+                </template>
                 
                 <!-- 停止/删除按钮 -->
                 <button 
@@ -311,10 +301,9 @@
                   :class="(task.status === 'running' || task.status === 'pending') ? 'btn-outline-warning' : 'btn-outline-danger'"
                   @click="(task.status === 'running' || task.status === 'pending') ? stopTask(task) : deleteTask(task)"
                   :disabled="(task.status === 'running' || task.status === 'pending') ? (stopping === task.task_id) : (deleting === task.task_id)"
-                  :title="(task.status === 'running' || task.status === 'pending') ? '停止任务' : '删除任务（只有停止、完成或失败的任务才能删除）'"
+                  :title="(task.status === 'running' || task.status === 'pending') ? '停止任务' : '删除任务'"
                 >
-                  <i :class="(task.status === 'running' || task.status === 'pending') ? 'fas fa-stop' : 'fas fa-trash'"></i> 
-                  {{ (task.status === 'running' || task.status === 'pending') ? '停止' : '删除' }}
+                  <i :class="(task.status === 'running' || task.status === 'pending') ? 'fas fa-stop' : 'fas fa-trash'"></i>
                   <span v-if="(task.status === 'running' || task.status === 'pending') && stopping === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
                   <span v-if="(task.status !== 'running' && task.status !== 'pending') && deleting === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
                 </button>
@@ -722,18 +711,6 @@ function resetPage() {
 // handleLogsOrError 函数已移除，统一使用 viewLogs 函数
 // 错误弹窗相关函数已移除，错误信息现在显示在日志顶部
 
-// 判断任务是否有更多操作（用于显示/隐藏"更多"下拉菜单）
-function hasMoreActions(task) {
-  if (task.task_category === 'build') {
-    // 构建任务：至少有"另存为流水线"或"查看配置JSON"或"重新构建"或"加入流水线"等操作
-    // 这些操作都放在"更多"菜单中，所以只要有构建任务就显示
-    return true
-  } else if (task.task_category === 'export') {
-    // 导出任务：失败状态时需要显示"重试"
-    return task.status === 'failed'
-  }
-  return false
-}
 
 function formatTime(isoString) {
   if (!isoString) return '-'
@@ -1757,6 +1734,32 @@ pre {
 
 .pagination .page-item.active .page-link {
   font-weight: 600;
+}
+
+/* 操作按钮优化 */
+.d-flex.gap-1 .btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  min-width: 32px;
+}
+
+.d-flex.gap-1 .btn i {
+  font-size: 0.85rem;
+}
+
+/* 表格响应式优化 */
+@media (max-width: 1400px) {
+  .table th:nth-child(5),
+  .table td:nth-child(5) {
+    display: none;
+  }
+}
+
+@media (max-width: 1200px) {
+  .table th:nth-child(7),
+  .table td:nth-child(7) {
+    display: none;
+  }
 }
 </style>
 

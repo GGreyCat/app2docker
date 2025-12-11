@@ -215,7 +215,7 @@
               v-if="repoVerified"
               class="btn btn-outline-secondary"
               type="button"
-              @click="refreshBranches"
+              @click="refreshBranches(true)"
               :disabled="refreshingBranches"
               title="刷新分支列表"
             >
@@ -1598,6 +1598,7 @@
 <script setup>
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
+import { getGitInfoWithCache, getGitCache, clearGitCache } from '../utils/gitCache.js';
 
 const currentStep = ref(1);
 const building = ref(false);
@@ -1828,6 +1829,16 @@ async function onSourceSelected() {
     (s) => s.source_id === buildConfig.value.sourceId
   );
   if (source) {
+    // 先尝试从缓存获取
+    const cached = getGitCache(source.git_url, source.source_id);
+    if (cached) {
+      branchesAndTags.value = cached;
+      repoVerified.value = true;
+      buildConfig.value.branch = cached.default_branch || cached.branches[0] || "";
+      return;
+    }
+    
+    // 如果缓存不存在，使用数据源中的信息
     branchesAndTags.value = {
       branches: source.branches || [],
       tags: source.tags || [],
@@ -1839,7 +1850,7 @@ async function onSourceSelected() {
 }
 
 // 刷新分支列表
-async function refreshBranches() {
+async function refreshBranches(forceRefresh = true) {
   if (!buildConfig.value.sourceId) {
     return;
   }
@@ -1853,18 +1864,31 @@ async function refreshBranches() {
 
   refreshingBranches.value = true;
   try {
-    // 调用验证Git仓库的API来刷新分支列表
-    const response = await axios.post("/api/verify-git-repo", {
-      git_url: source.git_url,
-      source_id: buildConfig.value.sourceId,
-    });
+    // 如果强制刷新，先清除缓存
+    if (forceRefresh) {
+      clearGitCache(source.git_url, buildConfig.value.sourceId);
+    }
+    
+    // 使用缓存机制获取Git信息
+    const data = await getGitInfoWithCache(
+      async () => {
+        const response = await axios.post("/api/verify-git-repo", {
+          git_url: source.git_url,
+          source_id: buildConfig.value.sourceId,
+        });
+        return response.data;
+      },
+      source.git_url,
+      buildConfig.value.sourceId,
+      forceRefresh
+    );
 
-    if (response.data && response.data.branches) {
+    if (data && data.branches) {
       // 更新分支和标签列表
       branchesAndTags.value = {
-        branches: response.data.branches || [],
-        tags: response.data.tags || [],
-        default_branch: response.data.default_branch || null,
+        branches: data.branches || [],
+        tags: data.tags || [],
+        default_branch: data.default_branch || null,
       };
 
       // 如果当前选择的分支不在新列表中，重置为默认分支
