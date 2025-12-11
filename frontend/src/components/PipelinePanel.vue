@@ -342,7 +342,18 @@
                     @click="activeTab = 'build'"
                     id="build-tab"
                   >
-                    <i class="fas fa-cogs"></i> Dockerfile & 镜像配置
+                    <i class="fas fa-cogs"></i> 编辑构建配置JSON
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button 
+                    class="nav-link" 
+                    :class="{ active: activeTab === 'dockerfile' }"
+                    type="button"
+                    @click="activeTab = 'dockerfile'"
+                    id="dockerfile-tab"
+                  >
+                    <i class="fas fa-file-code"></i> Dockerfile 配置
                   </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -589,7 +600,7 @@
                     <!-- 视图切换和查看JSON按钮 -->
                     <div class="d-flex justify-content-between align-items-center mb-3">
                       <h6 class="mb-0">
-                        <i class="fas fa-cogs"></i> Dockerfile & 镜像配置
+                        <i class="fas fa-cogs"></i> 编辑构建配置JSON
                       </h6>
                       <div class="btn-group btn-group-sm" role="group">
                         <button 
@@ -797,6 +808,176 @@
                       </div>
                     </div>
                   </div>
+                  </div>
+                </div>
+
+                <!-- Dockerfile 配置 Tab -->
+                <div 
+                  class="tab-pane fade" 
+                  :class="{ 'show active': activeTab === 'dockerfile' }"
+                  role="tabpanel"
+                  id="dockerfile-pane"
+                >
+                  <!-- Dockerfile 来源选择 -->
+                  <div class="card mb-3">
+                    <div class="card-header bg-light">
+                      <h6 class="mb-0">
+                        <i class="fas fa-layer-group text-primary"></i> Dockerfile 来源
+                      </h6>
+                    </div>
+                    <div class="card-body">
+                      <div class="mb-2">
+                        <label class="form-label">Dockerfile 来源 <span class="text-danger">*</span></label>
+                        <div class="btn-group w-100" role="group">
+                          <input
+                            type="radio"
+                            class="btn-check"
+                            id="dockerfile-from-project"
+                            :value="true"
+                            v-model="formData.use_project_dockerfile"
+                            @change="onDockerfileSourceChange"
+                          />
+                          <label class="btn btn-outline-primary" for="dockerfile-from-project">
+                            <i class="fas fa-file-code"></i> 从项目中选择
+                          </label>
+                          
+                          <input
+                            type="radio"
+                            class="btn-check"
+                            id="dockerfile-from-template"
+                            :value="false"
+                            v-model="formData.use_project_dockerfile"
+                            @change="onDockerfileSourceChange"
+                          />
+                          <label class="btn btn-outline-primary" for="dockerfile-from-template">
+                            <i class="fas fa-layer-group"></i> 从模板库中选择
+                          </label>
+                        </div>
+                        <div class="form-text small text-muted mt-1">
+                          <i class="fas fa-info-circle"></i> 选择 Dockerfile 的来源方式
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 模式1: 从项目中选择 Dockerfile -->
+                  <div v-if="formData.use_project_dockerfile" class="card mb-3">
+                    <div class="card-header bg-light">
+                      <h6 class="mb-0">
+                        <i class="fas fa-file-code text-primary"></i> 从项目中选择 Dockerfile
+                      </h6>
+                    </div>
+                    <div class="card-body">
+                      <div class="mb-2">
+                        <label class="form-label">Dockerfile 文件 <span class="text-danger">*</span></label>
+                        
+                        <!-- 当前选择提示 -->
+                        <div v-if="formData.dockerfile_name && formData.dockerfile_name !== ''" class="alert alert-success alert-sm py-2 mb-2">
+                          <i class="fas fa-check-circle me-2"></i>
+                          <strong>当前选择：</strong>{{ formData.dockerfile_name }}
+                        </div>
+                        
+                        <div v-if="scanningDockerfiles" class="mb-2">
+                          <span class="spinner-border spinner-border-sm me-2"></span>
+                          <small class="text-muted">正在扫描项目中的 Dockerfile...</small>
+                        </div>
+                        <div class="input-group input-group-sm">
+                          <select
+                            v-model="formData.dockerfile_name"
+                            class="form-select form-select-sm"
+                            :disabled="scanningDockerfiles || !formData.branch"
+                            required
+                          >
+                            <option value="">-- 请先选择分支 --</option>
+                            <option value="Dockerfile">Dockerfile（默认，根目录）</option>
+                            <!-- 如果当前选择不在扫描列表中，也要显示出来 -->
+                            <option
+                              v-if="formData.dockerfile_name && 
+                                    formData.dockerfile_name !== 'Dockerfile' && 
+                                    !availableDockerfiles.some(df => df.path === formData.dockerfile_name)"
+                              :value="formData.dockerfile_name"
+                              :key="'current-' + formData.dockerfile_name"
+                            >
+                              {{ formData.dockerfile_name }} (当前选择)
+                            </option>
+                            <option
+                              v-for="dockerfile in availableDockerfiles"
+                              :key="dockerfile.path"
+                              :value="dockerfile.path"
+                            >
+                              {{ dockerfile.path }} {{ dockerfile.path !== dockerfile.name ? `(${dockerfile.name})` : '' }}
+                            </option>
+                          </select>
+                          <button
+                            class="btn btn-outline-secondary"
+                            type="button"
+                            @click="scanDockerfiles(true, true)"
+                            :disabled="scanningDockerfiles || (!formData.branch && !branchesAndTags.default_branch)"
+                            title="刷新 Dockerfile 列表（强制刷新）"
+                          >
+                            <i v-if="scanningDockerfiles" class="fas fa-spinner fa-spin"></i>
+                            <i v-else class="fas fa-sync-alt"></i>
+                          </button>
+                        </div>
+                        <small v-if="dockerfilesError" class="text-danger d-block mt-1">
+                          <i class="fas fa-exclamation-triangle"></i> {{ dockerfilesError }}
+                        </small>
+                        <small v-else-if="availableDockerfiles.length > 0" class="text-muted d-block mt-1">
+                          <i class="fas fa-check-circle"></i> 已扫描到 {{ availableDockerfiles.length }} 个 Dockerfile
+                        </small>
+                        <small v-else-if="formData.branch" class="text-muted d-block mt-1">
+                          <i class="fas fa-info-circle"></i> 请先选择分支，然后点击刷新按钮扫描项目中的 Dockerfile
+                        </small>
+                        <small v-else class="text-muted d-block mt-1">
+                          <i class="fas fa-info-circle"></i> 请先在 Git 配置中选择分支
+                        </small>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 模式2: 从模板库中选择 -->
+                  <div v-if="!formData.use_project_dockerfile" class="card mb-3">
+                    <div class="card-header bg-light">
+                      <h6 class="mb-0">
+                        <i class="fas fa-layer-group text-primary"></i> 从模板库中选择
+                      </h6>
+                    </div>
+                    <div class="card-body">
+                      <div class="mb-2">
+                        <label class="form-label">模板 <span class="text-danger">*</span></label>
+                        
+                        <!-- 当前选择提示 -->
+                        <div v-if="formData.template && formData.template !== ''" class="alert alert-success alert-sm py-2 mb-2">
+                          <i class="fas fa-check-circle me-2"></i>
+                          <strong>当前选择：</strong>{{ formData.template }}
+                          <span v-if="filteredTemplates.find(t => t.name === formData.template)">
+                            ({{ filteredTemplates.find(t => t.name === formData.template).project_type }})
+                          </span>
+                        </div>
+                        
+                        <select
+                          v-model="formData.template"
+                          class="form-select form-select-sm"
+                          @change="onTemplateChange"
+                          :disabled="!formData.project_type"
+                          required
+                        >
+                          <option value="">-- 请先选择项目类型 --</option>
+                          <option v-for="tpl in filteredTemplates" :key="tpl.name" :value="tpl.name">
+                            {{ tpl.name }} ({{ tpl.project_type }})
+                          </option>
+                        </select>
+                        <small v-if="formData.project_type && filteredTemplates.length === 0" class="text-muted d-block mt-1">
+                          <i class="fas fa-info-circle"></i> 当前项目类型没有可用的模板
+                        </small>
+                        <small v-else-if="formData.project_type && filteredTemplates.length > 0" class="text-muted d-block mt-1">
+                          <i class="fas fa-check-circle"></i> 已按项目类型过滤，共 {{ filteredTemplates.length }} 个模板
+                        </small>
+                        <small v-else class="text-muted d-block mt-1">
+                          <i class="fas fa-info-circle"></i> 请先在 Git 配置中选择项目类型
+                        </small>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1908,9 +2089,17 @@ const activeTab = ref('basic')  // 当前激活的Tab
 const showBuildConfigJsonModal = ref(false)  // 显示构建配置JSON模态框
 const buildConfigJsonText = ref('')  // JSON文本内容（用于CodeMirror）
 const buildConfigJsonError = ref('')  // JSON验证错误
+const dockerfileContentText = ref('')  // Dockerfile文本内容（用于CodeMirror）
+const loadingDockerfile = ref(false)  // 正在从仓库加载Dockerfile
 
 // CodeMirror 扩展配置（JSON模式，使用JavaScript模式）
 const jsonEditorExtensions = [
+  StreamLanguage.define(javascript),
+  oneDark
+]
+
+// CodeMirror 扩展配置（Dockerfile模式，使用JavaScript模式）
+const dockerfileEditorExtensions = [
   StreamLanguage.define(javascript),
   oneDark
 ]
@@ -1935,6 +2124,7 @@ const formData = ref({
   cron_expression: '',  // Cron 表达式
   dockerfile_name: 'Dockerfile',  // Dockerfile文件名，默认Dockerfile
   use_project_dockerfile: true,  // 是否使用项目中的 Dockerfile
+  dockerfile_content: '',  // Dockerfile内容（用于直接编辑）
   source_id: '',  // 数据源ID
   // 多服务配置
   push_mode: 'multi',  // 推送模式：'single' 或 'multi'
@@ -2221,6 +2411,10 @@ function applyBuildConfigJson() {
     if (config.sub_path !== undefined && config.sub_path !== null) formData.value.sub_path = config.sub_path
     if (config.use_project_dockerfile !== undefined) formData.value.use_project_dockerfile = config.use_project_dockerfile
     if (config.dockerfile_name !== undefined) formData.value.dockerfile_name = config.dockerfile_name
+    if (config.dockerfile_content !== undefined && config.dockerfile_content !== null) {
+      formData.value.dockerfile_content = config.dockerfile_content
+      dockerfileContentText.value = config.dockerfile_content
+    }
     if (config.source_id !== undefined && config.source_id !== null) formData.value.source_id = config.source_id
     if (config.selected_services !== undefined) formData.value.selected_services = config.selected_services || []
     if (config.service_push_config !== undefined) formData.value.service_push_config = config.service_push_config || {}
@@ -2250,6 +2444,54 @@ function applyBuildConfigJson() {
   } catch (e) {
     alert(`应用失败: ${e.message}`)
   }
+}
+
+// 从仓库加载Dockerfile内容
+async function loadDockerfileFromRepo() {
+  if (!formData.value.source_id) {
+    alert('请先选择数据源')
+    return
+  }
+  
+  if (!formData.value.dockerfile_name) {
+    alert('请先选择或输入Dockerfile文件名')
+    return
+  }
+  
+  if (!formData.value.branch) {
+    alert('请先选择分支')
+    return
+  }
+  
+  loadingDockerfile.value = true
+  try {
+    const response = await axios.get(
+      `/api/git-sources/${formData.value.source_id}/dockerfiles/${encodeURIComponent(formData.value.dockerfile_name)}`
+    )
+    
+    if (response.data && response.data.content) {
+      dockerfileContentText.value = response.data.content
+      alert('Dockerfile已从仓库加载')
+    } else {
+      alert('未找到Dockerfile内容')
+    }
+  } catch (error) {
+    console.error('加载Dockerfile失败:', error)
+    alert(error.response?.data?.detail || '加载Dockerfile失败')
+  } finally {
+    loadingDockerfile.value = false
+  }
+}
+
+// 应用Dockerfile内容到formData
+function applyDockerfileContent() {
+  if (!dockerfileContentText.value.trim()) {
+    alert('Dockerfile内容不能为空')
+    return
+  }
+  
+  formData.value.dockerfile_content = dockerfileContentText.value
+  alert('Dockerfile内容已应用')
 }
 
 // 监听项目类型变化，如果当前选择的模板不再匹配新的项目类型，则清除模板选择
@@ -2327,6 +2569,7 @@ function showCreateModal() {
     trigger_schedule: false,
     cron_expression: '',
     dockerfile_name: 'Dockerfile',
+    dockerfile_content: '',  // Dockerfile内容
     source_id: '',
     use_project_dockerfile: true,
     push_mode: 'multi',
@@ -2339,6 +2582,8 @@ function showCreateModal() {
   services.value = []
   loadingServices.value = false
   servicesError.value = ''
+  // 初始化Dockerfile编辑器内容
+  dockerfileContentText.value = ''
   showModal.value = true
   // 初始化JSON编辑器内容（新建模式）
   nextTick(() => {
@@ -2395,6 +2640,7 @@ function editPipeline(pipeline) {
     cron_expression: pipeline.cron_expression || '',
     dockerfile_name: savedDockerfileName,
     use_project_dockerfile: savedUseProjectDockerfile,
+    dockerfile_content: pipeline.dockerfile_content || '',  // Dockerfile内容
     source_id: pipeline.source_id || (source ? source.source_id : ''),
     push_mode: pipeline.push_mode || 'multi',
     selected_service: pipeline.selected_services && pipeline.selected_services.length === 1 ? pipeline.selected_services[0] : '',
@@ -2429,6 +2675,9 @@ function editPipeline(pipeline) {
   
   // 编辑模式下：不加载服务列表，避免卡死问题
   // 服务管理功能已移除
+  
+  // 初始化Dockerfile编辑器内容
+  dockerfileContentText.value = formData.value.dockerfile_content || ''
   
   showModal.value = true
   
@@ -3703,13 +3952,25 @@ function updateResourcePackagePath(packageId, targetPath) {
 }
 
 // Dockerfile 来源变化处理
-function onDockerfileSourceChange() {
+async function onDockerfileSourceChange() {
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PipelinePanel.vue:2744',message:'Dockerfile source changed',data:{use_project_dockerfile:formData.value.use_project_dockerfile,template:formData.value.template,dockerfile_name:formData.value.dockerfile_name,git_url:formData.value.git_url,branch:formData.value.branch},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
   // #endregion
   if (formData.value.use_project_dockerfile) {
     // 使用项目 Dockerfile 时，清空模板
     formData.value.template = ''
+    // 如果有数据源、分支和 Dockerfile，尝试加载 Dockerfile 内容
+    if (formData.value.source_id && formData.value.branch && formData.value.dockerfile_name) {
+      try {
+        await loadDockerfileFromRepo()
+      } catch (error) {
+        // 如果加载失败，清空编辑器
+        dockerfileContentText.value = ''
+      }
+    } else {
+      // 如果没有完整信息，清空编辑器
+      dockerfileContentText.value = ''
+    }
     // 如果有分支和 Dockerfile，重新加载服务（服务列表依赖于 Dockerfile）
     if (formData.value.git_url && formData.value.branch && formData.value.dockerfile_name) {
       // Dockerfile 来源变化是用户主动切换，需要重新识别服务
@@ -3719,26 +3980,45 @@ function onDockerfileSourceChange() {
       scanDockerfiles()
     }
   } else {
-    // 使用模板时，清空 Dockerfile 名称
+    // 使用模板时，清空 Dockerfile 名称和内容
     formData.value.dockerfile_name = 'Dockerfile'
-    // 如果选择了模板，重新加载服务（切换到模板是用户主动切换）
+    dockerfileContentText.value = ''
+    // 如果选择了模板，加载模板内容并重新加载服务（切换到模板是用户主动切换）
     if (formData.value.template) {
-      loadServices(true)
+      await onTemplateChange()
     }
   }
 }
 
 // 模板变化处理
-function onTemplateChange() {
+async function onTemplateChange() {
   // 选择模板时，确保 use_project_dockerfile 为 false
   if (formData.value.template) {
     formData.value.use_project_dockerfile = false
+    // 加载模板的 Dockerfile 内容
+    try {
+      const res = await axios.get('/api/templates', {
+        params: {
+          name: formData.value.template,
+          project_type: formData.value.project_type
+        }
+      })
+      if (res.data && res.data.content) {
+        dockerfileContentText.value = res.data.content
+      }
+    } catch (error) {
+      console.error('加载模板内容失败:', error)
+      // 如果加载失败，清空编辑器
+      dockerfileContentText.value = ''
+    }
     // 编辑模式下不自动加载，需要用户手动点击加载按钮
     // 新建模式下可以自动加载（通过判断 editingPipeline）
     if (!editingPipeline.value) {
       loadServices(true)
     }
   } else {
+    // 清空模板时，清空 Dockerfile 内容
+    dockerfileContentText.value = ''
     // 清空模板时，如果使用项目 Dockerfile 且有分支，重新加载服务（切换到项目 Dockerfile 是用户主动切换）
     // 编辑模式下不自动加载，需要用户手动点击加载按钮
     if (formData.value.use_project_dockerfile && formData.value.git_url && formData.value.branch && !editingPipeline.value) {
@@ -3788,6 +4068,7 @@ const buildConfigJson = computed(() => {
     sub_path: formData.value.sub_path || null,
     use_project_dockerfile: formData.value.use_project_dockerfile !== false,
     dockerfile_name: formData.value.dockerfile_name || 'Dockerfile',
+    dockerfile_content: formData.value.dockerfile_content || null,
     source_id: formData.value.source_id || null,
     selected_services: formData.value.selected_services || [],
     service_push_config: Object.keys(servicePushConfig).length > 0 ? servicePushConfig : {},
