@@ -534,11 +534,11 @@
                   role="tabpanel"
                   id="build-pane"
                 >
-                  <!-- 编辑模式下显示JSON编辑器 -->
-                  <div v-if="editingPipeline">
+                  <!-- JSON编辑器（新建和编辑模式都使用） -->
+                  <div>
                     <div class="d-flex justify-content-between align-items-center mb-3">
                       <h6 class="mb-0">
-                        <i class="fas fa-code"></i> 编辑构建配置JSON
+                        <i class="fas fa-code"></i> {{ editingPipeline ? '编辑' : '新建' }}构建配置JSON
                       </h6>
                       <div class="btn-group btn-group-sm" role="group">
                         <button 
@@ -577,8 +577,8 @@
                     </div>
                   </div>
                   
-                  <!-- 新建模式下显示表单界面 -->
-                  <div v-else>
+                  <!-- 旧表单界面（已废弃，保留作为参考） -->
+                  <div v-if="false" style="display: none;">
                     <!-- 视图切换和查看JSON按钮 -->
                     <div class="d-flex justify-content-between align-items-center mb-3">
                       <h6 class="mb-0">
@@ -2095,9 +2095,9 @@ watch(showBuildConfigJsonModal, (isVisible) => {
   }
 })
 
-// 监听activeTab变化，当切换到build Tab且是编辑模式时，更新JSON内容
+// 监听activeTab变化，当切换到build Tab时（新建或编辑模式），更新JSON内容
 watch(activeTab, (newTab) => {
-  if (newTab === 'build' && editingPipeline.value) {
+  if (newTab === 'build') {
     nextTick(() => {
       buildConfigJsonText.value = buildConfigJson.value
       buildConfigJsonError.value = ''
@@ -2105,9 +2105,9 @@ watch(activeTab, (newTab) => {
   }
 })
 
-// 监听JSON文本变化，实时验证（编辑模式下）
+// 监听JSON文本变化，实时验证（新建和编辑模式下）
 watch(buildConfigJsonText, (newText) => {
-  if (!editingPipeline.value || activeTab.value !== 'build') return
+  if (activeTab.value !== 'build') return
   
   buildConfigJsonError.value = ''
   if (!newText || !newText.trim()) {
@@ -2282,6 +2282,13 @@ function showCreateModal() {
   loadingServices.value = false
   servicesError.value = ''
   showModal.value = true
+  // 初始化JSON编辑器内容（新建模式）
+  nextTick(() => {
+    if (activeTab.value === 'build') {
+      buildConfigJsonText.value = buildConfigJson.value
+      buildConfigJsonError.value = ''
+    }
+  })
 }
 
 function editPipeline(pipeline) {

@@ -896,29 +896,63 @@ async function downloadTask(task) {
   
   downloading.value = task.task_id
   try {
-    const res = await axios.get(`/api/export-tasks/${task.task_id}/download`, {
-      responseType: 'blob'
+    // 直接通过URL触发浏览器下载
+    const downloadUrl = `/api/export-tasks/${task.task_id}/download`
+    
+    // 获取token以添加到请求头（如果需要认证）
+    const token = localStorage.getItem('token')
+    
+    // 使用fetch获取文件（支持认证），然后创建blob URL触发下载
+    const response = await fetch(downloadUrl, {
+      headers: token ? {
+        'Authorization': `Bearer ${token}`
+      } : {}
     })
     
-    const url = URL.createObjectURL(res.data)
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: '下载失败' }))
+      throw new Error(errorData.detail || errorData.error || '下载失败')
+    }
+    
+    // 获取blob数据
+    const blob = await response.blob()
+    
+    // 创建blob URL并触发下载
+    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
+    a.style.display = 'none'
     
-    // 生成文件名
-    const image = task.image.replace(/\//g, '_')
-    const tag = task.tag || 'latest'
-    // 检查 compress 字段，支持多种格式
-    const isCompressed = task.compress && ['gzip', 'gz', 'tgz', '1', 'true', 'yes'].includes(task.compress.toLowerCase())
-    const ext = isCompressed ? '.tar.gz' : '.tar'
-    a.download = `${image}-${tag}${ext}`
+    // 生成文件名（优先使用后端返回的Content-Disposition，否则使用默认名称）
+    const contentDisposition = response.headers.get('Content-Disposition')
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+      if (filenameMatch && filenameMatch[1]) {
+        a.download = filenameMatch[1].replace(/['"]/g, '')
+      }
+    }
+    
+    // 如果没有从响应头获取到文件名，使用默认名称
+    if (!a.download) {
+      const image = task.image.replace(/\//g, '_')
+      const tag = task.tag || 'latest'
+      const isCompressed = task.compress && ['gzip', 'gz', 'tgz', '1', 'true', 'yes'].includes(task.compress.toLowerCase())
+      const ext = isCompressed ? '.tar.gz' : '.tar'
+      a.download = `${image}-${tag}${ext}`
+    }
     
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    
+    // 延迟释放blob URL，确保下载已开始
+    setTimeout(() => {
+      URL.revokeObjectURL(url)
+      downloading.value = null
+    }, 100)
   } catch (err) {
     console.error('下载失败:', err)
-    const errorMsg = err.response?.data?.detail || err.response?.data?.error || err.message || '下载失败'
+    const errorMsg = err.message || '下载失败'
     error.value = `下载失败: ${errorMsg}`
     // 3秒后自动清除错误提示
     setTimeout(() => {
@@ -926,7 +960,6 @@ async function downloadTask(task) {
         error.value = null
       }
     }, 3000)
-  } finally {
     downloading.value = null
   }
 }
