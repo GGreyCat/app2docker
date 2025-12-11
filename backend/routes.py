@@ -1321,12 +1321,13 @@ async def get_build_task_config(task_id: str):
         task = manager.get_task(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="任务不存在")
-        
+
         # 优先返回task_config，如果没有则从任务信息构建
         task_config = task.get("task_config")
         if not task_config:
             # 向后兼容：从任务信息构建配置
             from backend.handlers import build_task_config
+
             task_config = build_task_config(
                 git_url=task.get("git_url", ""),
                 image_name=task.get("image", ""),
@@ -1348,7 +1349,7 @@ async def get_build_task_config(task_id: str):
                 pipeline_id=task.get("pipeline_id"),
                 trigger_source=task.get("trigger_source", "manual"),
             )
-        
+
         return JSONResponse(task_config)
     except HTTPException:
         raise
@@ -1363,19 +1364,20 @@ async def retry_build_task(task_id: str, request: Request):
         username = get_current_username(request)
         manager = BuildTaskManager()
         task = manager.get_task(task_id)
-        
+
         if not task:
             raise HTTPException(status_code=404, detail="任务不存在")
-        
+
         # 检查任务状态
         if task.get("status") in ["pending", "running"]:
             raise HTTPException(status_code=400, detail="任务正在运行中，无法重试")
-        
+
         # 获取任务配置
         task_config = task.get("task_config")
         if not task_config:
             # 向后兼容：从任务信息构建配置
             from backend.handlers import build_task_config
+
             task_config = build_task_config(
                 git_url=task.get("git_url", ""),
                 image_name=task.get("image", ""),
@@ -1397,26 +1399,33 @@ async def retry_build_task(task_id: str, request: Request):
                 pipeline_id=task.get("pipeline_id"),
                 trigger_source="retry",  # 标记为重试
             )
-        
+
         # 使用统一触发函数重新触发任务
         build_manager = BuildManager()
         new_task_id = build_manager._trigger_task_from_config(task_config)
-        
+
         # 记录操作日志
-        OperationLogger.log(username, "retry_build_task", {
-            "original_task_id": task_id,
-            "new_task_id": new_task_id,
-        })
-        
-        return JSONResponse({
-            "message": "任务重试成功",
-            "original_task_id": task_id,
-            "new_task_id": new_task_id,
-        })
+        OperationLogger.log(
+            username,
+            "retry_build_task",
+            {
+                "original_task_id": task_id,
+                "new_task_id": new_task_id,
+            },
+        )
+
+        return JSONResponse(
+            {
+                "message": "任务重试成功",
+                "original_task_id": task_id,
+                "new_task_id": new_task_id,
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"重试任务失败: {str(e)}")
 
@@ -1686,7 +1695,7 @@ def force_remove_directory(dir_path: str) -> tuple[bool, str]:
     import stat
     import time
     import platform
-    
+
     def handle_remove_readonly(func, path, exc):
         excvalue = exc[1]
         if func in (os.rmdir, os.remove, os.unlink) and excvalue.errno == errno.EACCES:
@@ -1695,17 +1704,17 @@ def force_remove_directory(dir_path: str) -> tuple[bool, str]:
                 func(path)
             except Exception:
                 raise
-    
+
     try:
         # 首先尝试使用onerror回调删除
         shutil.rmtree(dir_path, onerror=handle_remove_readonly)
-        
+
         # 等待文件系统更新
         for _ in range(5):
             time.sleep(0.1)
             if not os.path.exists(dir_path):
                 return True, ""
-        
+
         # 如果还存在，尝试手动删除
         if os.path.exists(dir_path):
             for root, dirs, files in os.walk(dir_path, topdown=False):
@@ -1719,7 +1728,9 @@ def force_remove_directory(dir_path: str) -> tuple[bool, str]:
                 for name in dirs:
                     dir_path_full = os.path.join(root, name)
                     try:
-                        os.chmod(dir_path_full, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+                        os.chmod(
+                            dir_path_full, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO
+                        )
                         os.rmdir(dir_path_full)
                     except Exception as e:
                         print(f"⚠️ 删除子目录失败 ({dir_path_full}): {e}")
@@ -1728,30 +1739,35 @@ def force_remove_directory(dir_path: str) -> tuple[bool, str]:
                 os.rmdir(dir_path)
             except Exception as e:
                 # 最后尝试Windows系统命令
-                if platform.system() == 'Windows':
+                if platform.system() == "Windows":
                     try:
                         import subprocess
+
                         result = subprocess.run(
-                            ['cmd', '/c', 'rmdir', '/s', '/q', dir_path],
+                            ["cmd", "/c", "rmdir", "/s", "/q", dir_path],
                             capture_output=True,
                             text=True,
-                            timeout=30
+                            timeout=30,
                         )
                         if result.returncode != 0:
-                            return False, f"系统命令删除失败: {result.stderr or result.stdout}"
+                            return (
+                                False,
+                                f"系统命令删除失败: {result.stderr or result.stdout}",
+                            )
                     except Exception as sub_err:
                         return False, f"系统命令执行失败: {sub_err}"
                 else:
                     return False, f"删除失败: {e}"
-        
+
         # 最终验证
         time.sleep(0.2)
         if os.path.exists(dir_path):
             return False, "删除后目录仍然存在"
-        
+
         return True, ""
     except Exception as e:
         import traceback
+
         return False, f"删除异常: {str(e)}\n{traceback.format_exc()}"
 
 
@@ -1804,7 +1820,8 @@ async def cleanup_docker_build_dir(
                         image_name = task.get("image", "")
                         if image_name:
                             build_context = os.path.join(
-                                BUILD_DIR, f"{image_name.replace('/', '_')}_{task_id[:8]}"
+                                BUILD_DIR,
+                                f"{image_name.replace('/', '_')}_{task_id[:8]}",
                             )
                     if build_context:
                         # 转换为绝对路径并规范化
@@ -1843,11 +1860,12 @@ async def cleanup_docker_build_dir(
                 abs_item_path = os.path.abspath(item_path)
                 # 尝试多种路径匹配方式
                 is_valid = (
-                    abs_item_path in valid_build_contexts or
-                    item_path in valid_build_contexts or
-                    os.path.normpath(abs_item_path) in {os.path.normpath(p) for p in valid_build_contexts}
+                    abs_item_path in valid_build_contexts
+                    or item_path in valid_build_contexts
+                    or os.path.normpath(abs_item_path)
+                    in {os.path.normpath(p) for p in valid_build_contexts}
                 )
-                
+
                 # 只清理异常文件夹
                 if not is_valid:
                     orphan_count += 1
@@ -1857,7 +1875,7 @@ async def cleanup_docker_build_dir(
                         if not os.path.exists(item_path):
                             print(f"⏭️ 目录不存在，跳过: {item_path}")
                             continue
-                        
+
                         # 计算目录大小
                         dir_size = 0
                         try:
@@ -1874,18 +1892,23 @@ async def cleanup_docker_build_dir(
                         # 删除目录
                         print(f"🗑️ 正在删除目录: {item_path}")
                         success, error_detail = force_remove_directory(item_path)
-                        
+
                         if success:
                             removed_count += 1
                             print(f"✅ 成功清理异常文件夹: {item_path}")
                         else:
-                            error_msg = f"清理异常文件夹失败 ({item_path}): {error_detail}"
+                            error_msg = (
+                                f"清理异常文件夹失败 ({item_path}): {error_detail}"
+                            )
                             print(f"❌ {error_msg}")
                             errors.append(error_msg)
                     except Exception as e:
                         import traceback
+
                         error_detail = traceback.format_exc()
-                        error_msg = f"清理异常文件夹失败 ({item_path}): {e}\n{error_detail}"
+                        error_msg = (
+                            f"清理异常文件夹失败 ({item_path}): {e}\n{error_detail}"
+                        )
                         print(f"❌ {error_msg}")
                         errors.append(error_msg)
 
@@ -1915,7 +1938,7 @@ async def cleanup_docker_build_dir(
                 try:
                     abs_item_path = os.path.abspath(item_path)
                     is_valid = abs_item_path in valid_build_contexts
-                    
+
                     if not is_valid:
                         orphan_count += 1
                         print(f"⚠️ 发现异常文件夹（无对应任务）: {item_path}")
@@ -1939,7 +1962,7 @@ async def cleanup_docker_build_dir(
                     # 删除目录
                     print(f"🗑️ 正在删除目录: {item_path}")
                     success, error_detail = force_remove_directory(item_path)
-                    
+
                     if success:
                         removed_count += 1
                         print(f"✅ 成功删除: {item_path}")
@@ -1949,6 +1972,7 @@ async def cleanup_docker_build_dir(
                         errors.append(error_msg)
                 except Exception as e:
                     import traceback
+
                     error_detail = traceback.format_exc()
                     error_msg = f"清理构建上下文失败 ({item_path}): {e}\n{error_detail}"
                     print(f"❌ {error_msg}")
@@ -1972,11 +1996,12 @@ async def cleanup_docker_build_dir(
                 abs_item_path = os.path.abspath(item_path)
                 # 尝试多种路径匹配方式
                 is_valid = (
-                    abs_item_path in valid_build_contexts or
-                    item_path in valid_build_contexts or
-                    os.path.normpath(abs_item_path) in {os.path.normpath(p) for p in valid_build_contexts}
+                    abs_item_path in valid_build_contexts
+                    or item_path in valid_build_contexts
+                    or os.path.normpath(abs_item_path)
+                    in {os.path.normpath(p) for p in valid_build_contexts}
                 )
-                
+
                 # 异常文件夹无论时间如何都要清理
                 if not is_valid:
                     orphan_count += 1
@@ -1986,7 +2011,7 @@ async def cleanup_docker_build_dir(
                         if not os.path.exists(item_path):
                             print(f"⏭️ 目录不存在，跳过: {item_path}")
                             continue
-                        
+
                         # 计算目录大小
                         dir_size = 0
                         try:
@@ -2002,18 +2027,23 @@ async def cleanup_docker_build_dir(
                         # 删除目录
                         print(f"🗑️ 正在删除异常文件夹: {item_path}")
                         success, error_detail = force_remove_directory(item_path)
-                        
+
                         if success:
                             removed_count += 1
                             print(f"✅ 清理异常文件夹: {item_path}")
                         else:
-                            error_msg = f"清理异常文件夹失败 ({item_path}): {error_detail}"
+                            error_msg = (
+                                f"清理异常文件夹失败 ({item_path}): {error_detail}"
+                            )
                             print(f"❌ {error_msg}")
                             errors.append(error_msg)
                     except Exception as e:
                         import traceback
+
                         error_detail = traceback.format_exc()
-                        error_msg = f"清理异常文件夹失败 ({item_path}): {e}\n{error_detail}"
+                        error_msg = (
+                            f"清理异常文件夹失败 ({item_path}): {e}\n{error_detail}"
+                        )
                         print(f"❌ {error_msg}")
                         errors.append(error_msg)
                     continue  # 异常文件夹已处理，跳过时间检查
@@ -2022,7 +2052,7 @@ async def cleanup_docker_build_dir(
                 try:
                     mtime = os.path.getmtime(item_path)
                     is_old = mtime < cutoff_time.timestamp()
-                    
+
                     # 超过保留天数的有效文件夹也要清理
                     if is_old:
                         # 计算目录大小
@@ -2040,7 +2070,7 @@ async def cleanup_docker_build_dir(
                         # 删除目录
                         print(f"🗑️ 正在删除目录（超过保留天数）: {item_path}")
                         success, error_detail = force_remove_directory(item_path)
-                        
+
                         if success:
                             removed_count += 1
                             print(f"✅ 清理目录（超过保留天数）: {item_path}")
@@ -2050,6 +2080,7 @@ async def cleanup_docker_build_dir(
                             errors.append(error_msg)
                 except Exception as e:
                     import traceback
+
                     error_detail = traceback.format_exc()
                     error_msg = f"清理构建上下文失败 ({item_path}): {e}\n{error_detail}"
                     print(f"❌ {error_msg}")
@@ -3433,7 +3464,7 @@ async def list_pipelines(
                         success_count += 1
                     elif task_status == "failed":
                         failed_count += 1
-                    
+
                     # 查找所有状态的任务，取最新的一个
                     if not last_task or task.get("created_at", "") > last_task.get(
                         "created_at", ""
@@ -3456,11 +3487,11 @@ async def list_pipelines(
             else:
                 pipeline["last_build"] = None
                 pipeline["last_build_success"] = None
-            
+
             # 添加成功/失败统计
             pipeline["success_count"] = success_count
             pipeline["failed_count"] = failed_count
-            
+
             # 添加队列信息
             queue_length = manager.get_queue_length(pipeline_id)
             pipeline["queue_length"] = queue_length
@@ -3681,11 +3712,12 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
         # 检查防抖（5秒内重复触发直接加入队列）
         if manager.check_debounce(pipeline_id, debounce_seconds=5):
             from backend.handlers import pipeline_to_task_config
+
             task_config = pipeline_to_task_config(pipeline, trigger_source="manual")
             task_config["username"] = username
             queue_id = manager.add_task_to_queue(pipeline_id, task_config)
             queue_length = manager.get_queue_length(pipeline_id)
-            
+
             OperationLogger.log(
                 username,
                 "pipeline_run_queued",
@@ -3699,7 +3731,7 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
                     "reason": "debounce",
                 },
             )
-            
+
             return JSONResponse(
                 {
                     "message": "触发过于频繁，任务已加入队列",
@@ -3711,6 +3743,12 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
                 }
             )
 
+        # 从流水线配置生成任务配置JSON
+        from backend.handlers import pipeline_to_task_config
+
+        task_config = pipeline_to_task_config(pipeline, trigger_source="manual")
+        task_config["username"] = username
+
         # 检查是否有正在运行的任务
         current_task_id = manager.get_pipeline_running_task(pipeline_id)
         if current_task_id:
@@ -3718,13 +3756,10 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
             build_manager = BuildManager()
             task = build_manager.task_manager.get_task(current_task_id)
             if task and task.get("status") in ["pending", "running"]:
-                # 有任务正在运行，将新任务加入队列
-                from backend.handlers import pipeline_to_task_config
-                task_config = pipeline_to_task_config(pipeline, trigger_source="manual")
-                task_config["username"] = username  # 添加用户名信息
-                queue_id = manager.add_task_to_queue(pipeline_id, task_config)
+                # 有任务正在运行，立即创建新任务（状态为 pending，等待执行）
+                task_id = build_manager._trigger_task_from_config(task_config)
                 queue_length = manager.get_queue_length(pipeline_id)
-                
+
                 # 记录操作日志
                 OperationLogger.log(
                     username,
@@ -3732,18 +3767,18 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
                     {
                         "pipeline_id": pipeline_id,
                         "pipeline_name": pipeline.get("name"),
-                        "queue_id": queue_id,
+                        "task_id": task_id,
                         "queue_length": queue_length,
                         "branch": pipeline.get("branch"),
                         "trigger_source": "manual",
                     },
                 )
-                
+
                 return JSONResponse(
                     {
-                        "message": "构建任务已加入队列",
+                        "message": "构建任务已创建并加入队列",
                         "status": "queued",
-                        "queue_id": queue_id,
+                        "task_id": task_id,
                         "queue_length": queue_length,
                         "pipeline": pipeline.get("name"),
                         "branch": pipeline.get("branch"),
@@ -3753,11 +3788,7 @@ async def run_pipeline(pipeline_id: str, http_request: Request):
                 # 任务已完成或不存在，解绑
                 manager.unbind_task(pipeline_id)
 
-        # 从流水线配置生成任务配置JSON
-        from backend.handlers import pipeline_to_task_config
-        task_config = pipeline_to_task_config(pipeline, trigger_source="manual")
-        
-        # 启动构建任务（使用统一触发函数）
+        # 没有运行中的任务，立即启动构建任务
         build_manager = BuildManager()
         task_id = build_manager._trigger_task_from_config(task_config)
 
@@ -4007,42 +4038,54 @@ async def webhook_trigger(webhook_token: str, request: Request):
                         f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (忽略推送分支: {webhook_branch})"
                     )
 
-        # 检查防抖（5秒内重复触发直接加入队列）
+        # 根据推送的分支查找对应的标签（分支标签映射应该基于推送的分支，而不是用于构建的分支）
+        branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
+        tag = pipeline.get("tag", "latest")  # 默认标签
+
+        # 使用webhook推送的分支来查找标签映射（如果有的话）
+        branch_for_tag_mapping = webhook_branch if webhook_branch else branch
+
+        if branch_for_tag_mapping and branch_tag_mapping:
+            # 优先精确匹配
+            if branch_for_tag_mapping in branch_tag_mapping:
+                tag = branch_tag_mapping[branch_for_tag_mapping]
+            else:
+                # 尝试通配符匹配（如 feature/* -> feature）
+                import fnmatch
+
+                for pattern, mapped_tag in branch_tag_mapping.items():
+                    if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
+                        tag = mapped_tag
+                        break
+
+        # 从流水线配置生成任务配置JSON
+        from backend.handlers import pipeline_to_task_config
+
+        task_config = pipeline_to_task_config(
+            pipeline,
+            trigger_source="webhook",
+            branch=branch,
+            tag=tag,
+            webhook_branch=webhook_branch,
+            branch_tag_mapping=branch_tag_mapping,
+        )
+
+        # 检查防抖（5秒内重复触发直接创建任务，状态为 pending）
         pipeline_id = pipeline["pipeline_id"]
         if manager.check_debounce(pipeline_id, debounce_seconds=5):
-            from backend.handlers import pipeline_to_task_config
-            branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
-            tag = pipeline.get("tag", "latest")
-            branch_for_tag_mapping = webhook_branch if webhook_branch else branch
-            if branch_for_tag_mapping and branch_tag_mapping:
-                if branch_for_tag_mapping in branch_tag_mapping:
-                    tag = branch_tag_mapping[branch_for_tag_mapping]
-                else:
-                    import fnmatch
-                    for pattern, mapped_tag in branch_tag_mapping.items():
-                        if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
-                            tag = mapped_tag
-                            break
-            task_config = pipeline_to_task_config(
-                pipeline, 
-                trigger_source="webhook", 
-                branch=branch, 
-                tag=tag,
-                webhook_branch=webhook_branch,
-                branch_tag_mapping=branch_tag_mapping
-            )
-            queue_id = manager.add_task_to_queue(pipeline_id, task_config)
+            build_manager = BuildManager()
+            task_id = build_manager._trigger_task_from_config(task_config)
             queue_length = manager.get_queue_length(pipeline_id)
-            
+
             print(
-                f"⚠️ 流水线 {pipeline.get('name')} 触发过于频繁（防抖），将本次触发加入队列"
+                f"⚠️ 流水线 {pipeline.get('name')} 触发过于频繁（防抖），已创建任务（pending）"
             )
-            
+
             return JSONResponse(
                 {
-                    "message": "触发过于频繁，任务已加入队列",
+                    "message": "触发过于频繁，任务已创建并加入队列",
                     "status": "queued",
-                    "queue_id": queue_id,
+                    "task_id": task_id,
                     "queue_length": queue_length,
                     "pipeline": pipeline.get("name"),
                 }
@@ -4055,43 +4098,19 @@ async def webhook_trigger(webhook_token: str, request: Request):
             build_manager = BuildManager()
             task = build_manager.task_manager.get_task(current_task_id)
             if task and task.get("status") in ["pending", "running"]:
-                # 有任务正在运行，将新任务加入队列
-                print(
-                    f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，将本次触发加入队列"
-                )
-                
-                # 准备任务配置（稍后使用）- 使用统一的JSON结构
-                from backend.handlers import pipeline_to_task_config
-                # 先计算标签（基于分支映射）
-                branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
-                tag = pipeline.get("tag", "latest")
-                branch_for_tag_mapping = webhook_branch if webhook_branch else branch
-                if branch_for_tag_mapping and branch_tag_mapping:
-                    if branch_for_tag_mapping in branch_tag_mapping:
-                        tag = branch_tag_mapping[branch_for_tag_mapping]
-                    else:
-                        import fnmatch
-                        for pattern, mapped_tag in branch_tag_mapping.items():
-                            if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
-                                tag = mapped_tag
-                                break
-                task_config = pipeline_to_task_config(
-                    pipeline, 
-                    trigger_source="webhook", 
-                    branch=branch, 
-                    tag=tag,
-                    webhook_branch=webhook_branch,
-                    branch_tag_mapping=branch_tag_mapping
-                )
-                
-                queue_id = manager.add_task_to_queue(pipeline_id, task_config)
+                # 有任务正在运行，立即创建新任务（状态为 pending，等待执行）
+                task_id = build_manager._trigger_task_from_config(task_config)
                 queue_length = manager.get_queue_length(pipeline_id)
-                
+
+                print(
+                    f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，已创建新任务（pending）"
+                )
+
                 return JSONResponse(
                     {
-                        "message": "流水线已有正在执行的任务，本次触发已加入队列",
+                        "message": "流水线已有正在执行的任务，任务已创建并加入队列",
                         "status": "queued",
-                        "queue_id": queue_id,
+                        "task_id": task_id,
                         "queue_length": queue_length,
                         "current_task_id": current_task_id,
                         "pipeline": pipeline.get("name"),
@@ -4101,50 +4120,7 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 # 任务已完成或不存在，解绑
                 manager.unbind_task(pipeline_id)
 
-        # 根据推送的分支查找对应的标签（分支标签映射应该基于推送的分支，而不是用于构建的分支）
-        branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
-        tag = pipeline.get("tag", "latest")  # 默认标签
-
-        # 使用webhook推送的分支来查找标签映射（如果有的话）
-        branch_for_tag_mapping = webhook_branch if webhook_branch else branch
-
-        if branch_for_tag_mapping and branch_tag_mapping:
-            # 优先精确匹配
-            if branch_for_tag_mapping in branch_tag_mapping:
-                tag = branch_tag_mapping[branch_for_tag_mapping]
-                print(
-                    f"✅ 找到分支标签映射: {branch_for_tag_mapping} -> {tag} (推送分支: {webhook_branch}, 构建分支: {branch})"
-                )
-            else:
-                # 尝试通配符匹配（如 feature/* -> feature）
-                import fnmatch
-
-                for pattern, mapped_tag in branch_tag_mapping.items():
-                    if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
-                        tag = mapped_tag
-                        print(
-                            f"✅ 通配符匹配分支标签: {branch_for_tag_mapping} (pattern: {pattern}) -> {tag} (推送分支: {webhook_branch}, 构建分支: {branch})"
-                        )
-                        break
-                else:
-                    print(
-                        f"ℹ️  未找到分支 {branch_for_tag_mapping} 的标签映射，使用默认标签: {tag} (推送分支: {webhook_branch}, 构建分支: {branch})"
-                    )
-        else:
-            print(
-                f"ℹ️  使用默认标签: {tag} (推送分支: {webhook_branch}, 构建分支: {branch})"
-            )
-
-        # 从流水线配置生成任务配置JSON
-        from backend.handlers import pipeline_to_task_config
-        task_config = pipeline_to_task_config(
-            pipeline, 
-            trigger_source="webhook", 
-            branch=branch, 
-            tag=tag
-        )
-        
-        # 启动构建任务（使用统一触发函数）
+        # 没有运行中的任务，立即启动构建任务
         build_manager = BuildManager()
         task_id = build_manager._trigger_task_from_config(task_config)
 
@@ -4482,7 +4458,9 @@ async def scan_dockerfiles(
 
                             try:
                                 with open(file_path, "r", encoding="utf-8") as f:
-                                    dockerfiles[relative_path] = file  # 只保存文件名，不保存内容
+                                    dockerfiles[relative_path] = (
+                                        file  # 只保存文件名，不保存内容
+                                    )
                                     print(f"✅ 扫描到 Dockerfile: {relative_path}")
                             except Exception as e:
                                 print(f"⚠️ 读取 Dockerfile 失败 {relative_path}: {e}")
@@ -4497,7 +4475,10 @@ async def scan_dockerfiles(
                         status_code=403,
                         detail="仓库访问被拒绝，请检查认证信息是否正确",
                     )
-                elif "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
+                elif (
+                    "not found" in error_msg.lower()
+                    or "does not exist" in error_msg.lower()
+                ):
                     raise HTTPException(
                         status_code=404,
                         detail=f"分支 '{branch}' 不存在或仓库不存在",
@@ -4522,10 +4503,9 @@ async def scan_dockerfiles(
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500, detail=f"扫描 Dockerfile 失败: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"扫描 Dockerfile 失败: {str(e)}")
 
 
 @router.get("/git-sources/{source_id}/dockerfiles/{dockerfile_path:path}")

@@ -427,18 +427,49 @@ class PipelineManager:
         return queue_id
 
     def get_queue_length(self, pipeline_id: str) -> int:
-        """获取队列长度
+        """获取队列长度（从实际任务列表中统计）
 
         Args:
             pipeline_id: 流水线 ID
 
         Returns:
-            队列长度
+            队列长度（pending 状态的任务数量，不包括当前运行中的任务）
         """
-        with self.lock:
-            if pipeline_id in self.pipelines:
-                pipeline = self.pipelines[pipeline_id]
-                return len(pipeline.get("task_queue", []))
+        try:
+            # 从实际任务列表中获取排队中的任务
+            from backend.handlers import BuildManager
+            
+            build_manager = BuildManager()
+            # 获取所有 pending 状态的任务
+            pending_tasks = build_manager.task_manager.list_tasks(status="pending")
+            
+            # 获取当前运行中的任务ID（如果有）
+            current_task_id = None
+            with self.lock:
+                if pipeline_id in self.pipelines:
+                    current_task_id = self.pipelines[pipeline_id].get("current_task_id")
+            
+            # 统计属于该流水线且状态为 pending 的任务数量（排除当前运行中的任务）
+            queue_count = 0
+            for task in pending_tasks:
+                task_config = task.get("task_config", {})
+                task_pipeline_id = task_config.get("pipeline_id")
+                task_id = task.get("task_id")
+                
+                # 如果任务属于该流水线，且不是当前运行中的任务
+                if task_pipeline_id == pipeline_id and task_id != current_task_id:
+                    queue_count += 1
+            
+            return queue_count
+        except Exception as e:
+            print(f"⚠️ 获取队列长度失败: {e}")
+            import traceback
+            traceback.print_exc()
+            # 如果出错，回退到使用字段的方式
+            with self.lock:
+                if pipeline_id in self.pipelines:
+                    pipeline = self.pipelines[pipeline_id]
+                    return len(pipeline.get("task_queue", []))
             return 0
 
     def get_next_queued_task(self, pipeline_id: str) -> Optional[dict]:

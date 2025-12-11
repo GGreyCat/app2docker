@@ -119,13 +119,17 @@ class PipelineScheduler:
             pipeline_id = pipeline.get("pipeline_id")
             pipeline_name = pipeline.get("name", "unknown")
             
-            # 检查防抖（5秒内重复触发直接加入队列）
+            # 从流水线配置生成任务配置JSON
+            from backend.handlers import pipeline_to_task_config
+            task_config = pipeline_to_task_config(pipeline, trigger_source="cron")
+            
+            # 检查防抖（5秒内重复触发直接创建任务，状态为 pending）
             if self.pipeline_manager.check_debounce(pipeline_id, debounce_seconds=5):
-                from backend.handlers import pipeline_to_task_config
-                task_config = pipeline_to_task_config(pipeline, trigger_source="cron")
-                queue_id = self.pipeline_manager.add_task_to_queue(pipeline_id, task_config)
+                if self.build_manager is None:
+                    self.build_manager = BuildManager()
+                task_id = self.build_manager._trigger_task_from_config(task_config)
                 queue_length = self.pipeline_manager.get_queue_length(pipeline_id)
-                print(f"⚠️ 流水线 {pipeline_name} 触发过于频繁（防抖），将本次定时触发加入队列，队列长度: {queue_length}")
+                print(f"⚠️ 流水线 {pipeline_name} 触发过于频繁（防抖），已创建任务（pending），队列长度: {queue_length}")
                 return
             
             # 检查是否有正在运行的任务
@@ -137,12 +141,10 @@ class PipelineScheduler:
                 
                 task = self.build_manager.task_manager.get_task(current_task_id)
                 if task and task.get("status") in ["pending", "running"]:
-                    # 有任务正在运行，将新任务加入队列
-                    from backend.handlers import pipeline_to_task_config
-                    task_config = pipeline_to_task_config(pipeline, trigger_source="cron")
-                    queue_id = self.pipeline_manager.add_task_to_queue(pipeline_id, task_config)
+                    # 有任务正在运行，立即创建新任务（状态为 pending，等待执行）
+                    task_id = self.build_manager._trigger_task_from_config(task_config)
                     queue_length = self.pipeline_manager.get_queue_length(pipeline_id)
-                    print(f"⚠️ 流水线 {pipeline_name} 已有正在执行的任务 {current_task_id[:8]}，将本次定时触发加入队列，队列长度: {queue_length}")
+                    print(f"⚠️ 流水线 {pipeline_name} 已有正在执行的任务 {current_task_id[:8]}，已创建新任务（pending），队列长度: {queue_length}")
                     return
                 else:
                     # 任务已完成或不存在，解绑
@@ -152,11 +154,7 @@ class PipelineScheduler:
             if self.build_manager is None:
                 self.build_manager = BuildManager()
             
-            # 从流水线配置生成任务配置JSON
-            from backend.handlers import pipeline_to_task_config
-            task_config = pipeline_to_task_config(pipeline, trigger_source="cron")
-            
-            # 启动构建任务（使用统一触发函数）
+            # 没有运行中的任务，立即启动构建任务
             task_id = self.build_manager._trigger_task_from_config(task_config)
             
             print(f"✅ 定时触发流水线: {pipeline_name}, 任务ID: {task_id[:8]}")

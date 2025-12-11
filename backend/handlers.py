@@ -3215,18 +3215,13 @@ logs/
 
 # ============ 队列处理函数 ============
 def _process_next_queued_task(pipeline_manager, pipeline_id: str):
-    """处理队列中的下一个任务（相同流水线）
+    """处理队列中的下一个任务（相同流水线）- 从实际任务列表中获取
     
     Args:
         pipeline_manager: PipelineManager 实例
         pipeline_id: 流水线 ID
     """
     try:
-        # 检查是否有队列中的任务
-        queued_task = pipeline_manager.get_next_queued_task(pipeline_id)
-        if not queued_task:
-            return
-        
         # 检查当前是否还有运行中的任务（防止并发问题）
         current_task_id = pipeline_manager.get_pipeline_running_task(pipeline_id)
         if current_task_id:
@@ -3240,47 +3235,47 @@ def _process_next_queued_task(pipeline_manager, pipeline_id: str):
                 # 任务已完成或不存在，解绑
                 pipeline_manager.unbind_task(pipeline_id)
         
-        # 获取任务配置
-        task_config = queued_task.get("task_config", {})
-        
-        # 计算标签（如果是 webhook 触发，需要重新计算标签映射）
-        tag = task_config.get("tag", "latest")
-        if task_config.get("trigger_source") == "webhook":
-            # 重新计算标签映射
-            branch_tag_mapping = task_config.get("branch_tag_mapping", {})
-            webhook_branch = task_config.get("webhook_branch")
-            branch = task_config.get("branch")
-            branch_for_tag_mapping = webhook_branch if webhook_branch else branch
-            
-            if branch_for_tag_mapping and branch_tag_mapping:
-                # 优先精确匹配
-                if branch_for_tag_mapping in branch_tag_mapping:
-                    tag = branch_tag_mapping[branch_for_tag_mapping]
-                else:
-                    # 尝试通配符匹配
-                    import fnmatch
-                    for pattern, mapped_tag in branch_tag_mapping.items():
-                        if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
-                            tag = mapped_tag
-                            break
-        elif not tag or tag == "latest":
-            # 手动触发时，如果没有指定标签，使用默认值
-            pipeline = pipeline_manager.get_pipeline(pipeline_id)
-            if pipeline:
-                tag = pipeline.get("tag", "latest")
-        
-        # 更新任务配置中的标签和流水线ID
-        task_config["tag"] = tag
-        task_config["pipeline_id"] = pipeline_id
-        
-        # 启动构建任务（使用统一触发函数）
+        # 从实际任务列表中获取下一个 pending 任务
         build_manager = BuildManager()
-        task_id = build_manager._trigger_task_from_config(task_config)
+        pending_tasks = build_manager.task_manager.list_tasks(status="pending")
         
-        # 从队列中移除已处理的任务
-        pipeline_manager.remove_queued_task(pipeline_id, queued_task.get("queue_id"))
+        # 找到属于该流水线的最早创建的 pending 任务
+        next_task = None
+        for task in pending_tasks:
+            task_config = task.get("task_config", {})
+            task_pipeline_id = task_config.get("pipeline_id")
+            if task_pipeline_id == pipeline_id:
+                # 按创建时间排序，找到最早的任务
+                if next_task is None or task.get("created_at", "") < next_task.get("created_at", ""):
+                    next_task = task
         
-        # 记录触发并绑定任务
+        if not next_task:
+            # 没有 pending 任务，检查是否还有 task_queue 中的任务（向后兼容）
+            queued_task = pipeline_manager.get_next_queued_task(pipeline_id)
+            if queued_task:
+                # 从 task_queue 中创建任务（向后兼容）
+                task_config = queued_task.get("task_config", {})
+                task_config["pipeline_id"] = pipeline_id
+                task_id = build_manager._trigger_task_from_config(task_config)
+                pipeline_manager.remove_queued_task(pipeline_id, queued_task.get("queue_id"))
+                pipeline_manager.record_trigger(
+                    pipeline_id,
+                    task_id,
+                    trigger_source=task_config.get("trigger_source", "manual"),
+                    trigger_info={
+                        "username": task_config.get("username", "system"),
+                        "branch": task_config.get("branch"),
+                        "from_queue": True,
+                    },
+                )
+                print(f"✅ 队列任务已启动（从task_queue）: 流水线 {pipeline_id[:8]}, 任务 {task_id[:8]}")
+            return
+        
+        # 找到下一个 pending 任务，开始执行
+        task_id = next_task.get("task_id")
+        task_config = next_task.get("task_config", {})
+        
+        # 绑定任务到流水线
         pipeline_manager.record_trigger(
             pipeline_id,
             task_id,
@@ -3291,6 +3286,58 @@ def _process_next_queued_task(pipeline_manager, pipeline_id: str):
                 "from_queue": True,  # 标记来自队列
             },
         )
+        
+        # 重新调用构建逻辑来开始执行任务
+        # 从任务配置中提取参数
+        git_url = task_config.get("git_url")
+        image_name = task_config.get("image_name")
+        tag = task_config.get("tag", "latest")
+        branch = task_config.get("branch")
+        project_type = task_config.get("project_type", "jar")
+        template = task_config.get("template", "")
+        template_params = task_config.get("template_params", {})
+        should_push = task_config.get("should_push", False)
+        sub_path = task_config.get("sub_path")
+        use_project_dockerfile = task_config.get("use_project_dockerfile", True)
+        dockerfile_name = task_config.get("dockerfile_name", "Dockerfile")
+        source_id = task_config.get("source_id")
+        selected_services = task_config.get("selected_services")
+        service_push_config = task_config.get("service_push_config")
+        service_template_params = task_config.get("service_template_params", {})
+        push_mode = task_config.get("push_mode", "multi")
+        resource_package_ids = task_config.get("resource_package_ids", [])
+        trigger_source = task_config.get("trigger_source", "manual")
+        
+        # 启动构建线程（使用已有的任务ID）
+        import threading
+        thread = threading.Thread(
+            target=build_manager._build_from_source_task,
+            args=(
+                task_id,
+                git_url,
+                image_name,
+                tag,
+                should_push,
+                template,
+                project_type,
+                template_params or {},
+                None,  # push_registry
+                branch,
+                sub_path,
+                use_project_dockerfile,
+                dockerfile_name,
+                source_id,
+                selected_services,
+                service_push_config,
+                push_mode,
+                service_template_params,
+                resource_package_ids or [],
+            ),
+            daemon=True,
+        )
+        thread.start()
+        with build_manager.lock:
+            build_manager.tasks[task_id] = thread
         
         print(f"✅ 队列任务已启动: 流水线 {pipeline_id[:8]}, 任务 {task_id[:8]}")
         
