@@ -3488,6 +3488,7 @@ class CreatePipelineRequest(BaseModel):
     cron_expression: Optional[str] = None
     webhook_branch_filter: bool = False
     webhook_use_push_branch: bool = True
+    webhook_allowed_branches: Optional[list] = None  # 允许触发的分支列表
     branch_tag_mapping: Optional[dict] = (
         None  # 分支到标签的映射，如 {"main": "latest", "dev": "dev"}
     )
@@ -3524,6 +3525,7 @@ class UpdatePipelineRequest(BaseModel):
     cron_expression: Optional[str] = None
     webhook_branch_filter: Optional[bool] = None
     webhook_use_push_branch: Optional[bool] = None
+    webhook_allowed_branches: Optional[list] = None
     branch_tag_mapping: Optional[dict] = None
     source_id: Optional[str] = None
     selected_services: Optional[list] = None
@@ -3588,6 +3590,7 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
             cron_expression=request.cron_expression,
             webhook_branch_filter=request.webhook_branch_filter,
             webhook_use_push_branch=request.webhook_use_push_branch,
+            webhook_allowed_branches=request.webhook_allowed_branches,
             branch_tag_mapping=request.branch_tag_mapping,
             source_id=request.source_id,
             selected_services=request.selected_services,
@@ -4070,6 +4073,7 @@ async def update_pipeline(
             cron_expression=request.cron_expression,
             webhook_branch_filter=request.webhook_branch_filter,
             webhook_use_push_branch=request.webhook_use_push_branch,
+            webhook_allowed_branches=request.webhook_allowed_branches,
             branch_tag_mapping=request.branch_tag_mapping,
             source_id=request.source_id,
             selected_services=request.selected_services,

@@ -28,6 +28,7 @@ engine = create_engine(
     pool_pre_ping=True,  # 连接前ping，检测连接是否有效
 )
 
+
 # 启用WAL模式以提高并发性能
 @event.listens_for(engine, "connect")
 def set_sqlite_pragma(dbapi_conn, connection_record):
@@ -49,8 +50,11 @@ def set_sqlite_pragma(dbapi_conn, connection_record):
     finally:
         cursor.close()
 
+
 # 创建会话工厂
-SessionLocal = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
+SessionLocal = scoped_session(
+    sessionmaker(autocommit=False, autoflush=False, bind=engine)
+)
 
 # 线程本地存储
 _local = threading.local()
@@ -73,9 +77,10 @@ def get_db_session():
 def init_db():
     """初始化数据库（创建所有表）"""
     from backend.models import Base
+
     # 确保目录存在
     os.makedirs(DB_DIR, exist_ok=True)
-    
+
     # 在创建表之前，先设置WAL模式（如果数据库已存在）
     if os.path.exists(DB_FILE):
         try:
@@ -89,13 +94,50 @@ def init_db():
             conn.close()
         except Exception as e:
             print(f"⚠️ 设置数据库PRAGMA失败: {e}")
-    
+
     # 创建所有表
     Base.metadata.create_all(bind=engine)
+
+    # 迁移：添加webhook_allowed_branches字段（如果不存在）
+    migrate_add_webhook_allowed_branches()
+
     print(f"✅ 数据库初始化完成: {DB_FILE}")
+
+
+def migrate_add_webhook_allowed_branches():
+    """迁移：为pipelines表添加webhook_allowed_branches字段"""
+    if not os.path.exists(DB_FILE):
+        return
+
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=30.0)
+        cursor = conn.cursor()
+
+        # 检查字段是否已存在
+        cursor.execute("PRAGMA table_info(pipelines)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "webhook_allowed_branches" not in columns:
+            print("🔄 添加 webhook_allowed_branches 字段到 pipelines 表...")
+            # SQLite不支持直接添加JSON列，需要先添加TEXT列
+            cursor.execute(
+                "ALTER TABLE pipelines ADD COLUMN webhook_allowed_branches TEXT DEFAULT '[]'"
+            )
+            conn.commit()
+            print("✅ webhook_allowed_branches 字段添加成功")
+        else:
+            print("✅ webhook_allowed_branches 字段已存在")
+
+        conn.close()
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            print("✅ webhook_allowed_branches 字段已存在")
+        else:
+            print(f"⚠️ 迁移webhook_allowed_branches字段失败: {e}")
+    except Exception as e:
+        print(f"⚠️ 迁移webhook_allowed_branches字段失败: {e}")
 
 
 def close_db():
     """关闭数据库连接"""
     SessionLocal.remove()
-
