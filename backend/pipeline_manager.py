@@ -275,7 +275,12 @@ class PipelineManager:
                 "webhook_branch_filter": bool(row["webhook_branch_filter"]),
                 "webhook_use_push_branch": bool(row["webhook_use_push_branch"]),
                 "webhook_allowed_branches": self._safe_parse_json(
-                    row.get("webhook_allowed_branches"), []
+                    (
+                        row["webhook_allowed_branches"]
+                        if "webhook_allowed_branches" in row.keys()
+                        else None
+                    ),
+                    [],
                 ),
                 "branch_tag_mapping": self._safe_parse_json(
                     row["branch_tag_mapping"], {}
@@ -391,7 +396,12 @@ class PipelineManager:
                                 row["webhook_use_push_branch"]
                             ),
                             "webhook_allowed_branches": self._safe_parse_json(
-                                row.get("webhook_allowed_branches"), []
+                                (
+                                    row["webhook_allowed_branches"]
+                                    if "webhook_allowed_branches" in row.keys()
+                                    else None
+                                ),
+                                [],
                             ),
                             "branch_tag_mapping": self._safe_parse_json(
                                 row["branch_tag_mapping"], {}
@@ -441,7 +451,12 @@ class PipelineManager:
 
                         result.append(pipeline_dict)
                     except Exception as e:
-                        print(f"⚠️ 跳过流水线 {row.get('pipeline_id', 'Unknown')}: {e}")
+                        pipeline_id = (
+                            row["pipeline_id"]
+                            if "pipeline_id" in row.keys()
+                            else "Unknown"
+                        )
+                        print(f"⚠️ 跳过流水线 {pipeline_id}: {e}")
                         import traceback
 
                         traceback.print_exc()
