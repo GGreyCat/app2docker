@@ -1,24 +1,25 @@
-# host_manager.py
+# backend/host_manager.py
 """
-主机资源管理模块
+主机资源管理模块（基于数据库）
 用于管理远程主机SSH连接和Docker编译支持配置
 """
 import os
-import json
 import uuid
 import paramiko
 from datetime import datetime
 from typing import List, Dict, Optional
-from pathlib import Path
+from backend.database import get_db_session, init_db
+from backend.models import Host
 
-# 主机配置存储目录
-HOST_CONFIG_DIR = "data/hosts"
-# 主机配置元数据文件
-METADATA_FILE = os.path.join(HOST_CONFIG_DIR, "metadata.json")
+# 确保数据库已初始化
+try:
+    init_db()
+except:
+    pass
 
 
 class HostManager:
-    """主机资源管理器"""
+    """主机资源管理器（基于数据库）"""
     
     _instance = None
     _lock = None
@@ -33,30 +34,42 @@ class HostManager:
     
     def _init(self):
         """初始化主机管理器"""
-        # 确保目录存在
-        os.makedirs(HOST_CONFIG_DIR, exist_ok=True)
-        # 加载元数据
-        self._load_metadata()
+        pass
     
-    def _load_metadata(self) -> Dict:
-        """加载主机元数据"""
-        if os.path.exists(METADATA_FILE):
-            try:
-                with open(METADATA_FILE, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"⚠️ 加载主机元数据失败: {e}")
-                return {}
-        return {}
-    
-    def _save_metadata(self, metadata: Dict):
-        """保存主机元数据"""
-        try:
-            with open(METADATA_FILE, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"❌ 保存主机元数据失败: {e}")
-            raise
+    def _to_dict(self, host: Host, include_secrets: bool = False) -> Optional[Dict]:
+        """将数据库模型转换为字典"""
+        if not host:
+            return None
+        
+        result = {
+            "host_id": host.host_id,
+            "name": host.name,
+            "host": host.host,
+            "port": host.port,
+            "username": host.username,
+            "docker_enabled": host.docker_enabled,
+            "docker_version": host.docker_version,
+            "description": host.description,
+            "created_at": host.created_at.isoformat() if host.created_at else None,
+            "updated_at": host.updated_at.isoformat() if host.updated_at else None,
+        }
+        
+        if include_secrets:
+            result["password"] = host.password
+            result["private_key"] = host.private_key
+            result["key_password"] = host.key_password
+        else:
+            result["has_password"] = bool(host.password)
+            result["has_private_key"] = bool(host.private_key)
+            if host.password:
+                result["password"] = "***"
+            if host.private_key:
+                result["private_key"] = "***"
+            if host.key_password:
+                result["key_password"] = "***"
+            result["docker_available"] = bool(host.docker_version)
+        
+        return result
     
     def test_ssh_connection(
         self,
@@ -68,36 +81,18 @@ class HostManager:
         key_password: Optional[str] = None,
         timeout: int = 10
     ) -> Dict:
-        """
-        测试SSH连接
-        
-        Args:
-            host: 主机地址
-            port: SSH端口
-            username: 用户名
-            password: 密码（如果使用密码认证）
-            private_key: SSH私钥内容（如果使用密钥认证）
-            key_password: 私钥密码（如果私钥有密码）
-            timeout: 连接超时时间（秒）
-        
-        Returns:
-            测试结果字典，包含success、message、docker_available等信息
-        """
+        """测试SSH连接"""
         ssh_client = None
         try:
-            # 创建SSH客户端
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
-            # 准备认证方式
             auth_methods = []
             
-            # 如果提供了私钥，优先使用密钥认证
             if private_key:
                 try:
                     import io
                     key_file = io.StringIO(private_key)
-                    # 尝试不同的密钥类型
                     for key_class in [paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.DSSKey]:
                         try:
                             key_file.seek(0)
@@ -113,7 +108,6 @@ class HostManager:
                 except Exception as e:
                     print(f"⚠️ 解析SSH私钥失败: {e}")
             
-            # 如果提供了密码，添加密码认证
             if password:
                 auth_methods.append(password)
             
@@ -124,7 +118,6 @@ class HostManager:
                     "docker_available": False
                 }
             
-            # 连接SSH
             connect_kwargs = {
                 "hostname": host,
                 "port": port,
@@ -139,7 +132,6 @@ class HostManager:
             
             ssh_client.connect(**connect_kwargs)
             
-            # 测试Docker是否可用
             docker_available = False
             docker_version = None
             try:
@@ -195,57 +187,41 @@ class HostManager:
         docker_enabled: bool = False,
         description: str = ""
     ) -> Dict:
-        """
-        添加主机
-        
-        Args:
-            name: 主机名称
-            host: 主机地址
-            port: SSH端口
-            username: SSH用户名
-            password: SSH密码（可选）
-            private_key: SSH私钥（可选）
-            key_password: 私钥密码（可选）
-            docker_enabled: 是否支持Docker编译
-            description: 描述信息
-        
-        Returns:
-            主机信息字典
-        """
+        """添加主机"""
         with self._lock:
-            metadata = self._load_metadata()
-            
-            # 检查名称是否已存在
-            for host_id, host_info in metadata.items():
-                if host_info.get("name") == name:
+            db = get_db_session()
+            try:
+                # 检查名称是否已存在
+                existing = db.query(Host).filter(Host.name == name).first()
+                if existing:
                     raise ValueError(f"主机名称 '{name}' 已存在")
-            
-            # 生成唯一ID
-            host_id = str(uuid.uuid4())
-            
-            # 创建主机信息
-            host_info = {
-                "host_id": host_id,
-                "name": name,
-                "host": host,
-                "port": port,
-                "username": username,
-                "password": password,  # 注意：实际应用中应该加密存储
-                "private_key": private_key,  # 注意：实际应用中应该加密存储
-                "key_password": key_password,  # 注意：实际应用中应该加密存储
-                "docker_enabled": docker_enabled,
-                "docker_version": None,  # Docker版本信息
-                "description": description,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
-            }
-            
-            # 保存元数据
-            metadata[host_id] = host_info
-            self._save_metadata(metadata)
-            
-            print(f"✅ 主机添加成功: {host_id} ({name})")
-            return host_info
+                
+                host_id = str(uuid.uuid4())
+                
+                host_obj = Host(
+                    host_id=host_id,
+                    name=name,
+                    host=host,
+                    port=port,
+                    username=username,
+                    password=password,
+                    private_key=private_key,
+                    key_password=key_password,
+                    docker_enabled=docker_enabled,
+                    docker_version=None,
+                    description=description,
+                )
+                
+                db.add(host_obj)
+                db.commit()
+                
+                print(f"✅ 主机添加成功: {host_id} ({name})")
+                return self._to_dict(host_obj)
+            except Exception as e:
+                db.rollback()
+                raise
+            finally:
+                db.close()
     
     def update_host(
         self,
@@ -261,148 +237,95 @@ class HostManager:
         docker_version: Optional[str] = None,
         description: Optional[str] = None
     ) -> Optional[Dict]:
-        """
-        更新主机信息
-        
-        Args:
-            host_id: 主机ID
-            其他参数：要更新的字段
-        
-        Returns:
-            更新后的主机信息字典，如果主机不存在则返回None
-        """
+        """更新主机信息"""
         with self._lock:
-            metadata = self._load_metadata()
-            
-            if host_id not in metadata:
-                return None
-            
-            host_info = metadata[host_id]
-            
-            # 如果更新名称，检查是否与其他主机冲突
-            if name and name != host_info.get("name"):
-                for other_id, other_info in metadata.items():
-                    if other_id != host_id and other_info.get("name") == name:
+            db = get_db_session()
+            try:
+                host_obj = db.query(Host).filter(Host.host_id == host_id).first()
+                if not host_obj:
+                    return None
+                
+                if name and name != host_obj.name:
+                    existing = db.query(Host).filter(Host.name == name, Host.host_id != host_id).first()
+                    if existing:
                         raise ValueError(f"主机名称 '{name}' 已存在")
-            
-            # 更新字段
-            if name is not None:
-                host_info["name"] = name
-            if host is not None:
-                host_info["host"] = host
-            if port is not None:
-                host_info["port"] = port
-            if username is not None:
-                host_info["username"] = username
-            # 密码和私钥：如果传入空字符串，则清除；如果传入None，则保留原值
-            if password is not None:
-                if password == "":
-                    # 空字符串表示清除密码
-                    host_info["password"] = None
-                else:
-                    host_info["password"] = password
-            if private_key is not None:
-                if private_key == "":
-                    # 空字符串表示清除私钥
-                    host_info["private_key"] = None
-                    host_info["key_password"] = None  # 清除私钥时也清除私钥密码
-                else:
-                    host_info["private_key"] = private_key
-            if key_password is not None:
-                host_info["key_password"] = key_password if key_password else None
-            if docker_enabled is not None:
-                host_info["docker_enabled"] = docker_enabled
-            if docker_version is not None:
-                host_info["docker_version"] = docker_version
-            if description is not None:
-                host_info["description"] = description
-            
-            host_info["updated_at"] = datetime.now().isoformat()
-            
-            # 保存元数据
-            self._save_metadata(metadata)
-            
-            print(f"✅ 主机更新成功: {host_id}")
-            return host_info
+                    host_obj.name = name
+                
+                if host is not None:
+                    host_obj.host = host
+                if port is not None:
+                    host_obj.port = port
+                if username is not None:
+                    host_obj.username = username
+                if password is not None:
+                    host_obj.password = password if password else None
+                if private_key is not None:
+                    host_obj.private_key = private_key if private_key else None
+                    if not private_key:
+                        host_obj.key_password = None
+                if key_password is not None:
+                    host_obj.key_password = key_password if key_password else None
+                if docker_enabled is not None:
+                    host_obj.docker_enabled = docker_enabled
+                if docker_version is not None:
+                    host_obj.docker_version = docker_version
+                if description is not None:
+                    host_obj.description = description
+                
+                host_obj.updated_at = datetime.now()
+                db.commit()
+                
+                print(f"✅ 主机更新成功: {host_id}")
+                return self._to_dict(host_obj)
+            except Exception as e:
+                db.rollback()
+                raise
+            finally:
+                db.close()
     
     def list_hosts(self) -> List[Dict]:
         """列出所有主机"""
-        metadata = self._load_metadata()
-        hosts = []
-        
-        for host_id, host_info in metadata.items():
-            # 创建返回副本，隐藏敏感信息
-            host_copy = host_info.copy()
-            # 不返回密码和私钥的完整内容，只返回是否已设置
-            if host_copy.get("password"):
-                host_copy["has_password"] = True
-                host_copy["password"] = "***"
-            else:
-                host_copy["has_password"] = False
-            
-            if host_copy.get("private_key"):
-                host_copy["has_private_key"] = True
-                host_copy["private_key"] = "***"
-            else:
-                host_copy["has_private_key"] = False
-            
-            if host_copy.get("key_password"):
-                host_copy["key_password"] = "***"
-            
-            # 根据docker_version判断docker_available
-            if host_copy.get("docker_version"):
-                host_copy["docker_available"] = True
-            else:
-                host_copy["docker_available"] = False
-            
-            hosts.append(host_copy)
-        
-        # 按创建时间倒序排列
-        hosts.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-        return hosts
+        db = get_db_session()
+        try:
+            hosts = db.query(Host).order_by(Host.created_at.desc()).all()
+            return [self._to_dict(h) for h in hosts]
+        finally:
+            db.close()
     
     def get_host(self, host_id: str) -> Optional[Dict]:
         """获取主机信息"""
-        metadata = self._load_metadata()
-        host_info = metadata.get(host_id)
-        
-        if host_info:
-            # 创建返回副本，隐藏敏感信息
-            host_copy = host_info.copy()
-            if host_copy.get("password"):
-                host_copy["has_password"] = True
-                host_copy["password"] = "***"
-            else:
-                host_copy["has_password"] = False
-            
-            if host_copy.get("private_key"):
-                host_copy["has_private_key"] = True
-                host_copy["private_key"] = "***"
-            else:
-                host_copy["has_private_key"] = False
-            
-            if host_copy.get("key_password"):
-                host_copy["key_password"] = "***"
-        
-        return host_copy
+        db = get_db_session()
+        try:
+            host = db.query(Host).filter(Host.host_id == host_id).first()
+            return self._to_dict(host)
+        finally:
+            db.close()
     
     def get_host_full(self, host_id: str) -> Optional[Dict]:
         """获取主机完整信息（包含密码和私钥，用于连接）"""
-        metadata = self._load_metadata()
-        return metadata.get(host_id)
+        db = get_db_session()
+        try:
+            host = db.query(Host).filter(Host.host_id == host_id).first()
+            return self._to_dict(host, include_secrets=True)
+        finally:
+            db.close()
     
     def delete_host(self, host_id: str) -> bool:
         """删除主机"""
         with self._lock:
-            metadata = self._load_metadata()
-            
-            if host_id not in metadata:
-                return False
-            
-            # 从元数据中移除
-            del metadata[host_id]
-            self._save_metadata(metadata)
-            
-            print(f"✅ 主机已删除: {host_id}")
-            return True
-
+            db = get_db_session()
+            try:
+                host = db.query(Host).filter(Host.host_id == host_id).first()
+                if not host:
+                    return False
+                
+                db.delete(host)
+                db.commit()
+                
+                print(f"✅ 主机已删除: {host_id}")
+                return True
+            except Exception as e:
+                db.rollback()
+                raise
+            finally:
+                db.close()

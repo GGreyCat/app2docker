@@ -13,3 +13,4 @@ setuptools>=65.0.0  # 提供 distutils 兼容层（Python 3.12+ 需要）
 urllib3==2.5.0
 uvicorn[standard]==0.34.0
 watchdog==5.0.3
+sqlalchemy==2.0.23  # 数据库 ORM

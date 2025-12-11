@@ -16,6 +16,9 @@
         <button class="btn btn-primary btn-sm" @click="showCreateModal">
           <i class="fas fa-plus"></i> 新建流水线
         </button>
+        <button class="btn btn-info btn-sm" @click="openJsonCreateModal">
+          <i class="fas fa-code"></i> 通过JSON创建
+        </button>
       </div>
     </div>
 
@@ -531,21 +534,66 @@
                   role="tabpanel"
                   id="build-pane"
                 >
-                  <!-- 视图切换和查看JSON按钮 -->
-                  <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h6 class="mb-0">
-                      <i class="fas fa-cogs"></i> Dockerfile & 镜像配置
-                    </h6>
-                    <div class="btn-group btn-group-sm" role="group">
+                  <!-- 编辑模式下显示JSON编辑器 -->
+                  <div v-if="editingPipeline">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                      <h6 class="mb-0">
+                        <i class="fas fa-code"></i> 编辑构建配置JSON
+                      </h6>
+                      <div class="btn-group btn-group-sm" role="group">
+                        <button 
+                          type="button"
+                          class="btn btn-outline-primary"
+                          @click="copyBuildConfigJson"
+                        >
+                          <i class="fas fa-copy"></i> 复制JSON
+                        </button>
+                      </div>
+                    </div>
+                    <div class="alert alert-info mb-3">
+                      <i class="fas fa-info-circle"></i> 
+                      <strong>提示：</strong>编辑JSON后点击"应用"将配置应用到表单，然后点击底部"保存"按钮保存流水线。
+                    </div>
+                    <codemirror
+                      v-model="buildConfigJsonText"
+                      :style="{ height: '500px', fontSize: '13px' }"
+                      :extensions="jsonEditorExtensions"
+                    />
+                    <div v-if="buildConfigJsonError" class="alert alert-danger mt-2">
+                      <i class="fas fa-exclamation-circle"></i> {{ buildConfigJsonError }}
+                    </div>
+                    <div class="mt-3 d-flex justify-content-end gap-2">
+                      <button type="button" class="btn btn-secondary btn-sm" @click="resetBuildConfigJson">
+                        <i class="fas fa-undo"></i> 重置
+                      </button>
                       <button 
-                        type="button"
-                        class="btn btn-outline-info"
-                        @click="showBuildConfigJsonModal = true"
+                        type="button" 
+                        class="btn btn-success btn-sm" 
+                        @click="applyBuildConfigJson"
+                        :disabled="!!buildConfigJsonError"
                       >
-                        <i class="fas fa-code"></i> 查看JSON
+                        <i class="fas fa-check"></i> 应用
                       </button>
                     </div>
                   </div>
+                  
+                  <!-- 新建模式下显示表单界面 -->
+                  <div v-else>
+                    <!-- 视图切换和查看JSON按钮 -->
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                      <h6 class="mb-0">
+                        <i class="fas fa-cogs"></i> Dockerfile & 镜像配置
+                      </h6>
+                      <div class="btn-group btn-group-sm" role="group">
+                        <button 
+                          type="button"
+                          class="btn btn-outline-info"
+                          @click="showBuildConfigJsonModal = true"
+                        >
+                          <i class="fas fa-code"></i> 查看JSON
+                        </button>
+                      </div>
+                    </div>
 
 
                   <!-- Dockerfile 配置模块 -->
@@ -740,7 +788,7 @@
                               placeholder="latest"
                             >
                             <small class="text-muted d-block mt-1">
-                              <i class="fas fa-info-circle"></i> 所有服务使用此标签
+                              <i class="fas fa-info-circle"></i> 所有服务使用此标签，支持动态日期占位符
                             </small>
                           </div>
                         </div>
@@ -951,6 +999,7 @@
                       </div>
                     </div>
                   </div>
+                  </div>
                 </div>
 
                 <!-- 资源包配置 Tab -->
@@ -1117,7 +1166,7 @@
                     </button>
                   </label>
                   <small class="text-muted d-block mb-2">
-                    为不同分支设置不同的镜像标签，支持通配符（如 feature/*）
+                    为不同分支设置不同的镜像标签，支持通配符（如 feature/*）。一个分支可以设置多个标签，用逗号分隔（如：latest,v1.0.0）。标签支持动态日期占位符（${DATE}、${DATE:YYYY-MM-DD}、${TIMESTAMP}）
                   </small>
                   <div v-if="formData.branch_tag_mapping && formData.branch_tag_mapping.length > 0" class="border rounded p-2">
                     <div 
@@ -1141,7 +1190,8 @@
                           v-model="mapping.tag" 
                           type="text" 
                           class="form-control form-control-sm"
-                          placeholder="标签（如：latest）"
+                          placeholder="标签（如：latest 或 latest,v1.0.0）"
+                          title="支持多个标签，用逗号分隔"
                         >
                       </div>
                       <div class="col-md-1">
@@ -1599,15 +1649,19 @@
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title">
-              <i class="fas fa-code"></i> 构建配置JSON
+              <i class="fas fa-code"></i> {{ editingPipeline ? '编辑' : '查看' }}构建配置JSON
             </h5>
-            <button type="button" class="btn-close" @click="showBuildConfigJsonModal = false"></button>
+            <button type="button" class="btn-close" @click="closeBuildConfigJsonModal"></button>
           </div>
           <div class="modal-body">
+            <div v-if="editingPipeline" class="alert alert-info mb-3">
+              <i class="fas fa-info-circle"></i> 
+              <strong>提示：</strong>编辑JSON后点击保存，配置将应用到流水线中。
+            </div>
             <div class="d-flex justify-content-end mb-2">
               <button 
                 type="button"
-                class="btn btn-sm btn-outline-primary"
+                class="btn btn-sm btn-outline-primary me-2"
                 @click="copyBuildConfigJson"
               >
                 <i class="fas fa-copy"></i> 复制JSON
@@ -1616,17 +1670,106 @@
             <codemirror
               v-model="buildConfigJsonText"
               :style="{ height: '500px', fontSize: '13px' }"
-              :disabled="true"
+              :disabled="!editingPipeline"
               :extensions="jsonEditorExtensions"
             />
+            <div v-if="buildConfigJsonError" class="alert alert-danger mt-2">
+              <i class="fas fa-exclamation-circle"></i> {{ buildConfigJsonError }}
+            </div>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary btn-sm" @click="showBuildConfigJsonModal = false">关闭</button>
+            <button type="button" class="btn btn-secondary btn-sm" @click="closeBuildConfigJsonModal">取消</button>
+            <button 
+              v-if="editingPipeline"
+              type="button" 
+              class="btn btn-primary btn-sm" 
+              @click="saveBuildConfigJson"
+              :disabled="!!buildConfigJsonError"
+            >
+              <i class="fas fa-save"></i> 保存并应用
+            </button>
           </div>
         </div>
       </div>
     </div>
     <div v-if="showBuildConfigJsonModal" class="modal-backdrop fade show" style="z-index: 1050;"></div>
+
+    <!-- 通过JSON创建流水线模态框 -->
+    <div v-if="showJsonCreateModal" class="modal fade show" style="display: block; z-index: 1055;" tabindex="-1">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">
+              <i class="fas fa-code"></i> 通过JSON创建流水线
+            </h5>
+            <button type="button" class="btn-close" @click="closeJsonCreateModal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-info">
+              <i class="fas fa-info-circle"></i> 
+              <strong>提示：</strong>填写必要参数后，可在下方JSON中继续编辑完整配置。字段定义与"任务中另存为流水线"一致。
+            </div>
+            
+            <!-- 必要参数输入框 -->
+            <div class="card mb-3">
+              <div class="card-header bg-light">
+                <strong>必要参数</strong>
+              </div>
+              <div class="card-body">
+                <div class="mb-3">
+                  <label class="form-label">流水线名称 <span class="text-danger">*</span></label>
+                  <input
+                    type="text"
+                    v-model="jsonFormData.name"
+                    class="form-control"
+                    placeholder="请输入流水线名称"
+                    @input="updateJsonFromForm"
+                    required
+                  />
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Git 仓库地址 <span class="text-danger">*</span></label>
+                  <input
+                    type="text"
+                    v-model="jsonFormData.git_url"
+                    class="form-control"
+                    placeholder="https://github.com/example/repo.git"
+                    @input="updateJsonFromForm"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            <!-- JSON输入框 -->
+            <div class="mb-3">
+              <label class="form-label">流水线配置JSON：</label>
+              <textarea
+                v-model="jsonInput"
+                class="form-control font-monospace"
+                rows="15"
+                placeholder='{"name": "my_pipeline", "git_url": "https://github.com/example/repo.git", "branch": "main", ...}'
+                style="font-size: 0.9rem;"
+              ></textarea>
+            </div>
+
+            <div v-if="jsonError" class="alert alert-danger">
+              <i class="fas fa-exclamation-circle"></i> {{ jsonError }}
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeJsonCreateModal" :disabled="savingJson">
+              取消
+            </button>
+            <button type="button" class="btn btn-primary" @click="createPipelineFromJson" :disabled="savingJson || (!jsonFormData.name && !jsonInput)">
+              <span v-if="savingJson" class="spinner-border spinner-border-sm me-1"></span>
+              <i v-else class="fas fa-save"></i> 创建流水线
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div v-if="showJsonCreateModal" class="modal-backdrop fade show" style="z-index: 1050;"></div>
   </div>
 </template>
 
@@ -1681,6 +1824,14 @@ const autoScroll = ref(true)
 const refreshingLogs = ref(false)
 const showResourcePackageModal = ref(false)
 const resourcePackages = ref([])  // 资源包列表
+const showJsonCreateModal = ref(false)  // JSON创建流水线模态框
+const jsonInput = ref('')  // JSON输入内容
+const jsonError = ref('')  // JSON错误信息
+const savingJson = ref(false)  // 正在保存JSON
+const jsonFormData = ref({  // JSON表单数据（只包含必要参数）
+  name: '',
+  git_url: ''
+})
 
 // 多服务相关
 const services = ref([])  // 服务列表
@@ -1702,6 +1853,7 @@ const repoVerified = ref(false)  // 仓库是否已验证
 const activeTab = ref('basic')  // 当前激活的Tab
 const showBuildConfigJsonModal = ref(false)  // 显示构建配置JSON模态框
 const buildConfigJsonText = ref('')  // JSON文本内容（用于CodeMirror）
+const buildConfigJsonError = ref('')  // JSON验证错误
 
 // CodeMirror 扩展配置（JSON模式，使用JavaScript模式）
 const jsonEditorExtensions = [
@@ -1938,9 +2090,109 @@ watch(showBuildConfigJsonModal, (isVisible) => {
     // 使用 nextTick 确保在模态框完全显示后再更新
     nextTick(() => {
       buildConfigJsonText.value = buildConfigJson.value
+      buildConfigJsonError.value = ''
     })
   }
 })
+
+// 监听activeTab变化，当切换到build Tab且是编辑模式时，更新JSON内容
+watch(activeTab, (newTab) => {
+  if (newTab === 'build' && editingPipeline.value) {
+    nextTick(() => {
+      buildConfigJsonText.value = buildConfigJson.value
+      buildConfigJsonError.value = ''
+    })
+  }
+})
+
+// 监听JSON文本变化，实时验证（编辑模式下）
+watch(buildConfigJsonText, (newText) => {
+  if (!editingPipeline.value || activeTab.value !== 'build') return
+  
+  buildConfigJsonError.value = ''
+  if (!newText || !newText.trim()) {
+    buildConfigJsonError.value = 'JSON不能为空'
+    return
+  }
+  
+  try {
+    const parsed = JSON.parse(newText)
+    // 基本验证：确保是对象
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      buildConfigJsonError.value = 'JSON必须是对象格式'
+      return
+    }
+  } catch (e) {
+    buildConfigJsonError.value = `JSON格式错误: ${e.message}`
+  }
+})
+
+// 关闭构建配置JSON模态框
+function closeBuildConfigJsonModal() {
+  showBuildConfigJsonModal.value = false
+  buildConfigJsonError.value = ''
+}
+
+// 重置构建配置JSON（恢复到原始值）
+function resetBuildConfigJson() {
+  if (confirm('确定要重置构建配置JSON吗？未保存的修改将丢失。')) {
+    buildConfigJsonText.value = buildConfigJson.value
+    buildConfigJsonError.value = ''
+  }
+}
+
+// 应用构建配置JSON到formData（不保存到后端）
+function applyBuildConfigJson() {
+  if (buildConfigJsonError.value) {
+    alert('请先修复JSON错误')
+    return
+  }
+  
+  try {
+    const config = JSON.parse(buildConfigJsonText.value)
+    
+    // 更新formData中的相关字段
+    if (config.git_url !== undefined) formData.value.git_url = config.git_url
+    if (config.image_name !== undefined) formData.value.image_name = config.image_name
+    if (config.tag !== undefined) formData.value.tag = config.tag
+    if (config.branch !== undefined && config.branch !== null) formData.value.branch = config.branch
+    if (config.project_type !== undefined) formData.value.project_type = config.project_type
+    if (config.template !== undefined) formData.value.template = config.template
+    if (config.template_params !== undefined) formData.value.template_params = config.template_params
+    if (config.should_push !== undefined) formData.value.push = config.should_push
+    if (config.sub_path !== undefined && config.sub_path !== null) formData.value.sub_path = config.sub_path
+    if (config.use_project_dockerfile !== undefined) formData.value.use_project_dockerfile = config.use_project_dockerfile
+    if (config.dockerfile_name !== undefined) formData.value.dockerfile_name = config.dockerfile_name
+    if (config.source_id !== undefined && config.source_id !== null) formData.value.source_id = config.source_id
+    if (config.selected_services !== undefined) formData.value.selected_services = config.selected_services || []
+    if (config.service_push_config !== undefined) formData.value.service_push_config = config.service_push_config || {}
+    if (config.service_template_params !== undefined) formData.value.service_template_params = config.service_template_params || {}
+    if (config.push_mode !== undefined) formData.value.push_mode = config.push_mode || 'multi'
+    if (config.resource_package_configs !== undefined) {
+      // 直接使用resource_package_configs配置（包含package_id和target_path）
+      formData.value.resource_package_configs = config.resource_package_configs || []
+    } else if (config.resource_package_ids !== undefined) {
+      // 兼容旧格式：如果只有resource_package_ids数组，转换为resource_package_configs格式
+      formData.value.resource_package_configs = (config.resource_package_ids || []).map(pkgId => ({ 
+        package_id: pkgId,
+        target_path: '' // 旧格式没有target_path，留空
+      }))
+    }
+    
+    // 如果push_mode是single，设置selected_service
+    if (config.push_mode === 'single' && config.selected_services && config.selected_services.length > 0) {
+      formData.value.selected_service = config.selected_services[0]
+    }
+    
+    // 更新JSON文本以反映formData的变化
+    buildConfigJsonText.value = buildConfigJson.value
+    buildConfigJsonError.value = ''
+    
+    // 不显示alert，静默应用，用户需要点击外部保存按钮才能真正保存
+  } catch (e) {
+    alert(`应用失败: ${e.message}`)
+  }
+}
 
 // 监听项目类型变化，如果当前选择的模板不再匹配新的项目类型，则清除模板选择
 watch(() => formData.value.project_type, (newType, oldType) => {
@@ -2036,8 +2288,11 @@ function editPipeline(pipeline) {
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PipelinePanel.vue:1918',message:'editPipeline started',data:{pipeline_id:pipeline.id,pipeline_name:pipeline.name,dockerfile_name:pipeline.dockerfile_name,template:pipeline.template,use_project_dockerfile:pipeline.use_project_dockerfile,project_type:pipeline.project_type},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
   // #endregion
+  
+  // 先重置Tab，确保显示基本信息Tab，而不是自动跳转到build Tab
+  activeTab.value = 'basic'
+  // 然后设置编辑模式
   editingPipeline.value = pipeline
-  activeTab.value = 'basic'  // 重置到第一个Tab
   
   // 查找对应的数据源
   const source = gitSources.value.find(s => 
@@ -2066,7 +2321,10 @@ function editPipeline(pipeline) {
     webhook_token: pipeline.webhook_token || '',
     webhook_secret: pipeline.webhook_secret || '',
     webhook_branch_strategy: getWebhookBranchStrategy(pipeline),
-    branch_tag_mapping: pipeline.branch_tag_mapping ? Object.entries(pipeline.branch_tag_mapping).map(([branch, tag]) => ({ branch, tag })) : [],
+    branch_tag_mapping: pipeline.branch_tag_mapping ? Object.entries(pipeline.branch_tag_mapping).map(([branch, tag]) => ({ 
+      branch, 
+      tag: Array.isArray(tag) ? tag.join(',') : tag  // 如果是数组，转换为逗号分隔的字符串
+    })) : [],
     enabled: pipeline.enabled !== false,
     trigger_schedule: !!pipeline.cron_expression,  // 如果有cron表达式则启用
     cron_expression: pipeline.cron_expression || '',
@@ -2150,7 +2408,9 @@ function editPipeline(pipeline) {
       })
     }, 100)
   }
+  
   showModal.value = true
+  
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PipelinePanel.vue:1980',message:'editPipeline completed',data:{final_dockerfile_name:formData.value.dockerfile_name,final_template:formData.value.template},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
   // #endregion
@@ -2192,11 +2452,20 @@ async function savePipeline() {
   saving.value = true
   try {
     // 将分支标签映射从数组转换为对象
+    // 支持一个分支对应多个标签（用逗号分隔，转换为数组）
     const branch_tag_mapping = {}
     if (formData.value.branch_tag_mapping && formData.value.branch_tag_mapping.length > 0) {
       formData.value.branch_tag_mapping.forEach(mapping => {
         if (mapping.branch && mapping.tag) {
-          branch_tag_mapping[mapping.branch] = mapping.tag
+          // 如果标签包含逗号，转换为数组；否则保持字符串
+          const tagValue = mapping.tag.trim()
+          if (tagValue.includes(',')) {
+            // 多个标签，转换为数组
+            branch_tag_mapping[mapping.branch] = tagValue.split(',').map(t => t.trim()).filter(t => t)
+          } else {
+            // 单个标签，保持字符串（向后兼容）
+            branch_tag_mapping[mapping.branch] = tagValue
+          }
         }
       })
     }
@@ -2377,6 +2646,160 @@ function closeModal() {
   scanningDockerfiles.value = false
   dockerfilesError.value = ''
   repoVerified.value = false
+}
+
+function openJsonCreateModal() {
+  jsonInput.value = ''
+  jsonError.value = ''
+  jsonFormData.value = {
+    name: '',
+    git_url: ''
+  }
+  showJsonCreateModal.value = true
+}
+
+// 从表单数据更新JSON
+function updateJsonFromForm() {
+  try {
+    // 如果JSON输入框为空或无效，则从表单生成
+    let currentJson = {}
+    if (jsonInput.value && jsonInput.value.trim()) {
+      try {
+        currentJson = JSON.parse(jsonInput.value.trim())
+      } catch (e) {
+        // JSON无效，使用表单数据
+        currentJson = {}
+      }
+    }
+    
+    // 只更新必要字段
+    if (jsonFormData.value.name) {
+      currentJson.name = jsonFormData.value.name
+    }
+    if (jsonFormData.value.git_url) {
+      currentJson.git_url = jsonFormData.value.git_url
+    }
+    
+    // 设置默认值（如果字段不存在）
+    if (!currentJson.enabled) {
+      currentJson.enabled = true
+    }
+    if (currentJson.push === undefined) {
+      currentJson.push = false
+    }
+    if (currentJson.use_project_dockerfile === undefined) {
+      currentJson.use_project_dockerfile = true
+    }
+    if (!currentJson.dockerfile_name) {
+      currentJson.dockerfile_name = 'Dockerfile'
+    }
+    if (currentJson.webhook_branch_filter === undefined) {
+      currentJson.webhook_branch_filter = false
+    }
+    if (currentJson.webhook_use_push_branch === undefined) {
+      currentJson.webhook_use_push_branch = true
+    }
+    if (!currentJson.push_mode) {
+      currentJson.push_mode = 'multi'
+    }
+    if (!currentJson.tag) {
+      currentJson.tag = 'latest'
+    }
+    if (!currentJson.project_type) {
+      currentJson.project_type = 'jar'
+    }
+    
+    // 更新JSON输入框
+    jsonInput.value = JSON.stringify(currentJson, null, 2)
+  } catch (e) {
+    console.error('更新JSON失败:', e)
+  }
+}
+
+function closeJsonCreateModal() {
+  if (savingJson.value) {
+    return
+  }
+  showJsonCreateModal.value = false
+  jsonInput.value = ''
+  jsonError.value = ''
+}
+
+async function createPipelineFromJson() {
+  savingJson.value = true
+  jsonError.value = ''
+
+  try {
+    let pipelineData
+
+    // 优先使用JSON输入框的内容
+    if (jsonInput.value && jsonInput.value.trim()) {
+      try {
+        pipelineData = JSON.parse(jsonInput.value.trim())
+      } catch (e) {
+        jsonError.value = `JSON格式错误: ${e.message}`
+        savingJson.value = false
+        return
+      }
+    } else {
+      // 如果JSON为空，从表单数据生成
+      if (!jsonFormData.value.name) {
+        jsonError.value = '流水线名称不能为空'
+        savingJson.value = false
+        return
+      }
+
+      if (!jsonFormData.value.git_url) {
+        jsonError.value = 'Git 仓库地址不能为空'
+        savingJson.value = false
+        return
+      }
+
+      // 构建完整的流水线配置
+      pipelineData = {
+        name: jsonFormData.value.name,
+        git_url: jsonFormData.value.git_url,
+        branch: jsonFormData.value.branch || null,
+        image_name: jsonFormData.value.image_name || null,
+        tag: jsonFormData.value.tag || 'latest',
+        project_type: jsonFormData.value.project_type || 'jar',
+        description: jsonFormData.value.description || '',
+        enabled: true,
+        push: false,
+        use_project_dockerfile: true,
+        dockerfile_name: 'Dockerfile',
+        webhook_branch_filter: false,
+        webhook_use_push_branch: true,
+        push_mode: 'multi'
+      }
+    }
+
+    // 验证必填字段
+    if (!pipelineData.name) {
+      jsonError.value = '流水线名称(name)不能为空'
+      savingJson.value = false
+      return
+    }
+
+    if (!pipelineData.git_url && !pipelineData.source_id) {
+      jsonError.value = '必须提供 git_url 或 source_id'
+      savingJson.value = false
+      return
+    }
+
+    // 调用API创建流水线
+    const response = await axios.post('/api/pipelines/json', pipelineData)
+    
+    alert('流水线创建成功！')
+    closeJsonCreateModal()
+    loadPipelines()
+  } catch (error) {
+    console.error('通过JSON创建流水线失败:', error)
+    const errorMsg = error.response?.data?.detail || error.message || '创建流水线失败'
+    jsonError.value = errorMsg
+  } finally {
+    savingJson.value = false
+  }
 }
 
 // 刷新分支列表
@@ -3178,6 +3601,20 @@ function getResourcePackageConfig(packageId) {
   return config
 }
 
+// 更新资源包目标路径
+function updateResourcePackagePath(packageId, targetPath) {
+  const config = formData.value.resource_package_configs.find(p => p.package_id === packageId)
+  if (config) {
+    config.target_path = targetPath || ''
+  } else {
+    // 如果配置不存在，创建新配置
+    formData.value.resource_package_configs.push({
+      package_id: packageId,
+      target_path: targetPath || ''
+    })
+  }
+}
+
 // Dockerfile 来源变化处理
 function onDockerfileSourceChange() {
   // #region agent log
@@ -3265,7 +3702,7 @@ const buildConfigJson = computed(() => {
     service_push_config: Object.keys(servicePushConfig).length > 0 ? servicePushConfig : {},
     service_template_params: formData.value.service_template_params || {},
     push_mode: formData.value.push_mode || 'multi',
-    resource_package_ids: (formData.value.resource_package_configs || []).map(pkg => pkg.package_id || pkg),
+    resource_package_configs: formData.value.resource_package_configs || [],
   }
   
   // 移除null值和空值（保留false和0）

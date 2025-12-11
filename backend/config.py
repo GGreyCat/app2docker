@@ -125,16 +125,31 @@ def load_config():
 
 
 def save_config(config):
-    """保存配置文件"""
+    """保存配置文件（使用临时文件确保原子性）"""
     # 确保目录存在
     os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
 
+    # 使用临时文件，然后原子性替换
+    temp_file = f"{CONFIG_FILE}.tmp"
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        # 先写入临时文件
+        with open(temp_file, "w", encoding="utf-8") as f:
             yaml.dump(
                 config, f, default_flow_style=False, allow_unicode=True, sort_keys=False
             )
+        
+        # 原子性替换
+        if os.path.exists(CONFIG_FILE):
+            os.replace(temp_file, CONFIG_FILE)
+        else:
+            os.rename(temp_file, CONFIG_FILE)
     except Exception as e:
+        # 清理临时文件
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
         print(f"❌ 保存配置文件失败: {e}")
         raise
 

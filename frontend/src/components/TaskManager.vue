@@ -97,6 +97,18 @@
                 <span v-if="buildDirCount > 0" class="text-muted small ms-2">({{ buildDirSize }})</span>
               </a>
             </li>
+            <li><hr class="dropdown-divider"></li>
+            <li>
+              <a class="dropdown-item" href="#" @click.prevent="cleanupExportDir" :class="{ 'text-muted': exportDirCount === 0 }">
+                <i class="fas fa-download"></i> 清理下载目录（全部）
+                <span v-if="exportDirCount > 0" class="text-muted small ms-2">({{ exportDirSize }})</span>
+              </a>
+            </li>
+            <li>
+              <a class="dropdown-item" href="#" @click.prevent="cleanupExportDirDays" :class="{ 'text-muted': exportDirCount === 0 }">
+                <i class="fas fa-calendar-times"></i> 清理N天前的下载文件
+              </a>
+            </li>
           </ul>
         </div>
       </div>
@@ -1204,6 +1216,78 @@ async function cleanupBuildDir() {
       errorMsg = `清理失败: ${err.message}`
     }
     
+    alert(errorMsg)
+  } finally {
+    cleaning.value = false
+  }
+}
+
+// 清理下载目录
+async function cleanupExportDir() {
+  if (cleaning.value) return
+  
+  if (!confirm('确定要清空所有下载文件吗？\n\n此操作将删除所有导出文件，无法恢复，请谨慎操作！')) {
+    return
+  }
+  
+  cleaning.value = true
+  
+  try {
+    const res = await axios.post('/api/exports/cleanup', {
+      keep_tasks: true  // 保留任务元数据
+    })
+    
+    if (res.data.success) {
+      const removedCount = res.data.removed_count || 0
+      const freedSpace = res.data.freed_space_mb || 0
+      const message = res.data.message || `成功清理了 ${removedCount} 个文件，释放空间 ${freedSpace} MB`
+      alert(message)
+      await loadExportDirStats()  // 重新加载统计
+    } else {
+      alert(res.data.message || res.data.detail || '清理失败')
+    }
+  } catch (err) {
+    console.error('清理下载目录失败:', err)
+    const errorMsg = err.response?.data?.detail || err.response?.data?.message || err.message || '清理失败'
+    alert(errorMsg)
+  } finally {
+    cleaning.value = false
+  }
+}
+
+// 清理N天前的下载文件
+async function cleanupExportDirDays() {
+  if (cleaning.value) return
+  
+  const days = prompt('请输入要清理多少天前的文件（例如：7 表示清理7天前的文件）：')
+  if (!days || isNaN(days) || parseInt(days) <= 0) {
+    return
+  }
+  
+  if (!confirm(`确定要清理 ${days} 天前的下载文件吗？\n\n此操作不可恢复，请谨慎操作！`)) {
+    return
+  }
+  
+  cleaning.value = true
+  
+  try {
+    const res = await axios.post('/api/exports/cleanup', {
+      days: parseInt(days),
+      keep_tasks: true  // 保留任务元数据
+    })
+    
+    if (res.data.success) {
+      const removedCount = res.data.removed_count || 0
+      const freedSpace = res.data.freed_space_mb || 0
+      const message = res.data.message || `成功清理了 ${removedCount} 个文件，释放空间 ${freedSpace} MB`
+      alert(message)
+      await loadExportDirStats()  // 重新加载统计
+    } else {
+      alert(res.data.message || res.data.detail || '清理失败')
+    }
+  } catch (err) {
+    console.error('清理下载目录失败:', err)
+    const errorMsg = err.response?.data?.detail || err.response?.data?.message || err.message || '清理失败'
     alert(errorMsg)
   } finally {
     cleaning.value = false

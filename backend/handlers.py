@@ -1369,13 +1369,8 @@ class BuildManager:
             BUILD_DIR, f"{image_name.replace('/', '_')}_{task_id[:8]}"
         )
 
-        # 保存构建上下文路径到任务信息中
-        try:
-            with self.task_manager.lock:
-                if task_id in self.task_manager.tasks:
-                    self.task_manager.tasks[task_id]["build_context"] = build_context
-        except Exception as e:
-            print(f"⚠️ 保存构建上下文路径失败: {e}")
+        # 构建上下文路径不需要保存到数据库（临时路径）
+        # 如果需要，可以通过 task_id 和 image_name 推导
 
         def log(msg: str):
             """添加日志，自动确保以换行符结尾"""
@@ -1723,14 +1718,17 @@ class BuildManager:
             last_error = None
 
             for chunk in build_stream:
-                # 检查是否请求停止
-                if (
-                    hasattr(self.task_manager, "tasks")
-                    and task_id in self.task_manager.tasks
-                ):
-                    if self.task_manager.tasks[task_id].get("stop_requested"):
+                # 检查是否请求停止（通过任务状态判断）
+                from backend.database import get_db_session
+                from backend.models import Task
+                db = get_db_session()
+                try:
+                    task = db.query(Task).filter(Task.task_id == task_id).first()
+                    if task and task.status == "stopped":
                         log(f"\n⚠️ 任务已被用户停止\n")
                         return
+                finally:
+                    db.close()
 
                 if "stream" in chunk:
                     stream_msg = chunk["stream"]
@@ -2194,13 +2192,8 @@ class BuildManager:
             BUILD_DIR, f"{image_name.replace('/', '_')}_{task_id[:8]}"
         )
 
-        # 保存构建上下文路径到任务信息中
-        try:
-            with self.task_manager.lock:
-                if task_id in self.task_manager.tasks:
-                    self.task_manager.tasks[task_id]["build_context"] = build_context
-        except Exception as e:
-            print(f"⚠️ 保存构建上下文路径失败: {e}")
+        # 构建上下文路径不需要保存到数据库（临时路径）
+        # 如果需要，可以通过 task_id 和 image_name 推导
 
         def log(msg: str):
             """添加日志（增强错误处理）"""
@@ -3429,6 +3422,50 @@ def build_task_config(
     return {k: v for k, v in config.items() if v is not None}
 
 
+def replace_tag_date_placeholders(tag: str) -> str:
+    """
+    替换标签中的动态日期占位符
+    
+    支持的格式：
+    - ${DATE} -> YYYYMMDD (例如: 20241225)
+    - ${DATE:FORMAT} -> 自定义格式 (例如: ${DATE:YYYY-MM-DD} -> 2024-12-25)
+    - ${TIMESTAMP} -> 时间戳 (例如: 1703520000)
+    
+    Args:
+        tag: 原始标签字符串
+        
+    Returns:
+        替换后的标签字符串
+    """
+    if not tag:
+        return tag
+    
+    now = datetime.now()
+    
+    # 替换 ${DATE:FORMAT} 格式（自定义格式）
+    import re
+    date_format_pattern = r'\$\{DATE:([^}]+)\}'
+    def replace_date_format(match):
+        format_str = match.group(1)
+        try:
+            # 将 YYYY-MM-DD 格式转换为 Python 的 strftime 格式
+            format_str = format_str.replace('YYYY', '%Y').replace('MM', '%m').replace('DD', '%d')
+            format_str = format_str.replace('HH', '%H').replace('mm', '%M').replace('ss', '%S')
+            return now.strftime(format_str)
+        except:
+            return match.group(0)  # 如果格式错误，返回原字符串
+    
+    tag = re.sub(date_format_pattern, replace_date_format, tag)
+    
+    # 替换 ${DATE} -> YYYYMMDD
+    tag = tag.replace('${DATE}', now.strftime('%Y%m%d'))
+    
+    # 替换 ${TIMESTAMP} -> 时间戳
+    tag = tag.replace('${TIMESTAMP}', str(int(now.timestamp())))
+    
+    return tag
+
+
 def pipeline_to_task_config(pipeline: dict, trigger_source: str = "manual", branch: str = None, tag: str = None, webhook_branch: str = None, branch_tag_mapping: dict = None, **kwargs) -> dict:
     """
     将流水线配置转换为任务配置JSON
@@ -3449,20 +3486,41 @@ def pipeline_to_task_config(pipeline: dict, trigger_source: str = "manual", bran
     final_branch = branch or pipeline.get("branch")
     final_tag = tag or pipeline.get("tag", "latest")
     
+    # 替换标签中的动态日期占位符
+    final_tag = replace_tag_date_placeholders(final_tag)
+    
     # 处理分支标签映射（仅在webhook触发时）
     if trigger_source == "webhook":
         mapping = branch_tag_mapping or pipeline.get("branch_tag_mapping", {})
         branch_for_mapping = webhook_branch if webhook_branch else final_branch
         if branch_for_mapping and mapping:
+            mapped_tag_value = None
             if branch_for_mapping in mapping:
-                final_tag = mapping[branch_for_mapping]
+                mapped_tag_value = mapping[branch_for_mapping]
             else:
                 # 尝试通配符匹配
                 import fnmatch
                 for pattern, mapped_tag in mapping.items():
                     if fnmatch.fnmatch(branch_for_mapping, pattern):
-                        final_tag = mapped_tag
+                        mapped_tag_value = mapped_tag
                         break
+            
+            if mapped_tag_value:
+                # 处理标签值（支持字符串、数组或逗号分隔的字符串）
+                if isinstance(mapped_tag_value, list):
+                    # 如果是数组，取第一个标签（webhook触发时会为每个标签单独调用此函数）
+                    final_tag = mapped_tag_value[0] if mapped_tag_value else final_tag
+                elif isinstance(mapped_tag_value, str):
+                    # 如果是字符串，检查是否包含逗号
+                    if "," in mapped_tag_value:
+                        # 逗号分隔的多个标签，取第一个（webhook触发时会为每个标签单独调用此函数）
+                        final_tag = mapped_tag_value.split(",")[0].strip() or final_tag
+                    else:
+                        # 单个标签
+                        final_tag = mapped_tag_value
+            
+            # 替换映射标签中的动态日期占位符
+            final_tag = replace_tag_date_placeholders(final_tag)
     
     return build_task_config(
         git_url=pipeline.get("git_url"),
@@ -3504,115 +3562,41 @@ class BuildTaskManager:
         return cls._instance
 
     def _init(self):
-        self.tasks = {}  # task_id -> task_info
+        from backend.database import init_db
+        try:
+            init_db()
+        except:
+            pass
         self.lock = threading.Lock()
         self.tasks_dir = os.path.join(BUILD_DIR, "tasks")
         os.makedirs(self.tasks_dir, exist_ok=True)
-        self.tasks_file = os.path.join(self.tasks_dir, "tasks.json")
-
-        # 从文件加载任务
-        self._load_tasks()
-
+        
+        # 启动时，将 running/pending 状态的任务标记为失败
+        self._mark_lost_tasks_as_failed()
+        
         # 启动自动清理任务
         self._start_cleanup_task()
-
-    def _load_tasks(self):
-        """从文件加载任务列表"""
-        if not os.path.exists(self.tasks_file):
-            return
-
+    
+    def _mark_lost_tasks_as_failed(self):
+        """将服务重启时丢失的任务标记为失败"""
+        from backend.database import get_db_session
+        from backend.models import Task
+        
+        db = get_db_session()
         try:
-            with open(self.tasks_file, "r", encoding="utf-8") as f:
-                tasks_data = json.load(f)
-
-            need_save = False
-            with self.lock:
-                self.tasks = {}
-                for task in tasks_data:
-                    task_id = task["task_id"]
-                    # 如果任务状态是 running 或 pending，标记为失败（因为任务线程已丢失）
-                    if task.get("status") in ("running", "pending"):
-                        task["status"] = "failed"
-                        task["error"] = "服务重启，任务中断"
-                        task["completed_at"] = datetime.now().isoformat()
-                        need_save = True
-                    self.tasks[task_id] = task
-
-            # 如果有任务被标记为失败，保存更新
-            if need_save:
-                self._save_tasks()
-
-            print(f"✅ 已加载 {len(self.tasks)} 个构建任务")
+            lost_tasks = db.query(Task).filter(Task.status.in_(["running", "pending"])).all()
+            if lost_tasks:
+                for task in lost_tasks:
+                    task.status = "failed"
+                    task.error = "服务重启，任务中断"
+                    task.completed_at = datetime.now()
+                db.commit()
+                print(f"⚠️ 已将 {len(lost_tasks)} 个丢失的任务标记为失败")
         except Exception as e:
-            print(f"⚠️ 加载构建任务列表失败: {e}")
-            self.tasks = {}
-
-    def _save_tasks(self):
-        """保存任务列表到文件"""
-        try:
-            # 确保目录存在
-            os.makedirs(os.path.dirname(self.tasks_file), exist_ok=True)
-
-            with self.lock:
-                # 创建可序列化的任务列表
-                tasks_list = []
-                for task in self.tasks.values():
-                    try:
-                        # 尝试创建任务副本并验证可序列化
-                        task_copy = task.copy()
-                        # 确保 logs 是列表
-                        if "logs" not in task_copy:
-                            task_copy["logs"] = []
-                        # 限制 logs 长度以避免序列化问题
-                        if (
-                            isinstance(task_copy.get("logs"), list)
-                            and len(task_copy["logs"]) > 20000
-                        ):
-                            task_copy["logs"] = task_copy["logs"][-10000:]
-                        tasks_list.append(task_copy)
-                    except Exception as task_error:
-                        print(
-                            f"⚠️ 处理任务时出错 (task_id={task.get('task_id', 'unknown')}): {task_error}"
-                        )
-                        # 跳过有问题的任务，继续处理其他任务
-                        continue
-
-            # 尝试序列化以验证
-            try:
-                json.dumps(tasks_list)
-            except (TypeError, ValueError) as json_error:
-                print(f"⚠️ 任务列表无法序列化: {json_error}")
-                # 尝试清理无法序列化的数据
-                for task in tasks_list:
-                    # 移除可能无法序列化的字段
-                    if "logs" in task and isinstance(task["logs"], list):
-                        # 确保所有日志项都是字符串
-                        task["logs"] = [
-                            str(log) if not isinstance(log, str) else log
-                            for log in task["logs"]
-                        ]
-
-            temp_file = f"{self.tasks_file}.tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(tasks_list, f, ensure_ascii=False, indent=2)
-
-            if os.path.exists(self.tasks_file):
-                os.replace(temp_file, self.tasks_file)
-            else:
-                os.rename(temp_file, self.tasks_file)
-        except Exception as e:
-            import traceback
-
-            error_trace = traceback.format_exc()
-            print(f"⚠️ 保存构建任务列表失败: {e}")
-            print(f"错误堆栈:\n{error_trace}")
-            temp_file = f"{self.tasks_file}.tmp"
-            if os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                except:
-                    pass
-            # 不抛出异常，允许任务创建继续
+            db.rollback()
+            print(f"⚠️ 标记丢失任务失败: {e}")
+        finally:
+            db.close()
 
     def _start_cleanup_task(self):
         """启动自动清理过期任务的后台线程"""
@@ -3719,33 +3703,44 @@ class BuildTaskManager:
                 import traceback
                 traceback.print_exc()
 
-            task_info = {
-                "task_id": task_id,
-                "task_type": task_type,  # "build" 或 "build_from_source"
-                "image": image_name,
-                "tag": tag,
-                "status": "pending",  # pending, running, completed, failed
-                "created_at": created_at.isoformat(),
-                "completed_at": None,
-                "error": None,
-                "logs": [],  # 任务日志
-                "source": source,  # 任务来源
-                "task_config": task_config,  # 保存完整的任务配置JSON
-                **serializable_kwargs,  # 其他任务参数（保持向后兼容）
-            }
-
-            with self.lock:
-                self.tasks[task_id] = task_info
-
-            # 保存任务，即使失败也不影响返回 task_id
+            # 保存任务到数据库
+            from backend.database import get_db_session
+            from backend.models import Task
+            
+            db = get_db_session()
             try:
-                self._save_tasks()
+                task_obj = Task(
+                    task_id=task_id,
+                    task_type=task_type,
+                    image=image_name,
+                    tag=tag,
+                    status="pending",
+                    created_at=created_at,
+                    task_config=task_config,
+                    source=source,
+                    pipeline_id=serializable_kwargs.get("pipeline_id"),
+                    git_url=serializable_kwargs.get("git_url"),
+                    branch=serializable_kwargs.get("branch"),
+                    project_type=serializable_kwargs.get("project_type", "jar"),
+                    template=serializable_kwargs.get("selected_template"),
+                    should_push=serializable_kwargs.get("should_push", False),
+                    sub_path=serializable_kwargs.get("sub_path"),
+                    use_project_dockerfile=serializable_kwargs.get("use_project_dockerfile", True),
+                    dockerfile_name=serializable_kwargs.get("dockerfile_name", "Dockerfile"),
+                    trigger_source=serializable_kwargs.get("trigger_source", "manual"),
+                )
+                
+                db.add(task_obj)
+                db.commit()
+                print(f"✅ 任务创建成功: task_id={task_id}, type={task_type}")
+                return task_id
             except Exception as save_error:
+                db.rollback()
                 print(f"⚠️ 保存任务失败，但任务已创建 (task_id={task_id}): {save_error}")
                 # 即使保存失败，也继续返回 task_id
-
-            print(f"✅ 任务创建成功: task_id={task_id}, type={task_type}")
-            return task_id
+                return task_id
+            finally:
+                db.close()
         except Exception as e:
             import traceback
 
@@ -3754,210 +3749,312 @@ class BuildTaskManager:
             print(f"错误堆栈:\n{error_trace}")
             raise
 
+    def _to_dict(self, task: 'Task', include_logs: bool = False) -> dict:
+        """将数据库模型转换为字典"""
+        if not task:
+            return {}
+        
+        # 获取日志（只在明确需要时加载，列表查询时不加载以提高性能）
+        logs = []
+        if include_logs:
+            try:
+                # 尝试访问关系，如果已加载则使用，否则查询
+                if hasattr(task, 'logs') and task.logs:
+                    logs = [log.log_message for log in sorted(task.logs, key=lambda x: x.log_time)]
+            except Exception:
+                # 如果关系未加载或访问失败，返回空列表
+                logs = []
+        
+        return {
+            "task_id": task.task_id,
+            "task_type": task.task_type,
+            "image": task.image,
+            "tag": task.tag,
+            "status": task.status,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            "error": task.error,
+            "logs": logs,
+            "source": task.source,
+            "pipeline_id": task.pipeline_id,
+            "task_config": task.task_config or {},
+            # 向后兼容字段
+            "git_url": task.git_url,
+            "branch": task.branch,
+            "project_type": task.project_type,
+            "template": task.template,
+            "should_push": task.should_push,
+            "sub_path": task.sub_path,
+            "use_project_dockerfile": task.use_project_dockerfile,
+            "dockerfile_name": task.dockerfile_name,
+            "trigger_source": task.trigger_source,
+        }
+
     def get_task(self, task_id: str) -> dict:
         """获取任务信息"""
-        with self.lock:
-            return self.tasks.get(task_id, {}).copy()
+        from backend.database import get_db_session
+        from backend.models import Task, TaskLog
+        
+        db = get_db_session()
+        try:
+            task = db.query(Task).filter(Task.task_id == task_id).first()
+            if not task:
+                return {}
+            
+            # 获取日志（单个任务查询时加载日志）
+            logs = db.query(TaskLog).filter(TaskLog.task_id == task_id).order_by(TaskLog.log_time.asc()).all()
+            log_messages = [log.log_message for log in logs]
+            
+            result = self._to_dict(task)
+            result["logs"] = log_messages  # 覆盖 _to_dict 中的空日志列表
+            return result
+        finally:
+            db.close()
 
     def list_tasks(self, status: str = None, task_type: str = None) -> list:
         """列出所有任务"""
-        with self.lock:
-            tasks = list(self.tasks.values())
+        from backend.database import get_db_session
+        from backend.models import Task
+        
+        db = get_db_session()
+        try:
+            query = db.query(Task)
             if status:
-                tasks = [t for t in tasks if t["status"] == status]
+                query = query.filter(Task.status == status)
             if task_type:
-                tasks = [t for t in tasks if t.get("task_type") == task_type]
-            # 按创建时间倒序排列
-            tasks.sort(key=lambda x: x["created_at"], reverse=True)
-            return [t.copy() for t in tasks]
+                query = query.filter(Task.task_type == task_type)
+            tasks = query.order_by(Task.created_at.desc()).all()
+            return [self._to_dict(t) for t in tasks]
+        finally:
+            db.close()
 
     def update_task_status(self, task_id: str, status: str, error: str = None):
         """更新任务状态"""
-        with self.lock:
-            if task_id in self.tasks:
-                self.tasks[task_id]["status"] = status
-                if error:
-                    self.tasks[task_id]["error"] = error
-                if status in ("completed", "failed", "stopped"):
-                    self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
-
-                    # 任务完成、失败或停止时，解绑流水线并处理队列
-                    try:
-                        from backend.pipeline_manager import PipelineManager
-
-                        pipeline_manager = PipelineManager()
-                        pipeline_id = pipeline_manager.find_pipeline_by_task(task_id)
-                        if pipeline_id:
-                            pipeline_manager.unbind_task(pipeline_id)
-                            print(
-                                f"✅ 任务 {task_id[:8]} 已结束，解绑流水线 {pipeline_id[:8]}"
-                            )
-                            
-                            # 处理队列中的下一个任务（相同流水线）
-                            _process_next_queued_task(pipeline_manager, pipeline_id)
-                    except Exception as e:
-                        print(f"⚠️ 解绑流水线失败: {e}")
-                        import traceback
-                        traceback.print_exc()
-        self._save_tasks()
+        from backend.database import get_db_session
+        from backend.models import Task
+        
+        db = get_db_session()
+        try:
+            task = db.query(Task).filter(Task.task_id == task_id).first()
+            if not task:
+                return
+            
+            task.status = status
+            if error:
+                task.error = error
+            if status in ("completed", "failed", "stopped"):
+                task.completed_at = datetime.now()
+                
+                # 任务完成、失败或停止时，解绑流水线并处理队列
+                try:
+                    from backend.pipeline_manager import PipelineManager
+                    
+                    pipeline_manager = PipelineManager()
+                    pipeline_id = pipeline_manager.find_pipeline_by_task(task_id)
+                    if pipeline_id:
+                        pipeline_manager.unbind_task(pipeline_id)
+                        print(f"✅ 任务 {task_id[:8]} 已结束，解绑流水线 {pipeline_id[:8]}")
+                        
+                        # 处理队列中的下一个任务（相同流水线）
+                        _process_next_queued_task(pipeline_manager, pipeline_id)
+                except Exception as e:
+                    print(f"⚠️ 解绑流水线失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def stop_task(self, task_id: str) -> bool:
         """停止任务"""
-        with self.lock:
-            if task_id not in self.tasks:
+        from backend.database import get_db_session
+        from backend.models import Task, TaskLog
+        
+        db = get_db_session()
+        try:
+            task = db.query(Task).filter(Task.task_id == task_id).first()
+            if not task:
                 return False
-            task = self.tasks[task_id]
-            current_status = task.get("status")
-
+            
             # 只有运行中或等待中的任务才能停止
-            if current_status not in ("running", "pending"):
+            if task.status not in ("running", "pending"):
                 return False
-
+            
             # 设置停止标志
-            task["stop_requested"] = True
-            task["status"] = "stopped"
-            task["completed_at"] = datetime.now().isoformat()
-            task["error"] = "任务已停止"
-
+            task.status = "stopped"
+            task.completed_at = datetime.now()
+            task.error = "任务已停止"
+            
             # 添加停止日志
-            if "logs" not in task:
-                task["logs"] = []
-            task["logs"].append("⚠️ 任务已被用户停止\n")
-
-        self._save_tasks()
-        print(f"✅ 任务 {task_id[:8]} 已停止")
-        return True
+            stop_log = TaskLog(
+                task_id=task_id,
+                log_message="⚠️ 任务已被用户停止\n",
+                log_time=datetime.now(),
+            )
+            db.add(stop_log)
+            
+            db.commit()
+            print(f"✅ 任务 {task_id[:8]} 已停止")
+            return True
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def add_log(self, task_id: str, log_message: str):
-        """添加任务日志（增强错误处理）"""
+        """添加任务日志（基于数据库）"""
+        from backend.database import get_db_session
+        from backend.models import Task, TaskLog
+        
+        db = get_db_session()
         try:
-            with self.lock:
-                if task_id in self.tasks:
-                    if "logs" not in self.tasks[task_id]:
-                        self.tasks[task_id]["logs"] = []
-                    # 限制日志数量，避免内存过大
-                    if len(self.tasks[task_id]["logs"]) > 10000:
-                        self.tasks[task_id]["logs"] = self.tasks[task_id]["logs"][
-                            -5000:
-                        ]
-                    self.tasks[task_id]["logs"].append(log_message)
-                else:
-                    # 任务不存在，至少打印到控制台
-                    print(f"⚠️ 任务不存在 (task_id={task_id})，无法记录日志")
-                    print(f"日志内容: {log_message}")
-
-            # 每100条日志保存一次，或者如果是关键日志（错误、完成）则立即保存
-            should_save = False
-            with self.lock:
-                if task_id in self.tasks:
-                    log_count = len(self.tasks[task_id].get("logs", []))
-                    # 关键日志关键词
-                    is_critical = any(
-                        keyword in log_message
-                        for keyword in ["❌", "✅", "ERROR", "FAIL", "完成", "失败"]
-                    )
-                    # 每100条或关键日志保存
-                    should_save = (log_count % 100 == 0) or is_critical
-
-            if should_save:
-                try:
-                    self._save_tasks()
-                except Exception as save_error:
-                    print(f"⚠️ 保存任务日志失败: {save_error}")
+            task = db.query(Task).filter(Task.task_id == task_id).first()
+            if not task:
+                print(f"⚠️ 任务不存在 (task_id={task_id})，无法记录日志")
+                print(f"日志内容: {log_message}")
+                return
+            
+            # 添加日志到 TaskLog 表
+            task_log = TaskLog(
+                task_id=task_id,
+                log_message=log_message,
+                log_time=datetime.now(),
+            )
+            db.add(task_log)
+            
+            # 限制日志数量（保留最近10000条）
+            log_count = db.query(TaskLog).filter(TaskLog.task_id == task_id).count()
+            if log_count > 10000:
+                # 删除最旧的日志
+                oldest_logs = db.query(TaskLog).filter(
+                    TaskLog.task_id == task_id
+                ).order_by(TaskLog.log_time.asc()).limit(log_count - 10000).all()
+                for log in oldest_logs:
+                    db.delete(log)
+            
+            db.commit()
         except Exception as e:
-            # 即使记录日志失败，也要打印到控制台
+            db.rollback()
             print(f"⚠️ 添加任务日志异常 (task_id={task_id}): {e}")
             print(f"日志内容: {log_message}")
+        finally:
+            db.close()
 
     def get_logs(self, task_id: str) -> str:
         """获取任务日志"""
-        with self.lock:
-            task = self.tasks.get(task_id)
-            if not task:
-                return ""
-            logs = task.get("logs", [])
-            return "".join(logs)
+        from backend.database import get_db_session
+        from backend.models import TaskLog
+        
+        db = get_db_session()
+        try:
+            logs = db.query(TaskLog).filter(
+                TaskLog.task_id == task_id
+            ).order_by(TaskLog.log_time.asc()).all()
+            return "".join([log.log_message for log in logs])
+        finally:
+            db.close()
 
     def delete_task(self, task_id: str) -> bool:
         """删除任务（只有停止、完成或失败的任务才能删除）"""
-        build_context = None
-        with self.lock:
-            if task_id not in self.tasks:
+        from backend.database import get_db_session
+        from backend.models import Task, TaskLog
+        
+        db = get_db_session()
+        try:
+            task = db.query(Task).filter(Task.task_id == task_id).first()
+            if not task:
                 return False
-            task = self.tasks[task_id]
-            status = task.get("status")
+            
             # 只有停止、完成或失败的任务才能删除
-            if status not in ("stopped", "completed", "failed"):
+            if task.status not in ("stopped", "completed", "failed"):
                 return False
-
-            # 获取构建上下文路径（如果存在）
-            build_context = task.get("build_context")
-            if not build_context:
-                # 如果没有保存，尝试从 image_name 和 task_id 推导
-                image_name = task.get("image", "")
-                if image_name:
-                    build_context = os.path.join(
-                        BUILD_DIR, f"{image_name.replace('/', '_')}_{task_id[:8]}"
-                    )
-
-            del self.tasks[task_id]
-
-        # 清理构建上下文目录
-        if build_context and os.path.exists(build_context):
-            try:
-                import shutil
-
-                shutil.rmtree(build_context, ignore_errors=True)
-                print(f"🧹 已清理构建上下文: {build_context}")
-            except Exception as e:
-                print(f"⚠️ 清理构建上下文失败 ({build_context}): {e}")
-
-        self._save_tasks()
-        return True
-
-    def cleanup_expired_tasks(self):
-        """清理过期任务（超过1天）"""
-        cutoff_time = datetime.now() - timedelta(days=1)
-        cutoff_iso = cutoff_time.isoformat()
-
-        expired_tasks_info = []
-        with self.lock:
-            expired_tasks = [
-                (task_id, task)
-                for task_id, task in self.tasks.items()
-                if task.get("created_at", "") < cutoff_iso
-            ]
-
-            for task_id, task in expired_tasks:
-                # 获取构建上下文路径
-                build_context = task.get("build_context")
-                if not build_context:
-                    # 如果没有保存，尝试从 image_name 和 task_id 推导
-                    image_name = task.get("image", "")
-                    if image_name:
-                        build_context = os.path.join(
-                            BUILD_DIR, f"{image_name.replace('/', '_')}_{task_id[:8]}"
-                        )
-                expired_tasks_info.append((task_id, build_context))
-                del self.tasks[task_id]
-
-        # 清理构建上下文目录
-        cleaned_count = 0
-        for task_id, build_context in expired_tasks_info:
+            
+            # 获取构建上下文路径
+            build_context = None
+            image_name = task.image
+            if image_name:
+                build_context = os.path.join(
+                    BUILD_DIR, f"{image_name.replace('/', '_')}_{task_id[:8]}"
+                )
+            
+            # 删除任务日志
+            db.query(TaskLog).filter(TaskLog.task_id == task_id).delete()
+            
+            # 删除任务
+            db.delete(task)
+            db.commit()
+            
+            # 清理构建上下文目录
             if build_context and os.path.exists(build_context):
                 try:
                     import shutil
-
                     shutil.rmtree(build_context, ignore_errors=True)
-                    cleaned_count += 1
+                    print(f"🧹 已清理构建上下文: {build_context}")
                 except Exception as e:
                     print(f"⚠️ 清理构建上下文失败 ({build_context}): {e}")
+            
+            return True
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
-        if expired_tasks:
-            self._save_tasks()
-            print(
-                f"🧹 已清理 {len(expired_tasks)} 个过期构建任务，清理了 {cleaned_count} 个构建上下文目录"
-            )
+    def cleanup_expired_tasks(self):
+        """清理过期任务（超过1天）"""
+        from backend.database import get_db_session
+        from backend.models import Task, TaskLog
+        
+        cutoff_time = datetime.now() - timedelta(days=1)
+        
+        db = get_db_session()
+        try:
+            expired_tasks = db.query(Task).filter(Task.created_at < cutoff_time).all()
+            
+            expired_tasks_info = []
+            cleaned_count = 0
+            for task in expired_tasks:
+                # 获取构建上下文路径
+                build_context = None
+                image_name = task.image
+                if image_name:
+                    build_context = os.path.join(
+                        BUILD_DIR, f"{image_name.replace('/', '_')}_{task.task_id[:8]}"
+                    )
+                expired_tasks_info.append((task.task_id, build_context))
+                
+                # 删除任务日志
+                db.query(TaskLog).filter(TaskLog.task_id == task.task_id).delete()
+                
+                # 删除任务
+                db.delete(task)
+            
+            db.commit()
+            
+            # 清理构建上下文目录
+            for task_id, build_context in expired_tasks_info:
+                if build_context and os.path.exists(build_context):
+                    try:
+                        import shutil
+                        shutil.rmtree(build_context, ignore_errors=True)
+                        cleaned_count += 1
+                    except Exception as e:
+                        print(f"⚠️ 清理构建上下文失败 ({build_context}): {e}")
+            
+            if expired_tasks_info:
+                print(
+                    f"🧹 已清理 {len(expired_tasks_info)} 个过期构建任务，清理了 {cleaned_count} 个构建上下文目录"
+                )
+        except Exception as e:
+            db.rollback()
+            print(f"⚠️ 清理过期任务失败: {e}")
+        finally:
+            db.close()
 
 
 # ============ 导出任务管理器 ============
@@ -3976,83 +4073,41 @@ class ExportTaskManager:
         return cls._instance
 
     def _init(self):
-        self.tasks = {}  # task_id -> task_info
+        from backend.database import init_db
+        try:
+            init_db()
+        except:
+            pass
         self.lock = threading.Lock()
         self.tasks_dir = os.path.join(EXPORT_DIR, "tasks")
         os.makedirs(self.tasks_dir, exist_ok=True)
-        self.tasks_file = os.path.join(self.tasks_dir, "tasks.json")
-
-        # 从文件加载任务
-        self._load_tasks()
-
+        
+        # 启动时，将 running/pending 状态的任务标记为失败
+        self._mark_lost_tasks_as_failed()
+        
         # 启动自动清理任务
         self._start_cleanup_task()
-
-    def _load_tasks(self):
-        """从文件加载任务列表"""
-        if not os.path.exists(self.tasks_file):
-            return
-
+    
+    def _mark_lost_tasks_as_failed(self):
+        """将服务重启时丢失的任务标记为失败"""
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        db = get_db_session()
         try:
-            with open(self.tasks_file, "r", encoding="utf-8") as f:
-                tasks_data = json.load(f)
-
-            need_save = False
-            with self.lock:
-                self.tasks = {}
-                for task in tasks_data:
-                    task_id = task["task_id"]
-                    # 如果任务状态是 running 或 pending，标记为失败（因为任务线程已丢失）
-                    if task.get("status") in ("running", "pending"):
-                        task["status"] = "failed"
-                        task["error"] = "服务重启，任务中断"
-                        task["completed_at"] = datetime.now().isoformat()
-                        need_save = True
-                    # 如果任务已完成但文件不存在，标记为失败
-                    elif task.get("status") == "completed":
-                        file_path = task.get("file_path")
-                        if file_path and not os.path.exists(file_path):
-                            task["status"] = "failed"
-                            task["error"] = "任务文件已丢失"
-                            task["completed_at"] = datetime.now().isoformat()
-                            need_save = True
-                    self.tasks[task_id] = task
-
-            # 如果有任务被标记为失败，保存更新（在锁外调用，避免死锁）
-            if need_save:
-                self._save_tasks()
-
-            print(f"✅ 已加载 {len(self.tasks)} 个导出任务")
+            lost_tasks = db.query(ExportTask).filter(ExportTask.status.in_(["running", "pending"])).all()
+            if lost_tasks:
+                for task in lost_tasks:
+                    task.status = "failed"
+                    task.error = "服务重启，任务中断"
+                    task.completed_at = datetime.now()
+                db.commit()
+                print(f"⚠️ 已将 {len(lost_tasks)} 个丢失的导出任务标记为失败")
         except Exception as e:
-            print(f"⚠️ 加载任务列表失败: {e}")
-            self.tasks = {}
-
-    def _save_tasks(self):
-        """保存任务列表到文件（不持有锁，避免死锁）"""
-        try:
-            # 先复制数据，避免长时间持有锁
-            with self.lock:
-                tasks_list = [task.copy() for task in self.tasks.values()]
-
-            # 使用临时文件，然后原子性替换
-            temp_file = f"{self.tasks_file}.tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(tasks_list, f, ensure_ascii=False, indent=2)
-
-            # 原子性替换
-            if os.path.exists(self.tasks_file):
-                os.replace(temp_file, self.tasks_file)
-            else:
-                os.rename(temp_file, self.tasks_file)
-        except Exception as e:
-            print(f"⚠️ 保存任务列表失败: {e}")
-            # 清理临时文件
-            temp_file = f"{self.tasks_file}.tmp"
-            if os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                except:
-                    pass
+            db.rollback()
+            print(f"⚠️ 标记丢失导出任务失败: {e}")
+        finally:
+            db.close()
 
     def _start_cleanup_task(self):
         """启动自动清理过期任务的后台线程"""
@@ -4079,80 +4134,124 @@ class ExportTaskManager:
         use_local: bool = False,
     ) -> str:
         """创建导出任务"""
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
         task_id = str(uuid.uuid4())
         created_at = datetime.now()
+        
+        db = get_db_session()
+        try:
+            task_obj = ExportTask(
+                task_id=task_id,
+                task_type="export",
+                image=image,
+                tag=tag,
+                compress=compress,
+                registry=registry,
+                use_local=use_local,
+                status="pending",
+                source="手动导出",
+                created_at=created_at,
+            )
+            
+            db.add(task_obj)
+            db.commit()
+            
+            # 启动导出任务
+            thread = threading.Thread(
+                target=self._export_task,
+                args=(task_id,),
+                daemon=True,
+            )
+            thread.start()
+            
+            return task_id
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
-        task_info = {
-            "task_id": task_id,
-            "task_type": "export",  # 添加任务类型标识
-            "image": image,
-            "tag": tag,
-            "compress": compress,
-            "registry": registry,
-            "use_local": use_local,  # 是否使用本地仓库（不执行 pull）
-            "status": "pending",  # pending, running, completed, failed
-            "created_at": created_at.isoformat(),
-            "completed_at": None,
-            "file_path": None,
-            "file_size": None,
-            "error": None,
-            "source": "手动导出",  # 导出任务来源
-        }
-
-        with self.lock:
-            self.tasks[task_id] = task_info
-
-        # 保存到文件
-        self._save_tasks()
-
-        # 启动导出任务
-        thread = threading.Thread(
-            target=self._export_task,
-            args=(task_id,),
-            daemon=True,
-        )
-        thread.start()
-
-        return task_id
+    def _update_task_status(self, task_id: str, status: str, error: str = None, file_path: str = None, file_size: int = None):
+        """更新任务状态（辅助方法）"""
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        db = get_db_session()
+        try:
+            task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
+            if not task:
+                return False
+            
+            task.status = status
+            if error is not None:
+                task.error = error
+            if file_path is not None:
+                task.file_path = file_path
+            if file_size is not None:
+                task.file_size = file_size
+            if status in ("completed", "failed", "stopped"):
+                task.completed_at = datetime.now()
+            
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            print(f"⚠️ 更新任务状态失败: {e}")
+            return False
+        finally:
+            db.close()
+    
+    def _get_task_from_db(self, task_id: str):
+        """从数据库获取任务对象"""
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        db = get_db_session()
+        try:
+            return db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
+        finally:
+            db.close()
 
     def _export_task(self, task_id: str):
         """执行导出任务"""
-        with self.lock:
-            if task_id not in self.tasks:
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        # 检查任务是否存在
+        db = get_db_session()
+        try:
+            task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
+            if not task:
                 return
-            task_info = self.tasks[task_id]
-            # 检查是否已请求停止
-            if task_info.get("stop_requested"):
-                task_info["status"] = "stopped"
-                task_info["completed_at"] = datetime.now().isoformat()
-                task_info["error"] = "任务已停止"
-                self._save_tasks()
+            
+            # 检查是否已请求停止（通过状态判断）
+            if task.status == "stopped":
                 return
-            task_info["status"] = "running"
-
-        # 保存状态更新
-        self._save_tasks()
+            
+            # 更新状态为 running
+            task.status = "running"
+            db.commit()
+            
+            image = task.image
+            tag = task.tag
+            compress = task.compress
+            registry = task.registry
+            use_local = task.use_local
+        except Exception as e:
+            db.rollback()
+            print(f"⚠️ 获取任务失败: {e}")
+            return
+        finally:
+            db.close()
 
         try:
             # 检查停止标志
-            with self.lock:
-                if task_id not in self.tasks or self.tasks[task_id].get(
-                    "stop_requested"
-                ):
-                    with self.lock:
-                        if task_id in self.tasks:
-                            self.tasks[task_id]["status"] = "stopped"
-                            self.tasks[task_id][
-                                "completed_at"
-                            ] = datetime.now().isoformat()
-                            self.tasks[task_id]["error"] = "任务已停止"
-                    self._save_tasks()
-                    return
-            image = task_info["image"]
-            tag = task_info["tag"]
-            compress = task_info["compress"]
-            registry = task_info["registry"]
-
+            task = self._get_task_from_db(task_id)
+            if not task or task.status == "stopped":
+                return
+            
             if not DOCKER_AVAILABLE:
                 raise RuntimeError("Docker 服务不可用，无法导出镜像")
 
@@ -4187,11 +4286,8 @@ class ExportTaskManager:
                     return None
 
                 registry_config = find_matching_registry_for_export(image)
-                if not registry_config:
-                    registry_config = get_active_registry()
-
-            # 检查是否使用本地仓库
-            use_local = task_info.get("use_local", False)
+            if not registry_config:
+                registry_config = get_active_registry()
 
             if not use_local:
                 # 需要从远程仓库拉取镜像
@@ -4205,36 +4301,17 @@ class ExportTaskManager:
                 pull_stream = docker_builder.pull_image(image, tag, auth_config)
                 for chunk in pull_stream:
                     # 检查停止标志
-                    with self.lock:
-                        if task_id not in self.tasks or self.tasks[task_id].get(
-                            "stop_requested"
-                        ):
-                            with self.lock:
-                                if task_id in self.tasks:
-                                    self.tasks[task_id]["status"] = "stopped"
-                                    self.tasks[task_id][
-                                        "completed_at"
-                                    ] = datetime.now().isoformat()
-                                    self.tasks[task_id]["error"] = "任务已停止"
-                            self._save_tasks()
-                            return
+                    task = self._get_task_from_db(task_id)
+                    if not task or task.status == "stopped":
+                        self._update_task_status(task_id, "stopped", "任务已停止")
+                        return
                     if "error" in chunk:
                         raise RuntimeError(chunk["error"])
 
             # 再次检查停止标志
-            with self.lock:
-                if task_id not in self.tasks or self.tasks[task_id].get(
-                    "stop_requested"
-                ):
-                    with self.lock:
-                        if task_id in self.tasks:
-                            self.tasks[task_id]["status"] = "stopped"
-                            self.tasks[task_id][
-                                "completed_at"
-                            ] = datetime.now().isoformat()
-                            self.tasks[task_id]["error"] = "任务已停止"
-                    self._save_tasks()
-                    return
+            task = self._get_task_from_db(task_id)
+            if not task or task.status == "stopped":
+                return
 
             full_tag = f"{image}:{tag}"
             # 检查镜像是否存在（本地或已拉取）
@@ -4255,25 +4332,16 @@ class ExportTaskManager:
             with open(tar_path, "wb") as f:
                 for chunk in image_stream:
                     # 检查停止标志
-                    with self.lock:
-                        if task_id not in self.tasks or self.tasks[task_id].get(
-                            "stop_requested"
-                        ):
-                            # 删除部分文件
-                            try:
-                                if os.path.exists(tar_path):
-                                    os.remove(tar_path)
-                            except:
-                                pass
-                            with self.lock:
-                                if task_id in self.tasks:
-                                    self.tasks[task_id]["status"] = "stopped"
-                                    self.tasks[task_id][
-                                        "completed_at"
-                                    ] = datetime.now().isoformat()
-                                    self.tasks[task_id]["error"] = "任务已停止"
-                            self._save_tasks()
-                            return
+                    task = self._get_task_from_db(task_id)
+                    if not task or task.status == "stopped":
+                        # 删除部分文件
+                        try:
+                            if os.path.exists(tar_path):
+                                os.remove(tar_path)
+                        except:
+                            pass
+                        self._update_task_status(task_id, "stopped", "任务已停止")
+                        return
                     f.write(chunk)
 
             final_path = tar_path
@@ -4288,143 +4356,182 @@ class ExportTaskManager:
                 file_size = os.path.getsize(final_path)
 
             # 更新任务状态
-            with self.lock:
-                if task_id in self.tasks:
-                    self.tasks[task_id]["status"] = "completed"
-                    self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
-                    self.tasks[task_id]["file_path"] = final_path
-                    self.tasks[task_id]["file_size"] = file_size
-
-            # 保存到文件
-            self._save_tasks()
+            self._update_task_status(task_id, "completed", file_path=final_path, file_size=file_size)
 
         except Exception as e:
             import traceback
 
             error_msg = str(e)
             traceback.print_exc()
-            with self.lock:
-                if task_id in self.tasks:
-                    self.tasks[task_id]["status"] = "failed"
-                    self.tasks[task_id]["completed_at"] = datetime.now().isoformat()
-                    self.tasks[task_id]["error"] = error_msg
+            self._update_task_status(task_id, "failed", error=error_msg)
 
-            # 保存到文件
-            self._save_tasks()
+    def _to_dict(self, task: 'ExportTask') -> dict:
+        """将数据库模型转换为字典"""
+        if not task:
+            return {}
+        
+        return {
+            "task_id": task.task_id,
+            "task_type": task.task_type,
+            "image": task.image,
+            "tag": task.tag,
+            "compress": task.compress,
+            "registry": task.registry,
+            "use_local": task.use_local,
+            "status": task.status,
+            "file_path": task.file_path,
+            "file_size": task.file_size,
+            "source": task.source,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            "error": task.error,
+        }
 
     def get_task(self, task_id: str) -> dict:
         """获取任务信息"""
-        with self.lock:
-            return self.tasks.get(task_id, {}).copy()
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        db = get_db_session()
+        try:
+            task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
+            return self._to_dict(task)
+        finally:
+            db.close()
 
     def list_tasks(self, status: str = None) -> list:
         """列出所有任务"""
-        with self.lock:
-            tasks = list(self.tasks.values())
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        db = get_db_session()
+        try:
+            query = db.query(ExportTask)
             if status:
-                tasks = [t for t in tasks if t["status"] == status]
-            # 按创建时间倒序排列
-            tasks.sort(key=lambda x: x["created_at"], reverse=True)
-            return [t.copy() for t in tasks]
+                query = query.filter(ExportTask.status == status)
+            tasks = query.order_by(ExportTask.created_at.desc()).all()
+            return [self._to_dict(t) for t in tasks]
+        finally:
+            db.close()
 
     def get_task_file_path(self, task_id: str) -> str:
         """获取任务文件路径"""
-        with self.lock:
-            task = self.tasks.get(task_id)
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        db = get_db_session()
+        try:
+            task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
             if not task:
                 raise ValueError(f"任务 {task_id} 不存在")
-            if task["status"] != "completed":
+            if task.status != "completed":
                 raise ValueError(f"任务 {task_id} 尚未完成")
-            file_path = task.get("file_path")
+            file_path = task.file_path
             if not file_path or not os.path.exists(file_path):
                 raise ValueError(f"任务文件不存在: {file_path}")
             return file_path
+        finally:
+            db.close()
 
     def stop_task(self, task_id: str) -> bool:
         """停止任务"""
-        with self.lock:
-            if task_id not in self.tasks:
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        db = get_db_session()
+        try:
+            task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
+            if not task:
                 return False
-            task = self.tasks[task_id]
-            current_status = task.get("status")
-
+            
             # 只有运行中或等待中的任务才能停止
-            if current_status not in ("running", "pending"):
+            if task.status not in ("running", "pending"):
                 return False
-
-            # 设置停止标志
-            task["stop_requested"] = True
-            task["status"] = "stopped"
-            task["completed_at"] = datetime.now().isoformat()
-            task["error"] = "任务已停止"
-
-        self._save_tasks()
-        print(f"✅ 导出任务 {task_id[:8]} 已停止")
-        return True
+            
+            # 设置停止状态
+            task.status = "stopped"
+            task.completed_at = datetime.now()
+            task.error = "任务已停止"
+            
+            db.commit()
+            print(f"✅ 导出任务 {task_id[:8]} 已停止")
+            return True
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def delete_task(self, task_id: str) -> bool:
         """删除任务及其文件（只有停止、完成或失败的任务才能删除）"""
-        with self.lock:
-            if task_id not in self.tasks:
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+        
+        db = get_db_session()
+        try:
+            task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
+            if not task:
                 return False
-            task = self.tasks[task_id]
-            status = task.get("status")
+            
             # 只有停止、完成或失败的任务才能删除
-            if status not in ("stopped", "completed", "failed"):
+            if task.status not in ("stopped", "completed", "failed"):
                 return False
-
-            file_path = task.get("file_path")
+            
+            file_path = task.file_path
             task_dir = os.path.join(self.tasks_dir, task_id)
-
+            
             # 删除文件
             if file_path and os.path.exists(file_path):
                 try:
                     os.remove(file_path)
                 except Exception as e:
                     print(f"⚠️ 删除文件失败: {e}")
-
+            
             # 删除任务目录
             if os.path.exists(task_dir):
                 try:
                     shutil.rmtree(task_dir, ignore_errors=True)
                 except Exception as e:
                     print(f"⚠️ 删除目录失败: {e}")
-
+            
             # 删除任务记录
-            del self.tasks[task_id]
-
-        # 保存到文件
-        self._save_tasks()
-        return True
+            db.delete(task)
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def cleanup_expired_tasks(self, days: int = 1):
         """清理过期任务（默认保留1天）"""
+        from backend.database import get_db_session
+        from backend.models import ExportTask
         from datetime import timedelta
-
+        
         cutoff_time = datetime.now() - timedelta(days=days)
-
-        expired_task_ids = []
-        with self.lock:
-            for task_id, task in self.tasks.items():
-                created_at = datetime.fromisoformat(task["created_at"])
-                if created_at < cutoff_time:
-                    expired_task_ids.append(task_id)
-
-        for task_id in expired_task_ids:
-            try:
-                self.delete_task(task_id)
-                print(f"🗑️ 已清理过期任务: {task_id}")
-            except Exception as e:
-                print(f"⚠️ 清理任务失败 {task_id}: {e}")
+        
+        db = get_db_session()
+        try:
+            expired_tasks = db.query(ExportTask).filter(ExportTask.created_at < cutoff_time).all()
+            
+            for task in expired_tasks:
+                try:
+                    self.delete_task(task.task_id)
+                    print(f"🗑️ 已清理过期任务: {task.task_id}")
+                except Exception as e:
+                    print(f"⚠️ 清理任务失败 {task.task_id}: {e}")
+        finally:
+            db.close()
 
 
 # ============ 操作日志管理器 ============
 class OperationLogger:
-    """操作日志管理器 - 记录用户操作"""
+    """操作日志管理器 - 记录用户操作（基于数据库）"""
 
     _instance_lock = threading.Lock()
     _instance = None
-    _logs_file = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -4435,56 +4542,62 @@ class OperationLogger:
         return cls._instance
 
     def _init(self):
-        os.makedirs(LOGS_DIR, exist_ok=True)
-        self._logs_file = os.path.join(LOGS_DIR, "operations.jsonl")
+        from backend.database import init_db
+        try:
+            init_db()
+        except:
+            pass
         self.lock = threading.Lock()
 
     @classmethod
     def log(cls, username: str, operation: str, details: dict = None):
         """记录操作日志"""
-        instance = cls()
-        log_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "username": username,
-            "operation": operation,
-            "details": details or {},
-        }
-
+        from backend.database import get_db_session
+        from backend.models import OperationLog
+        
+        db = get_db_session()
         try:
-            with instance.lock:
-                with open(instance._logs_file, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+            log_entry = OperationLog(
+                username=username,
+                action=operation,
+                details=details or {},
+                timestamp=datetime.now(),
+            )
+            db.add(log_entry)
+            db.commit()
         except Exception as e:
+            db.rollback()
             print(f"⚠️ 记录操作日志失败: {e}")
+        finally:
+            db.close()
 
     def get_logs(self, limit: int = 100, username: str = None, operation: str = None):
         """获取操作日志"""
-        if not os.path.exists(self._logs_file):
-            return []
-
-        logs = []
+        from backend.database import get_db_session
+        from backend.models import OperationLog
+        
+        db = get_db_session()
         try:
-            with open(self._logs_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-                    try:
-                        log_entry = json.loads(line)
-                        # 过滤
-                        if username and log_entry.get("username") != username:
-                            continue
-                        if operation and log_entry.get("operation") != operation:
-                            continue
-                        logs.append(log_entry)
-                    except json.JSONDecodeError:
-                        continue
-
-            # 按时间倒序排列
-            logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-            return logs[:limit]
+            query = db.query(OperationLog)
+            
+            if username:
+                query = query.filter(OperationLog.username == username)
+            if operation:
+                query = query.filter(OperationLog.action == operation)
+            
+            logs = query.order_by(OperationLog.timestamp.desc()).limit(limit).all()
+            
+            return [{
+                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                "username": log.username,
+                "operation": log.action,
+                "details": log.details or {},
+            } for log in logs]
         except Exception as e:
             print(f"⚠️ 读取操作日志失败: {e}")
             return []
+        finally:
+            db.close()
 
     def clear_logs(self, days: int = None):
         """清理操作日志
@@ -4495,44 +4608,26 @@ class OperationLogger:
         Returns:
             清理的日志条数
         """
-        if not os.path.exists(self._logs_file):
-            return 0
-
+        from backend.database import get_db_session
+        from backend.models import OperationLog
+        
+        db = get_db_session()
         try:
-            with self.lock:
-                if days is None:
-                    # 清空所有日志
-                    with open(self._logs_file, "w", encoding="utf-8") as f:
-                        f.write("")
-                    return 0
-                else:
-                    # 保留最近 N 天的日志
-                    cutoff_time = datetime.now() - timedelta(days=days)
-                    cutoff_iso = cutoff_time.isoformat()
-
-                    kept_logs = []
-                    removed_count = 0
-
-                    with open(self._logs_file, "r", encoding="utf-8") as f:
-                        for line in f:
-                            if not line.strip():
-                                continue
-                            try:
-                                log_entry = json.loads(line)
-                                timestamp = log_entry.get("timestamp", "")
-                                if timestamp >= cutoff_iso:
-                                    kept_logs.append(line)
-                                else:
-                                    removed_count += 1
-                            except json.JSONDecodeError:
-                                continue
-
-                    # 写回保留的日志
-                    with open(self._logs_file, "w", encoding="utf-8") as f:
-                        for line in kept_logs:
-                            f.write(line)
-
-                    return removed_count
+            if days is None:
+                # 清空所有日志
+                count = db.query(OperationLog).count()
+                db.query(OperationLog).delete()
+                db.commit()
+                return count
+            else:
+                # 保留最近 N 天的日志
+                cutoff_time = datetime.now() - timedelta(days=days)
+                deleted = db.query(OperationLog).filter(OperationLog.timestamp < cutoff_time).delete()
+                db.commit()
+                return deleted
         except Exception as e:
+            db.rollback()
             print(f"⚠️ 清理操作日志失败: {e}")
-            raise
+            return 0
+        finally:
+            db.close()

@@ -101,8 +101,10 @@ def get_current_username(request: Request) -> str:
         else:
             # Token 无效
             error_msg = result.get("error", "unknown error")
-            # 调试信息（可以注释掉）
-            # print(f"⚠️ Token 验证失败: {error_msg}")
+            # 调试信息：打印 token 验证失败的原因
+            print(
+                f"⚠️ Token 验证失败: {error_msg}, token 前10个字符: {token[:10] if len(token) > 10 else token}"
+            )
             return "unknown"
     except jwt.ExpiredSignatureError:
         # Token 已过期
@@ -350,7 +352,24 @@ async def save_registries(request: SaveRegistriesRequest, http_request: Request)
     """保存仓库配置列表"""
     try:
         username = get_current_username(http_request)
+        if username == "unknown":
+            # 检查是否有 Authorization header
+            auth_header = http_request.headers.get("authorization", "")
+            if not auth_header:
+                # 没有 token，返回 401（这是真正的认证错误）
+                raise HTTPException(status_code=401, detail="未授权，请重新登录")
+            else:
+                # 有 token 但验证失败（可能是过期），返回 400 避免前端退出登录
+                raise HTTPException(
+                    status_code=400, detail="Token 已过期或无效，请刷新页面后重试"
+                )
+
         config = load_config()
+
+        # 备份原始配置，以防保存失败
+        import copy
+
+        config_backup = copy.deepcopy(config)
 
         # 转换 Pydantic 模型为字典
         registries_data = [reg.model_dump() for reg in request.registries]
@@ -360,27 +379,88 @@ async def save_registries(request: SaveRegistriesRequest, http_request: Request)
         if not has_active and registries_data:
             registries_data[0]["active"] = True
 
-        # 更新配置
+        # 更新配置（只更新 docker.registries，不影响其他配置如 server、git、users 等）
         if "docker" not in config:
             config["docker"] = {}
-        config["docker"]["registries"] = registries_data
 
-        save_config(config)
+        # 确保保留 docker 配置中的其他字段（如 use_remote、remote 等）
+        docker_config = config.get("docker", {})
+        docker_config["registries"] = registries_data
+        config["docker"] = docker_config
+
+        # 保存配置（使用临时文件确保原子性）
+        try:
+            save_config(config)
+        except Exception as save_error:
+            # 如果保存失败，尝试恢复备份
+            try:
+                import yaml
+                import os
+
+                CONFIG_FILE = "data/config.yml"
+                with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                    yaml.dump(
+                        config_backup,
+                        f,
+                        default_flow_style=False,
+                        allow_unicode=True,
+                        sort_keys=False,
+                    )
+            except:
+                pass
+            raise HTTPException(
+                status_code=500, detail=f"保存仓库配置失败: {str(save_error)}"
+            )
+
+        # 验证配置是否保存成功且认证配置未被影响
+        try:
+            verify_config = load_config()
+            # 检查 server 配置是否还在
+            if "server" not in verify_config:
+                # 如果 server 配置丢失，恢复备份
+                print("⚠️ 检测到 server 配置丢失，正在恢复...")
+                import yaml
+                import os
+
+                CONFIG_FILE = "data/config.yml"
+                with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                    yaml.dump(
+                        config_backup,
+                        f,
+                        default_flow_style=False,
+                        allow_unicode=True,
+                        sort_keys=False,
+                    )
+                # 重新保存，但这次只更新 registries
+                verify_config = load_config()
+                verify_config["docker"]["registries"] = registries_data
+                save_config(verify_config)
+        except Exception as verify_error:
+            print(f"⚠️ 验证配置失败: {verify_error}")
+            # 不抛出异常，因为主要操作已成功
 
         # 重新初始化 Docker 构建器
-        from backend.handlers import init_docker_builder
+        try:
+            from backend.handlers import init_docker_builder
 
-        init_docker_builder()
+            init_docker_builder()
+        except Exception as init_error:
+            print(f"⚠️ 重新初始化 Docker 构建器失败: {init_error}")
+            # 不抛出异常，因为配置已保存成功
 
         # 记录操作日志
-        OperationLogger.log(
-            username,
-            "save_registries",
-            {
-                "registry_count": len(registries_data),
-                "registry_names": [r.get("name") for r in registries_data],
-            },
-        )
+        try:
+            OperationLogger.log(
+                username,
+                "save_registries",
+                {
+                    "registry_count": len(registries_data),
+                    "registry_names": [r.get("name") for r in registries_data],
+                },
+            )
+        except Exception as log_error:
+            print(f"⚠️ 记录操作日志失败: {log_error}")
+            # 不抛出异常，因为主要操作已成功
 
         return JSONResponse(
             {"message": "仓库配置保存成功", "registries": registries_data}
@@ -404,9 +484,39 @@ class TestRegistryRequest(BaseModel):
 
 
 @router.post("/registries/test")
-async def test_registry_login(request: TestRegistryRequest):
-    """测试Registry登录"""
+async def test_registry_login(request: TestRegistryRequest, http_request: Request):
+    """测试Registry登录（测试仓库的用户名和密码是否正确）
+
+    注意：
+    - 需要系统 token 认证才能使用此功能（安全考虑）
+    - 但测试的是仓库的登录信息（request.username 和 request.password），与系统用户无关
+    - 如果系统 token 无效，返回 400 而不是 401，避免前端退出登录
+    """
     try:
+        # 验证系统 token（需要系统认证才能使用此功能）
+        username = get_current_username(http_request)
+        if username == "unknown":
+            # 检查是否有 Authorization header
+            auth_header = http_request.headers.get("authorization", "")
+            if not auth_header:
+                # 没有 token，返回 401（这是真正的系统认证错误）
+                print(f"⚠️ 测试仓库接口：没有 Authorization header")
+                raise HTTPException(status_code=401, detail="未授权，请先登录系统")
+            else:
+                # 有 token 但验证失败（可能是过期），返回 400 避免前端退出登录
+                # 提取 token 用于调试
+                token_preview = (
+                    auth_header[:20] + "..." if len(auth_header) > 20 else auth_header
+                )
+                print(
+                    f"⚠️ 测试仓库接口：Token 验证失败，header 前20个字符: {token_preview}"
+                )
+                raise HTTPException(
+                    status_code=400, detail="系统 Token 已过期或无效，请刷新页面后重试"
+                )
+
+        # 系统认证通过后，使用传入的仓库用户名和密码测试仓库连接
+        # 注意：这里的 username 和 password 是仓库的认证信息，不是系统的
         from backend.handlers import docker_builder
 
         if not docker_builder or not docker_builder.is_available():
@@ -1480,45 +1590,41 @@ async def cleanup_tasks(
                 from datetime import timedelta
 
                 cutoff_time = datetime.now() - timedelta(days=days)
-                cutoff_iso = cutoff_time.isoformat()
 
-                # 在锁内收集要删除的任务ID
-                with build_manager.lock:
-                    tasks_to_remove = [
-                        task_id
-                        for task_id, task in build_manager.tasks.items()
-                        if task.get("created_at", "") < cutoff_iso
-                        and (not status or task.get("status") == status)
-                    ]
+                # 获取所有任务
+                all_tasks = build_manager.list_tasks()
+                tasks_to_remove = [
+                    task["task_id"]
+                    for task in all_tasks
+                    if task.get("created_at")
+                    and datetime.fromisoformat(task["created_at"]) < cutoff_time
+                    and (not status or task.get("status") == status)
+                ]
 
-                # 在锁外执行删除，避免死锁
+                # 执行删除
                 for task_id in tasks_to_remove:
                     build_manager.delete_task(task_id)
                     removed_count += 1
             elif status:
                 # 清理指定状态的任务
-                # 在锁内收集要删除的任务ID
-                with build_manager.lock:
-                    tasks_to_remove = [
-                        task_id
-                        for task_id, task in build_manager.tasks.items()
-                        if task.get("status") == status
-                    ]
+                tasks_to_remove = [
+                    task["task_id"] for task in build_manager.list_tasks(status=status)
+                ]
 
-                # 在锁外执行删除，避免死锁
+                # 执行删除
                 for task_id in tasks_to_remove:
                     build_manager.delete_task(task_id)
                     removed_count += 1
             elif not days and not status:
                 # 清理全部（只清理非运行中的任务）
-                with build_manager.lock:
-                    tasks_to_remove = [
-                        task_id
-                        for task_id, task in build_manager.tasks.items()
-                        if task.get("status") not in ["running", "pending"]
-                    ]
+                all_tasks = build_manager.list_tasks()
+                tasks_to_remove = [
+                    task["task_id"]
+                    for task in all_tasks
+                    if task.get("status") not in ["running", "pending"]
+                ]
 
-                # 在锁外执行删除，避免死锁
+                # 执行删除
                 for task_id in tasks_to_remove:
                     build_manager.delete_task(task_id)
                     removed_count += 1
@@ -1532,43 +1638,40 @@ async def cleanup_tasks(
 
                 cutoff_time = datetime.now() - timedelta(days=days)
 
-                # 在锁内收集要删除的任务ID
-                with export_manager.lock:
-                    tasks_to_remove = [
-                        task_id
-                        for task_id, task in export_manager.tasks.items()
-                        if datetime.fromisoformat(task.get("created_at", ""))
-                        < cutoff_time
-                        and (not status or task.get("status") == status)
-                    ]
+                # 获取所有任务
+                all_tasks = export_manager.list_tasks()
+                tasks_to_remove = [
+                    task["task_id"]
+                    for task in all_tasks
+                    if task.get("created_at")
+                    and datetime.fromisoformat(task["created_at"]) < cutoff_time
+                    and (not status or task.get("status") == status)
+                ]
 
-                # 在锁外执行删除，避免死锁
+                # 执行删除
                 for task_id in tasks_to_remove:
                     export_manager.delete_task(task_id)
                     removed_count += 1
             elif status:
-                # 在锁内收集要删除的任务ID
-                with export_manager.lock:
-                    tasks_to_remove = [
-                        task_id
-                        for task_id, task in export_manager.tasks.items()
-                        if task.get("status") == status
-                    ]
+                # 清理指定状态的任务
+                tasks_to_remove = [
+                    task["task_id"] for task in export_manager.list_tasks(status=status)
+                ]
 
-                # 在锁外执行删除，避免死锁
+                # 执行删除
                 for task_id in tasks_to_remove:
                     export_manager.delete_task(task_id)
                     removed_count += 1
             elif not days and not status:
                 # 清理全部（只清理非运行中的任务）
-                with export_manager.lock:
-                    tasks_to_remove = [
-                        task_id
-                        for task_id, task in export_manager.tasks.items()
-                        if task.get("status") not in ["running", "pending"]
-                    ]
+                all_tasks = export_manager.list_tasks()
+                tasks_to_remove = [
+                    task["task_id"]
+                    for task in all_tasks
+                    if task.get("status") not in ["running", "pending"]
+                ]
 
-                # 在锁外执行删除，避免死锁
+                # 执行删除
                 for task_id in tasks_to_remove:
                     export_manager.delete_task(task_id)
                     removed_count += 1
@@ -1684,6 +1787,107 @@ async def get_exports_stats(request: Request):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取导出目录统计失败: {str(e)}")
+
+
+@router.post("/exports/cleanup")
+async def cleanup_exports_dir(
+    request: Request,
+    days: Optional[int] = Body(
+        None, description="清理N天前的导出文件（不传则清理所有）"
+    ),
+    keep_tasks: bool = Body(True, description="是否保留任务元数据文件（tasks.json）"),
+):
+    """清理导出目录中的文件"""
+    try:
+        username = get_current_username(request)
+        if username == "unknown":
+            raise HTTPException(status_code=401, detail="未授权，请重新登录")
+
+        if not os.path.exists(EXPORT_DIR):
+            return JSONResponse(
+                {
+                    "success": True,
+                    "message": "导出目录不存在，无需清理",
+                    "removed_count": 0,
+                    "freed_space_mb": 0,
+                }
+            )
+
+        removed_count = 0
+        freed_space = 0
+        cutoff_time = None
+
+        if days and days > 0:
+            from datetime import datetime, timedelta
+
+            cutoff_time = datetime.now() - timedelta(days=days)
+
+        # 遍历导出目录
+        for root, dirs, files in os.walk(EXPORT_DIR):
+            for filename in files:
+                # 如果保留任务元数据，跳过 tasks.json
+                if keep_tasks and filename == "tasks.json":
+                    continue
+
+                file_path = os.path.join(root, filename)
+                try:
+                    # 检查文件修改时间
+                    if cutoff_time:
+                        file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+                        if file_mtime > cutoff_time:
+                            continue  # 文件未过期，跳过
+
+                    file_size = os.path.getsize(file_path)
+                    os.remove(file_path)
+                    removed_count += 1
+                    freed_space += file_size
+                    print(f"✅ 清理导出文件: {file_path}")
+                except Exception as e:
+                    print(f"⚠️ 删除导出文件失败 ({file_path}): {e}")
+
+            # 清理空目录（但保留根目录）
+            if root != EXPORT_DIR:
+                try:
+                    if not os.listdir(root):
+                        os.rmdir(root)
+                        print(f"✅ 清理空目录: {root}")
+                except Exception as e:
+                    print(f"⚠️ 删除空目录失败 ({root}): {e}")
+
+        freed_space_mb = round(freed_space / 1024 / 1024, 2)
+
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "cleanup_exports",
+            {
+                "removed_count": removed_count,
+                "freed_space_mb": freed_space_mb,
+                "days": days,
+            },
+        )
+
+        message = (
+            f"成功清理了 {removed_count} 个文件，释放空间 {freed_space_mb} MB"
+            if removed_count > 0
+            else "没有需要清理的文件"
+        )
+
+        return JSONResponse(
+            {
+                "success": True,
+                "message": message,
+                "removed_count": removed_count,
+                "freed_space_mb": freed_space_mb,
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"清理导出目录失败: {str(e)}")
 
 
 def force_remove_directory(dir_path: str) -> tuple[bool, str]:
@@ -1811,18 +2015,16 @@ async def cleanup_docker_build_dir(
         valid_build_contexts = set()
         try:
             build_manager = BuildTaskManager()
-            with build_manager.lock:
-                for task_id, task in build_manager.tasks.items():
-                    # 获取构建上下文路径
-                    build_context = task.get("build_context")
-                    if not build_context:
-                        # 如果没有保存，尝试从 image_name 和 task_id 推导
-                        image_name = task.get("image", "")
-                        if image_name:
-                            build_context = os.path.join(
-                                BUILD_DIR,
-                                f"{image_name.replace('/', '_')}_{task_id[:8]}",
-                            )
+            all_tasks = build_manager.list_tasks()
+            for task in all_tasks:
+                task_id = task.get("task_id")
+                # 获取构建上下文路径（从 image_name 和 task_id 推导）
+                image_name = task.get("image", "")
+                if image_name:
+                    build_context = os.path.join(
+                        BUILD_DIR,
+                        f"{image_name.replace('/', '_')}_{task_id[:8]}",
+                    )
                     if build_context:
                         # 转换为绝对路径并规范化
                         abs_path = os.path.abspath(build_context)
@@ -3414,6 +3616,110 @@ async def create_pipeline(request: CreatePipelineRequest, http_request: Request)
         raise HTTPException(status_code=500, detail=f"创建流水线失败: {str(e)}")
 
 
+@router.post("/pipelines/json")
+async def create_pipeline_from_json(pipeline_data: dict, http_request: Request):
+    """通过 JSON 创建流水线（功能与任务中另存为流水线一致）
+
+    接收一个 JSON 对象，包含流水线的所有配置字段。
+    字段定义与 CreatePipelineRequest 相同。
+    """
+    try:
+        username = get_current_username(http_request)
+        manager = PipelineManager()
+
+        # 验证必填字段
+        if not pipeline_data.get("name"):
+            raise HTTPException(status_code=400, detail="流水线名称不能为空")
+
+        if not pipeline_data.get("git_url") and not pipeline_data.get("source_id"):
+            raise HTTPException(status_code=400, detail="必须提供 git_url 或 source_id")
+
+        # 如果提供了 source_id，从数据源获取 git_url 和 branch
+        git_url = pipeline_data.get("git_url")
+        branch = pipeline_data.get("branch")
+
+        if pipeline_data.get("source_id"):
+            from backend.git_source_manager import GitSourceManager
+
+            source_manager = GitSourceManager()
+            source = source_manager.get_source(
+                pipeline_data["source_id"], include_password=False
+            )
+            if source:
+                # 如果提供了 source_id，优先使用数据源的 git_url
+                if source.get("git_url"):
+                    git_url = source["git_url"]
+                # 如果没有指定分支，使用数据源的默认分支
+                if not branch and source.get("default_branch"):
+                    branch = source["default_branch"]
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"数据源不存在: {pipeline_data['source_id']}",
+                )
+
+        # 创建流水线（使用与 create_pipeline 相同的逻辑）
+        pipeline_id = manager.create_pipeline(
+            name=pipeline_data["name"],
+            git_url=git_url,
+            branch=branch,
+            project_type=pipeline_data.get("project_type", "jar"),
+            template=pipeline_data.get("template"),
+            image_name=pipeline_data.get("image_name"),
+            tag=pipeline_data.get("tag", "latest"),
+            push=pipeline_data.get("push", False),
+            push_registry=pipeline_data.get("push_registry"),
+            template_params=pipeline_data.get("template_params"),
+            sub_path=pipeline_data.get("sub_path"),
+            use_project_dockerfile=pipeline_data.get("use_project_dockerfile", True),
+            dockerfile_name=pipeline_data.get("dockerfile_name", "Dockerfile"),
+            webhook_secret=pipeline_data.get("webhook_secret"),
+            webhook_token=pipeline_data.get("webhook_token"),
+            enabled=pipeline_data.get("enabled", True),
+            description=pipeline_data.get("description", ""),
+            cron_expression=pipeline_data.get("cron_expression"),
+            webhook_branch_filter=pipeline_data.get("webhook_branch_filter", False),
+            webhook_use_push_branch=pipeline_data.get("webhook_use_push_branch", True),
+            branch_tag_mapping=pipeline_data.get("branch_tag_mapping"),
+            source_id=pipeline_data.get("source_id"),
+            selected_services=pipeline_data.get("selected_services"),
+            service_push_config=pipeline_data.get("service_push_config"),
+            service_template_params=pipeline_data.get("service_template_params"),
+            push_mode=pipeline_data.get("push_mode", "multi"),
+            resource_package_configs=pipeline_data.get("resource_package_configs"),
+        )
+
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "pipeline_create",
+            {
+                "pipeline_id": pipeline_id,
+                "name": pipeline_data["name"],
+                "git_url": git_url,
+                "source": "json",
+            },
+        )
+
+        return JSONResponse(
+            {
+                "pipeline_id": pipeline_id,
+                "message": "流水线创建成功",
+                "data": {
+                    "pipeline_id": pipeline_id,
+                    "name": pipeline_data["name"],
+                },
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"创建流水线失败: {str(e)}")
+
+
 @router.get("/pipelines")
 async def list_pipelines(
     enabled: Optional[bool] = Query(None, description="过滤启用状态")
@@ -4040,52 +4346,91 @@ async def webhook_trigger(webhook_token: str, request: Request):
 
         # 根据推送的分支查找对应的标签（分支标签映射应该基于推送的分支，而不是用于构建的分支）
         branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
-        tag = pipeline.get("tag", "latest")  # 默认标签
+        default_tag = pipeline.get("tag", "latest")  # 默认标签
 
         # 使用webhook推送的分支来查找标签映射（如果有的话）
         branch_for_tag_mapping = webhook_branch if webhook_branch else branch
 
+        # 获取标签列表（支持单个标签或多个标签）
+        tags = [default_tag]  # 默认只有一个标签
+
         if branch_for_tag_mapping and branch_tag_mapping:
+            mapped_tag_value = None
             # 优先精确匹配
             if branch_for_tag_mapping in branch_tag_mapping:
-                tag = branch_tag_mapping[branch_for_tag_mapping]
+                mapped_tag_value = branch_tag_mapping[branch_for_tag_mapping]
             else:
                 # 尝试通配符匹配（如 feature/* -> feature）
                 import fnmatch
 
                 for pattern, mapped_tag in branch_tag_mapping.items():
                     if fnmatch.fnmatch(branch_for_tag_mapping, pattern):
-                        tag = mapped_tag
+                        mapped_tag_value = mapped_tag
                         break
 
-        # 从流水线配置生成任务配置JSON
+            # 处理标签值（支持字符串、数组或逗号分隔的字符串）
+            if mapped_tag_value:
+                if isinstance(mapped_tag_value, list):
+                    # 如果是数组，直接使用
+                    tags = mapped_tag_value
+                elif isinstance(mapped_tag_value, str):
+                    # 如果是字符串，检查是否包含逗号
+                    if "," in mapped_tag_value:
+                        # 逗号分隔的多个标签
+                        tags = [
+                            t.strip() for t in mapped_tag_value.split(",") if t.strip()
+                        ]
+                    else:
+                        # 单个标签
+                        tags = [mapped_tag_value]
+
+        # 为每个标签创建任务
         from backend.handlers import pipeline_to_task_config
 
-        task_config = pipeline_to_task_config(
-            pipeline,
-            trigger_source="webhook",
-            branch=branch,
-            tag=tag,
-            webhook_branch=webhook_branch,
-            branch_tag_mapping=branch_tag_mapping,
-        )
+        build_manager = BuildManager()
+        pipeline_id = pipeline["pipeline_id"]
+        task_ids = []
 
         # 检查防抖（5秒内重复触发直接创建任务，状态为 pending）
-        pipeline_id = pipeline["pipeline_id"]
-        if manager.check_debounce(pipeline_id, debounce_seconds=5):
-            build_manager = BuildManager()
-            task_id = build_manager._trigger_task_from_config(task_config)
-            queue_length = manager.get_queue_length(pipeline_id)
+        is_debounced = manager.check_debounce(pipeline_id, debounce_seconds=5)
 
-            print(
-                f"⚠️ 流水线 {pipeline.get('name')} 触发过于频繁（防抖），已创建任务（pending）"
+        for tag in tags:
+            task_config = pipeline_to_task_config(
+                pipeline,
+                trigger_source="webhook",
+                branch=branch,
+                tag=tag,
+                webhook_branch=webhook_branch,
+                branch_tag_mapping=branch_tag_mapping,
             )
+
+            if is_debounced:
+                task_id = build_manager._trigger_task_from_config(task_config)
+                task_ids.append(task_id)
+
+        queue_length = manager.get_queue_length(pipeline_id)
+
+        # 检查防抖（5秒内重复触发直接创建任务，状态为 pending）
+        if is_debounced:
+            if len(tags) > 1:
+                print(
+                    f"⚠️ 流水线 {pipeline.get('name')} 触发过于频繁（防抖），已创建 {len(task_ids)} 个任务（pending）"
+                )
+            else:
+                print(
+                    f"⚠️ 流水线 {pipeline.get('name')} 触发过于频繁（防抖），已创建任务（pending）"
+                )
 
             return JSONResponse(
                 {
-                    "message": "触发过于频繁，任务已创建并加入队列",
+                    "message": (
+                        f"触发过于频繁，已创建 {len(task_ids)} 个任务并加入队列"
+                        if len(tags) > 1
+                        else "触发过于频繁，任务已创建并加入队列"
+                    ),
                     "status": "queued",
-                    "task_id": task_id,
+                    "task_id": task_ids[0] if task_ids else None,
+                    "task_ids": task_ids if len(task_ids) > 1 else None,
                     "queue_length": queue_length,
                     "pipeline": pipeline.get("name"),
                 }
@@ -4095,22 +4440,47 @@ async def webhook_trigger(webhook_token: str, request: Request):
         current_task_id = manager.get_pipeline_running_task(pipeline_id)
         if current_task_id:
             # 检查任务是否真的在运行
-            build_manager = BuildManager()
             task = build_manager.task_manager.get_task(current_task_id)
             if task and task.get("status") in ["pending", "running"]:
-                # 有任务正在运行，立即创建新任务（状态为 pending，等待执行）
-                task_id = build_manager._trigger_task_from_config(task_config)
+                # 有任务正在运行，为每个标签创建新任务（状态为 pending，等待执行）
+                queued_task_ids = []
+                for tag in tags:
+                    task_config = pipeline_to_task_config(
+                        pipeline,
+                        trigger_source="webhook",
+                        branch=branch,
+                        tag=tag,
+                        webhook_branch=webhook_branch,
+                        branch_tag_mapping=branch_tag_mapping,
+                    )
+                    queued_task_id = build_manager._trigger_task_from_config(
+                        task_config
+                    )
+                    queued_task_ids.append(queued_task_id)
+
                 queue_length = manager.get_queue_length(pipeline_id)
 
-                print(
-                    f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，已创建新任务（pending）"
-                )
+                if len(tags) > 1:
+                    print(
+                        f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，已创建 {len(queued_task_ids)} 个新任务（pending）"
+                    )
+                else:
+                    print(
+                        f"⚠️ 流水线 {pipeline.get('name')} 已有正在执行的任务 {current_task_id[:8]}，已创建新任务（pending）"
+                    )
 
                 return JSONResponse(
                     {
-                        "message": "流水线已有正在执行的任务，任务已创建并加入队列",
+                        "message": (
+                            f"流水线已有正在执行的任务，已创建 {len(queued_task_ids)} 个任务并加入队列"
+                            if len(tags) > 1
+                            else "流水线已有正在执行的任务，任务已创建并加入队列"
+                        ),
                         "status": "queued",
-                        "task_id": task_id,
+                        "task_id": queued_task_ids[0] if queued_task_ids else None,
+                        "task_ids": (
+                            queued_task_ids if len(queued_task_ids) > 1 else None
+                        ),
                         "queue_length": queue_length,
                         "current_task_id": current_task_id,
                         "pipeline": pipeline.get("name"),
@@ -4120,13 +4490,26 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 # 任务已完成或不存在，解绑
                 manager.unbind_task(pipeline_id)
 
-        # 没有运行中的任务，立即启动构建任务
-        build_manager = BuildManager()
-        task_id = build_manager._trigger_task_from_config(task_config)
+        # 没有运行中的任务，为每个标签立即启动构建任务
+        started_task_ids = []
+        for tag in tags:
+            task_config = pipeline_to_task_config(
+                pipeline,
+                trigger_source="webhook",
+                branch=branch,
+                tag=tag,
+                webhook_branch=webhook_branch,
+                branch_tag_mapping=branch_tag_mapping,
+            )
+            started_task_id = build_manager._trigger_task_from_config(task_config)
+            started_task_ids.append(started_task_id)
+
+        task_id = started_task_ids[0] if started_task_ids else None
 
         # 提取 webhook 相关信息
         webhook_info = {
             "branch": branch,
+            "tags": tags,  # 添加标签列表信息
             "event": request.headers.get("x-gitee-event")
             or request.headers.get("x-gitlab-event")
             or request.headers.get("x-github-event", "unknown"),
@@ -4149,7 +4532,7 @@ async def webhook_trigger(webhook_token: str, request: Request):
             if "repository" in payload:
                 webhook_info["repository"] = payload["repository"].get("name", "")
 
-        # 记录触发并绑定任务（webhook 触发）
+        # 记录触发并绑定任务（webhook 触发，只绑定第一个任务）
         manager.record_trigger(
             pipeline["pipeline_id"],
             task_id,
@@ -4157,7 +4540,7 @@ async def webhook_trigger(webhook_token: str, request: Request):
             trigger_info=webhook_info,
         )
 
-        # 记录操作日志
+        # 记录操作日志（记录所有任务）
         OperationLogger.log(
             "webhook",
             "pipeline_trigger",
@@ -4165,16 +4548,34 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 "pipeline_id": pipeline["pipeline_id"],
                 "pipeline_name": pipeline.get("name"),
                 "task_id": task_id,
+                "task_ids": started_task_ids if len(started_task_ids) > 1 else None,
+                "tags": tags,
                 "branch": branch,
                 "trigger_source": "webhook",
                 "webhook_info": webhook_info,
             },
         )
 
+        if len(tags) > 1:
+            print(
+                f"🔔 Webhook 触发，已启动 {len(started_task_ids)} 个构建任务: pipeline={pipeline.get('name')}, branch={branch}, tags={tags}"
+            )
+        else:
+            print(
+                f"🔔 Webhook 触发，已启动构建任务: pipeline={pipeline.get('name')}, branch={branch}, tag={tags[0]}"
+            )
+
         return JSONResponse(
             {
-                "message": "构建任务已启动",
+                "message": (
+                    f"已启动 {len(started_task_ids)} 个构建任务"
+                    if len(tags) > 1
+                    else "构建任务已启动"
+                ),
+                "status": "started",
                 "task_id": task_id,
+                "task_ids": started_task_ids if len(started_task_ids) > 1 else None,
+                "tags": tags,
                 "pipeline": pipeline.get("name"),
                 "branch": branch,
             }

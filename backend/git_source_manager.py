@@ -1,51 +1,51 @@
 # backend/git_source_manager.py
-"""Git 数据源管理器 - 用于管理验证过的 Git 仓库"""
-import json
-import os
+"""Git 数据源管理器 - 用于管理验证过的 Git 仓库（基于数据库）"""
+import base64
 import uuid
 import threading
-import base64
 from datetime import datetime
 from typing import Optional, Dict, List
+from backend.database import get_db_session, init_db
+from backend.models import GitSource
 
-# 数据源配置文件
-GIT_SOURCES_FILE = "data/git_sources.json"
+# 确保数据库已初始化
+try:
+    init_db()
+except:
+    pass
 
 
 class GitSourceManager:
-    """Git 数据源管理器"""
+    """Git 数据源管理器（基于数据库）"""
     
     def __init__(self):
         self.lock = threading.RLock()
-        self.sources = {}
-        self._load_sources()
     
-    def _load_sources(self):
-        """从文件加载数据源配置"""
-        if not os.path.exists(GIT_SOURCES_FILE):
-            return
+    def _to_dict(self, source: GitSource, include_password: bool = False) -> Optional[Dict]:
+        """将数据库模型转换为字典"""
+        if not source:
+            return None
         
-        try:
-            with open(GIT_SOURCES_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                self.sources = data.get('sources', {})
-                print(f"✅ 加载了 {len(self.sources)} 个 Git 数据源")
-        except Exception as e:
-            print(f"⚠️ 加载 Git 数据源配置失败: {e}")
-            self.sources = {}
-    
-    def _save_sources(self):
-        """保存数据源配置到文件"""
-        try:
-            os.makedirs(os.path.dirname(GIT_SOURCES_FILE), exist_ok=True)
-            with open(GIT_SOURCES_FILE, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'sources': self.sources,
-                    'updated_at': datetime.now().isoformat()
-                }, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"❌ 保存 Git 数据源配置失败: {e}")
-            raise
+        result = {
+            "source_id": source.source_id,
+            "name": source.name,
+            "description": source.description,
+            "git_url": source.git_url,
+            "branches": source.branches or [],
+            "tags": source.tags or [],
+            "default_branch": source.default_branch,
+            "username": source.username,
+            "dockerfiles": source.dockerfiles or {},
+            "created_at": source.created_at.isoformat() if source.created_at else None,
+            "updated_at": source.updated_at.isoformat() if source.updated_at else None,
+        }
+        
+        if include_password:
+            result["password"] = source.password
+        else:
+            result["has_password"] = bool(source.password)
+        
+        return result
     
     def create_source(
         self,
@@ -58,22 +58,7 @@ class GitSourceManager:
         username: str = None,
         password: str = None,
     ) -> str:
-        """
-        创建 Git 数据源
-        
-        Args:
-            name: 数据源名称
-            git_url: Git 仓库地址
-            description: 描述
-            branches: 分支列表
-            tags: 标签列表
-            default_branch: 默认分支
-            username: Git 用户名（可选）
-            password: Git 密码或 token（可选，将加密存储）
-        
-        Returns:
-            source_id: 数据源 ID
-        """
+        """创建 Git 数据源"""
         source_id = str(uuid.uuid4())
         
         # 加密密码（使用 base64 编码，仅用于基本保护）
@@ -81,68 +66,47 @@ class GitSourceManager:
         if password:
             encrypted_password = base64.b64encode(password.encode('utf-8')).decode('utf-8')
         
-        source = {
-            "source_id": source_id,
-            "name": name,
-            "description": description,
-            "git_url": git_url,
-            "branches": branches or [],
-            "tags": tags or [],
-            "default_branch": default_branch,
-            "username": username or "",  # Git 用户名
-            "password": encrypted_password,  # 加密后的密码
-            "dockerfiles": {},  # Dockerfile 字典，key 为文件路径，value 为内容
-            # 元数据
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-        }
-        
-        with self.lock:
-            self.sources[source_id] = source
-            self._save_sources()
-        
-        return source_id
+        db = get_db_session()
+        try:
+            source = GitSource(
+                source_id=source_id,
+                name=name,
+                description=description,
+                git_url=git_url,
+                branches=branches or [],
+                tags=tags or [],
+                default_branch=default_branch,
+                username=username or "",
+                password=encrypted_password,
+                dockerfiles={},
+            )
+            
+            db.add(source)
+            db.commit()
+            return source_id
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
     
     def get_source(self, source_id: str, include_password: bool = False) -> Optional[Dict]:
         """获取数据源配置"""
-        with self.lock:
-            source = self.sources.get(source_id)
-            if not source:
-                return None
-            
-            # 如果不包含密码，移除密码字段
-            if not include_password and source:
-                source = source.copy()
-                if "password" in source:
-                    source["has_password"] = bool(source["password"])
-                    del source["password"]
-            
-            return source
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.source_id == source_id).first()
+            return self._to_dict(source, include_password)
+        finally:
+            db.close()
     
     def list_sources(self, include_password: bool = False) -> List[Dict]:
-        """
-        列出所有数据源配置
-        
-        Args:
-            include_password: 是否包含密码（用于内部使用，前端不应包含密码）
-        
-        Returns:
-            数据源列表
-        """
-        with self.lock:
-            sources = list(self.sources.values())
-            # 按创建时间倒序排列
-            sources.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-            
-            # 如果不包含密码，移除密码字段
-            if not include_password:
-                for source in sources:
-                    if "password" in source:
-                        # 只返回是否有密码的标识，不返回实际密码
-                        source["has_password"] = bool(source["password"])
-                        del source["password"]
-            
-            return sources
+        """列出所有数据源配置"""
+        db = get_db_session()
+        try:
+            sources = db.query(GitSource).order_by(GitSource.created_at.desc()).all()
+            return [self._to_dict(s, include_password) for s in sources]
+        finally:
+            db.close()
     
     def update_source(
         self,
@@ -156,140 +120,155 @@ class GitSourceManager:
         username: str = None,
         password: str = None,
     ) -> bool:
-        """
-        更新数据源配置
-        
-        Returns:
-            True 表示更新成功，False 表示数据源不存在
-        """
-        with self.lock:
-            if source_id not in self.sources:
+        """更新数据源配置"""
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.source_id == source_id).first()
+            if not source:
                 return False
             
-            source = self.sources[source_id]
-            
-            # 更新字段
             if name is not None:
-                source["name"] = name
+                source.name = name
             if git_url is not None:
-                source["git_url"] = git_url
+                source.git_url = git_url
             if description is not None:
-                source["description"] = description
+                source.description = description
             if branches is not None:
-                source["branches"] = branches
+                source.branches = branches
             if tags is not None:
-                source["tags"] = tags
+                source.tags = tags
             if default_branch is not None:
-                source["default_branch"] = default_branch
+                source.default_branch = default_branch
             if username is not None:
-                source["username"] = username
+                source.username = username
             if password is not None:
-                # 如果提供了新密码，加密存储
                 if password:
-                    source["password"] = base64.b64encode(password.encode('utf-8')).decode('utf-8')
+                    source.password = base64.b64encode(password.encode('utf-8')).decode('utf-8')
                 else:
-                    source["password"] = None
+                    source.password = None
             
-            # 确保有 dockerfiles 字段
-            if "dockerfiles" not in source:
-                source["dockerfiles"] = {}
+            if "dockerfiles" not in source.dockerfiles:
+                source.dockerfiles = {}
             
-            # 更新时间
-            source["updated_at"] = datetime.now().isoformat()
-            
-            self._save_sources()
+            source.updated_at = datetime.now()
+            db.commit()
             return True
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
     
     def delete_source(self, source_id: str) -> bool:
-        """
-        删除数据源配置
-        
-        Returns:
-            True 表示删除成功，False 表示数据源不存在
-        """
-        with self.lock:
-            if source_id not in self.sources:
+        """删除数据源配置"""
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.source_id == source_id).first()
+            if not source:
                 return False
             
-            del self.sources[source_id]
-            self._save_sources()
+            db.delete(source)
+            db.commit()
             return True
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
     
     def get_source_by_url(self, git_url: str) -> Optional[Dict]:
         """通过 Git URL 获取数据源配置"""
-        with self.lock:
-            for source in self.sources.values():
-                if source.get("git_url") == git_url:
-                    return source
-            return None
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.git_url == git_url).first()
+            return self._to_dict(source)
+        finally:
+            db.close()
     
     def get_decrypted_password(self, source_id: str) -> Optional[str]:
         """获取解密后的密码"""
-        with self.lock:
-            source = self.sources.get(source_id)
-            if not source or not source.get("password"):
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.source_id == source_id).first()
+            if not source or not source.password:
                 return None
             try:
-                return base64.b64decode(source["password"]).decode('utf-8')
+                return base64.b64decode(source.password).decode('utf-8')
             except Exception:
                 return None
+        finally:
+            db.close()
     
     def get_auth_config(self, source_id: str) -> Dict[str, str]:
         """获取数据源的认证配置"""
-        with self.lock:
-            source = self.sources.get(source_id)
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.source_id == source_id).first()
             if not source:
                 return {}
             
             auth_config = {}
-            if source.get("username"):
-                auth_config["username"] = source["username"]
+            if source.username:
+                auth_config["username"] = source.username
             
             password = self.get_decrypted_password(source_id)
             if password:
                 auth_config["password"] = password
             
             return auth_config
+        finally:
+            db.close()
     
     def update_dockerfile(self, source_id: str, dockerfile_path: str, content: str) -> bool:
         """更新或创建 Dockerfile"""
-        with self.lock:
-            if source_id not in self.sources:
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.source_id == source_id).first()
+            if not source:
                 return False
             
-            source = self.sources[source_id]
-            if "dockerfiles" not in source:
-                source["dockerfiles"] = {}
+            if not source.dockerfiles:
+                source.dockerfiles = {}
             
-            source["dockerfiles"][dockerfile_path] = content
-            source["updated_at"] = datetime.now().isoformat()
-            self._save_sources()
+            source.dockerfiles[dockerfile_path] = content
+            source.updated_at = datetime.now()
+            db.commit()
             return True
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
     
     def delete_dockerfile(self, source_id: str, dockerfile_path: str) -> bool:
         """删除 Dockerfile"""
-        with self.lock:
-            if source_id not in self.sources:
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.source_id == source_id).first()
+            if not source or not source.dockerfiles:
                 return False
             
-            source = self.sources[source_id]
-            if "dockerfiles" not in source:
-                return False
-            
-            if dockerfile_path in source["dockerfiles"]:
-                del source["dockerfiles"][dockerfile_path]
-                source["updated_at"] = datetime.now().isoformat()
-                self._save_sources()
+            if dockerfile_path in source.dockerfiles:
+                del source.dockerfiles[dockerfile_path]
+                source.updated_at = datetime.now()
+                db.commit()
                 return True
             
             return False
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
     
     def get_dockerfile(self, source_id: str, dockerfile_path: str) -> Optional[str]:
         """获取 Dockerfile 内容"""
-        with self.lock:
-            source = self.sources.get(source_id)
-            if not source or "dockerfiles" not in source:
+        db = get_db_session()
+        try:
+            source = db.query(GitSource).filter(GitSource.source_id == source_id).first()
+            if not source or not source.dockerfiles:
                 return None
             
-            return source["dockerfiles"].get(dockerfile_path)
-
+            return source.dockerfiles.get(dockerfile_path)
+        finally:
+            db.close()

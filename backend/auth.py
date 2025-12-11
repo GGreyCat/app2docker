@@ -74,7 +74,9 @@ def create_token(username: str) -> str:
 def verify_token(token: str) -> dict:
     """验证 JWT token"""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        # 使用 options 参数，不验证 iat（issued at）时间，避免时间不匹配问题
+        # JWT 库默认使用 UTC 时间，但我们的系统使用本地时间
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'], options={'verify_iat': False})
         return {'valid': True, 'username': payload['username']}
     except jwt.ExpiredSignatureError:
         return {'valid': False, 'error': 'Token 已过期'}
