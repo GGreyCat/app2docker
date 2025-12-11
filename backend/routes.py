@@ -3731,51 +3731,91 @@ async def list_pipelines(
 
         # 为每个流水线添加当前任务状态和最后一次构建状态
         build_manager = BuildManager()
-        pipeline_id = None
+
+        # 优化：只查询一次所有任务，然后在内存中过滤（避免重复查询数据库）
+        try:
+            all_tasks = build_manager.task_manager.list_tasks(
+                task_type="build_from_source"
+            )
+        except Exception as e:
+            print(f"⚠️ 查询任务列表失败: {e}")
+            import traceback
+
+            traceback.print_exc()
+            # 如果查询任务失败，使用空列表继续处理
+            all_tasks = []
+
+        # 确保 pipelines 是列表
+        if not isinstance(pipelines, list):
+            print(f"⚠️ pipelines 不是列表类型: {type(pipelines)}")
+            pipelines = []
+
+        # 按 pipeline_id 分组任务，提高查找效率
+        tasks_by_pipeline = {}
+        for task in all_tasks:
+            task_pipeline_id = task.get("pipeline_id")
+            if task_pipeline_id:
+                if task_pipeline_id not in tasks_by_pipeline:
+                    tasks_by_pipeline[task_pipeline_id] = []
+                tasks_by_pipeline[task_pipeline_id].append(task)
+
         for pipeline in pipelines:
             pipeline_id = pipeline.get("pipeline_id")
+            if not pipeline_id:
+                # 如果流水线没有ID，跳过处理
+                pipeline["last_build"] = None
+                pipeline["last_build_success"] = None
+                pipeline["success_count"] = 0
+                pipeline["failed_count"] = 0
+                pipeline["queue_length"] = 0
+                pipeline["has_queued_tasks"] = False
+                continue
 
             # 获取当前正在运行的任务
             task_id = pipeline.get("current_task_id")
             if task_id:
-                task = build_manager.task_manager.get_task(task_id)
-                if task:
-                    pipeline["current_task_status"] = task.get("status")
-                    pipeline["current_task_info"] = {
-                        "task_id": task_id,
-                        "status": task.get("status"),
-                        "created_at": task.get("created_at"),
-                        "image": task.get("image"),
-                        "tag": task.get("tag"),
-                    }
-                else:
-                    # 任务不存在，清除绑定
+                try:
+                    task = build_manager.task_manager.get_task(task_id)
+                    if task:
+                        pipeline["current_task_status"] = task.get("status")
+                        pipeline["current_task_info"] = {
+                            "task_id": task_id,
+                            "status": task.get("status"),
+                            "created_at": task.get("created_at"),
+                            "image": task.get("image"),
+                            "tag": task.get("tag"),
+                        }
+                    else:
+                        # 任务不存在，清除绑定
+                        manager.unbind_task(pipeline_id)
+                        pipeline["current_task_id"] = None
+                except Exception as e:
+                    # 如果获取任务失败，清除绑定
+                    print(f"⚠️ 获取任务 {task_id} 失败: {e}")
                     manager.unbind_task(pipeline_id)
                     pipeline["current_task_id"] = None
 
-            # 查找最后一个构建任务（包括所有状态：running, pending, completed, failed）
-            all_tasks = build_manager.task_manager.list_tasks(
-                task_type="build_from_source"
-            )
+            # 从分组后的任务中查找该流水线的任务
+            pipeline_tasks = tasks_by_pipeline.get(pipeline_id, [])
             last_task = None
             success_count = 0
             failed_count = 0
-            for task in all_tasks:
-                # 检查任务是否属于该流水线
-                task_pipeline_id = task.get("pipeline_id")
-                if task_pipeline_id == pipeline_id:
-                    # 统计成功和失败数量
-                    task_status = task.get("status")
-                    if task_status == "completed":
-                        success_count += 1
-                    elif task_status == "failed":
-                        failed_count += 1
 
-                    # 查找所有状态的任务，取最新的一个
-                    if not last_task or task.get("created_at", "") > last_task.get(
-                        "created_at", ""
-                    ):
-                        last_task = task
+            for task in pipeline_tasks:
+                # 统计成功和失败数量
+                task_status = task.get("status")
+                if task_status == "completed":
+                    success_count += 1
+                elif task_status == "failed":
+                    failed_count += 1
+
+                # 查找所有状态的任务，取最新的一个
+                task_created_at = task.get("created_at", "")
+                if not last_task or (
+                    task_created_at
+                    and task_created_at > last_task.get("created_at", "")
+                ):
+                    last_task = task
 
             # 添加最后一次构建信息（包含所有状态）
             if last_task:
@@ -3799,15 +3839,22 @@ async def list_pipelines(
             pipeline["failed_count"] = failed_count
 
             # 添加队列信息
-            queue_length = manager.get_queue_length(pipeline_id)
-            pipeline["queue_length"] = queue_length
-            if queue_length > 0:
-                pipeline["has_queued_tasks"] = True
-            else:
+            try:
+                queue_length = manager.get_queue_length(pipeline_id)
+                pipeline["queue_length"] = queue_length
+                pipeline["has_queued_tasks"] = queue_length > 0
+            except Exception as e:
+                print(f"⚠️ 获取流水线 {pipeline_id} 队列长度失败: {e}")
+                pipeline["queue_length"] = 0
                 pipeline["has_queued_tasks"] = False
 
         return JSONResponse({"pipelines": pipelines, "total": len(pipelines)})
     except Exception as e:
+        import traceback
+
+        error_detail = traceback.format_exc()
+        print(f"❌ 获取流水线列表失败: {e}")
+        print(f"错误详情:\n{error_detail}")
         raise HTTPException(status_code=500, detail=f"获取流水线列表失败: {str(e)}")
 
 

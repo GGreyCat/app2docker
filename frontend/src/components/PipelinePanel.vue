@@ -3826,6 +3826,14 @@ function closeHistoryModal() {
 async function loadHistory(page = null) {
   if (!currentPipeline.value) return
   
+  // 获取pipeline_id，支持两种字段名
+  const pipelineId = currentPipeline.value.pipeline_id || currentPipeline.value.id
+  if (!pipelineId) {
+    console.error('流水线ID不存在:', currentPipeline.value)
+    alert('无法获取流水线ID')
+    return
+  }
+  
   // 如果指定了页码，更新当前页
   if (page !== null) {
     historyPagination.value.currentPage = page
@@ -3845,16 +3853,38 @@ async function loadHistory(page = null) {
     params.append('limit', historyPagination.value.pageSize.toString())
     params.append('offset', offset.toString())
     
-    const url = `/api/pipelines/${currentPipeline.value.pipeline_id}/tasks?${params.toString()}`
+    const url = `/api/pipelines/${pipelineId}/tasks?${params.toString()}`
     const res = await axios.get(url)
-    historyTasks.value = res.data.tasks || []
     
-    // 更新分页信息
-    historyPagination.value.total = res.data.total || 0
-    historyPagination.value.hasMore = res.data.has_more || false
+    // 检查响应数据结构
+    if (res.data && Array.isArray(res.data.tasks)) {
+      historyTasks.value = res.data.tasks || []
+      // 更新分页信息
+      historyPagination.value.total = res.data.total || 0
+      historyPagination.value.hasMore = res.data.has_more || false
+    } else if (Array.isArray(res.data)) {
+      // 兼容旧格式：如果直接返回数组
+      historyTasks.value = res.data
+      historyPagination.value.total = res.data.length
+      historyPagination.value.hasMore = false
+    } else {
+      console.warn('意外的响应格式:', res.data)
+      historyTasks.value = []
+      historyPagination.value.total = 0
+      historyPagination.value.hasMore = false
+    }
   } catch (error) {
     console.error('加载历史构建失败:', error)
-    alert('加载历史构建失败')
+    const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '加载历史构建失败'
+    
+    // 如果是 404 错误（流水线不存在），显示更友好的提示
+    if (error.response?.status === 404) {
+      console.warn(`流水线 ${pipelineId} 不存在，可能是数据不一致`)
+      alert(`流水线不存在，请刷新页面后重试`)
+    } else {
+      alert(`加载历史构建失败: ${errorMsg}`)
+    }
+    
     historyTasks.value = []
     historyPagination.value.total = 0
     historyPagination.value.hasMore = false
