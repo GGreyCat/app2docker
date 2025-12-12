@@ -7100,24 +7100,58 @@ function viewTaskLogs(taskId, task) {
 }
 
 // 显示多服务配置模态框
-function showMultiServiceConfig(pipeline) {
-  multiServiceConfigPipeline.value = pipeline;
+async function showMultiServiceConfig(pipeline) {
+  // 先刷新流水线列表，确保获取最新数据
+  await loadPipelines();
+
+  // 从最新列表中查找对应的流水线，确保使用最新数据
+  const latestPipeline = pipelines.value.find(
+    (p) => p.pipeline_id === pipeline.pipeline_id
+  );
+  const pipelineToUse = latestPipeline || pipeline;
+
+  console.log("showMultiServiceConfig - pipelineToUse:", {
+    pipeline_id: pipelineToUse.pipeline_id,
+    push_mode: pipelineToUse.push_mode,
+    selected_services: pipelineToUse.selected_services,
+    service_push_config: pipelineToUse.service_push_config,
+  });
+
+  multiServiceConfigPipeline.value = pipelineToUse;
 
   // 初始化表单数据
   multiServiceFormData.value = {
-    push_mode: pipeline.push_mode || "multi",
-    selected_services: pipeline.selected_services
-      ? [...pipeline.selected_services]
+    push_mode: pipelineToUse.push_mode || "multi",
+    selected_services: pipelineToUse.selected_services
+      ? [...pipelineToUse.selected_services]
       : [],
-    service_push_config: pipeline.service_push_config
-      ? JSON.parse(JSON.stringify(pipeline.service_push_config))
+    service_push_config: pipelineToUse.service_push_config
+      ? JSON.parse(JSON.stringify(pipelineToUse.service_push_config))
       : {},
-    global_image_name: pipeline.image_name || "",
-    global_tag: pipeline.tag || "latest",
+    global_image_name: pipelineToUse.image_name || "",
+    global_tag: pipelineToUse.tag || "latest",
   };
 
   // 确保每个服务都有配置对象
   const isSingleMode = multiServiceFormData.value.push_mode === "single";
+
+  // 如果是单服务模式但没有服务，自动添加一个默认服务
+  if (
+    isSingleMode &&
+    multiServiceFormData.value.selected_services.length === 0
+  ) {
+    const defaultServiceName = "service1";
+    multiServiceFormData.value.selected_services.push(defaultServiceName);
+    if (!multiServiceFormData.value.service_push_config[defaultServiceName]) {
+      multiServiceFormData.value.service_push_config[defaultServiceName] = {
+        enabled: false, // 单服务模式下默认禁用
+        push: false,
+        imageName: "",
+        tag: "",
+      };
+    }
+  }
+
   multiServiceFormData.value.selected_services.forEach((serviceName) => {
     if (!multiServiceFormData.value.service_push_config[serviceName]) {
       multiServiceFormData.value.service_push_config[serviceName] = {
@@ -7454,10 +7488,28 @@ async function saveMultiServiceConfig() {
   try {
     if (multiServiceFormData.value.push_mode === "single") {
       // 单服务模式：使用全局配置，但保留所有服务配置（设置为禁用状态）
+      // 如果没有服务，自动添加一个默认服务
       if (serviceNames.length === 0) {
-        alert("单服务模式下至少需要一个服务");
-        savingMultiServiceConfig.value = false;
-        return;
+        const defaultServiceName = "service1";
+        serviceNames.push(defaultServiceName);
+        // 同时更新 multiServiceFormData，确保数据一致性
+        if (
+          !multiServiceFormData.value.selected_services.includes(
+            defaultServiceName
+          )
+        ) {
+          multiServiceFormData.value.selected_services.push(defaultServiceName);
+        }
+        if (
+          !multiServiceFormData.value.service_push_config[defaultServiceName]
+        ) {
+          multiServiceFormData.value.service_push_config[defaultServiceName] = {
+            enabled: false,
+            push: false,
+            imageName: "",
+            tag: "",
+          };
+        }
       }
 
       // 保留所有服务，但将所有服务的配置设置为禁用状态
@@ -7497,6 +7549,7 @@ async function saveMultiServiceConfig() {
           "latest",
       };
 
+      console.log("保存单服务模式配置:", payload);
       await axios.put(
         `/api/pipelines/${multiServiceConfigPipeline.value.pipeline_id}`,
         payload
@@ -7564,10 +7617,18 @@ async function saveMultiServiceConfig() {
     }
 
     alert("多服务配置已保存");
-    closeMultiServiceConfigModal();
 
     // 重新加载流水线列表
     await loadPipelines();
+
+    // 从更新后的列表中查找对应的流水线并更新 multiServiceConfigPipeline
+    const updatedPipeline = pipelines.value.find(
+      (p) => p.pipeline_id === multiServiceConfigPipeline.value.pipeline_id
+    );
+    if (updatedPipeline) {
+      // 更新 multiServiceConfigPipeline，这样如果用户再次打开多服务配置，会显示最新数据
+      multiServiceConfigPipeline.value = updatedPipeline;
+    }
 
     // 如果当前正在编辑这个流水线，需要更新 editingPipeline 和 formData
     if (
@@ -7575,10 +7636,6 @@ async function saveMultiServiceConfig() {
       editingPipeline.value.pipeline_id ===
         multiServiceConfigPipeline.value.pipeline_id
     ) {
-      // 从更新后的列表中查找对应的流水线
-      const updatedPipeline = pipelines.value.find(
-        (p) => p.pipeline_id === multiServiceConfigPipeline.value.pipeline_id
-      );
       if (updatedPipeline) {
         // 更新 editingPipeline
         editingPipeline.value = updatedPipeline;
@@ -7604,6 +7661,9 @@ async function saveMultiServiceConfig() {
         }
       }
     }
+
+    // 关闭模态框（在更新数据之后关闭，确保数据已更新）
+    closeMultiServiceConfigModal();
   } catch (error) {
     console.error("保存多服务配置失败:", error);
     alert(error.response?.data?.detail || "保存多服务配置失败");

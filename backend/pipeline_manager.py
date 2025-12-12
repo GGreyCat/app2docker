@@ -594,13 +594,14 @@ class PipelineManager:
 
             pipeline.updated_at = datetime.now()
 
-            # 刷新对象以确保它仍然存在
+            # 提交更改
+            db.commit()
+
+            # 刷新对象以确保数据已更新
             db.refresh(pipeline)
             if not pipeline:
-                db.rollback()
                 return False
 
-            db.commit()
             return True
         except Exception as e:
             db.rollback()

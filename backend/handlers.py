@@ -3508,6 +3508,25 @@ def build_task_config(
     Returns:
         标准化的任务配置字典
     """
+    # 确保字段对齐：在单服务模式下，should_push 应该与 service_push_config 中第一个服务的 push 字段一致
+    normalized_service_push_config = service_push_config or {}
+    if push_mode == "single" and selected_services and len(selected_services) > 0:
+        first_service = selected_services[0]
+        service_config = normalized_service_push_config.get(first_service, {})
+        if isinstance(service_config, dict):
+            # 确保 should_push 与 service_push_config 中的 push 字段对齐
+            service_push = service_config.get("push", False)
+            if should_push != service_push:
+                print(
+                    f"⚠️ 字段对齐：should_push ({should_push}) 与 service_push_config[{first_service}].push ({service_push}) 不一致，使用 service_push_config 的值"
+                )
+                should_push = service_push
+            # 确保 service_push_config 中的 push 字段与 should_push 一致
+            if service_config.get("push") != should_push:
+                normalized_service_push_config = normalized_service_push_config.copy()
+                normalized_service_push_config[first_service] = service_config.copy()
+                normalized_service_push_config[first_service]["push"] = should_push
+
     config = {
         "git_url": git_url,
         "image_name": image_name,
@@ -3522,7 +3541,7 @@ def build_task_config(
         "dockerfile_name": dockerfile_name,
         "source_id": source_id,
         "selected_services": selected_services or [],
-        "service_push_config": service_push_config or {},
+        "service_push_config": normalized_service_push_config,
         "service_template_params": service_template_params or {},
         "push_mode": push_mode,
         "resource_package_ids": resource_package_ids or [],
@@ -3678,6 +3697,31 @@ def pipeline_to_task_config(
     print(f"🔍 pipeline_to_task_config 准备调用 build_task_config:")
     print(f"   - final_branch: {repr(final_branch)}")
 
+    # 根据 push_mode 和 service_push_config 确定 should_push
+    push_mode = pipeline.get("push_mode", "multi")
+    service_push_config = pipeline.get("service_push_config", {})
+    selected_services = pipeline.get("selected_services", [])
+
+    should_push = False
+    if push_mode == "single":
+        # 单服务模式：从第一个服务的 service_push_config 中获取 push 配置
+        if selected_services and len(selected_services) > 0:
+            first_service = selected_services[0]
+            service_config = service_push_config.get(first_service, {})
+            if isinstance(service_config, dict):
+                should_push = service_config.get("push", False)
+            else:
+                should_push = bool(service_config)
+    else:
+        # 多服务模式：使用旧的 push 字段（向后兼容）
+        should_push = pipeline.get("push", False)
+
+    print(f"🔍 should_push 计算:")
+    print(f"   - push_mode: {push_mode}")
+    print(f"   - selected_services: {selected_services}")
+    print(f"   - service_push_config: {service_push_config}")
+    print(f"   - should_push: {should_push}")
+
     task_config_result = build_task_config(
         git_url=pipeline.get("git_url"),
         image_name=pipeline.get("image_name") or "pipeline-build",
@@ -3686,15 +3730,15 @@ def pipeline_to_task_config(
         project_type=pipeline.get("project_type", "jar"),
         template=pipeline.get("template"),
         template_params=pipeline.get("template_params", {}),
-        should_push=pipeline.get("push", False),
+        should_push=should_push,
         sub_path=pipeline.get("sub_path"),
         use_project_dockerfile=pipeline.get("use_project_dockerfile", True),
         dockerfile_name=pipeline.get("dockerfile_name", "Dockerfile"),
         source_id=pipeline.get("source_id"),
-        selected_services=pipeline.get("selected_services", []),
-        service_push_config=pipeline.get("service_push_config", {}),
+        selected_services=selected_services,
+        service_push_config=service_push_config,
         service_template_params=pipeline.get("service_template_params", {}),
-        push_mode=pipeline.get("push_mode", "multi"),
+        push_mode=push_mode,
         resource_package_ids=pipeline.get("resource_package_configs", []),
         pipeline_id=pipeline.get("pipeline_id"),
         trigger_source=trigger_source,
