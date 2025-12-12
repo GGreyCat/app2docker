@@ -2042,12 +2042,15 @@ class BuildManager:
         image_name = task_config.get("image_name")
         tag = task_config.get("tag", "latest")
         branch = task_config.get("branch")
-        
+
         # 调试日志：检查任务配置中的分支
         import json
+
         print(f"🔍 _trigger_task_from_config:")
         print(f"   - task_config中的branch: {repr(branch)}")
-        print(f"   - task_config完整内容: {json.dumps({k: v for k, v in task_config.items() if k != 'template_params'}, indent=2, ensure_ascii=False, default=str)}")
+        print(
+            f"   - task_config完整内容: {json.dumps({k: v for k, v in task_config.items() if k != 'template_params'}, indent=2, ensure_ascii=False, default=str)}"
+        )
         project_type = task_config.get("project_type", "jar")
         template = task_config.get("template", "")
         template_params = task_config.get("template_params", {})
@@ -3242,7 +3245,7 @@ logs/
             print(f"   - branch参数: {repr(branch)}")
             print(f"   - branch类型: {type(branch)}")
             print(f"   - branch是否为真值: {bool(branch)}")
-            
+
             if branch:
                 cmd.extend(["-b", branch])
                 log(f"📌 检出分支: {branch}\n")
@@ -3626,10 +3629,20 @@ def pipeline_to_task_config(
     # 替换标签中的动态日期占位符
     final_tag = replace_tag_date_placeholders(final_tag)
 
-    # 处理分支标签映射（仅在webhook触发时）
-    if trigger_source == "webhook":
+    # 处理分支标签映射（webhook和manual触发时都应用）
+    if trigger_source in ["webhook", "manual"]:
         mapping = branch_tag_mapping or pipeline.get("branch_tag_mapping", {})
-        branch_for_mapping = webhook_branch if webhook_branch else final_branch
+        # webhook触发时，优先使用webhook推送的分支；手动触发时，使用实际使用的分支
+        branch_for_mapping = (
+            webhook_branch
+            if (trigger_source == "webhook" and webhook_branch)
+            else final_branch
+        )
+        print(f"🔍 分支标签映射处理:")
+        print(f"   - trigger_source: {trigger_source}")
+        print(f"   - branch_for_mapping: {branch_for_mapping}")
+        print(f"   - mapping: {mapping}")
+        print(f"   - 当前final_tag: {final_tag}")
         if branch_for_mapping and mapping:
             mapped_tag_value = None
             if branch_for_mapping in mapping:
@@ -3659,11 +3672,12 @@ def pipeline_to_task_config(
 
             # 替换映射标签中的动态日期占位符
             final_tag = replace_tag_date_placeholders(final_tag)
+            print(f"   - 映射后的final_tag: {final_tag}")
 
     # 调试日志：确认传递给 build_task_config 的分支
     print(f"🔍 pipeline_to_task_config 准备调用 build_task_config:")
     print(f"   - final_branch: {repr(final_branch)}")
-    
+
     task_config_result = build_task_config(
         git_url=pipeline.get("git_url"),
         image_name=pipeline.get("image_name") or "pipeline-build",
@@ -3686,11 +3700,11 @@ def pipeline_to_task_config(
         trigger_source=trigger_source,
         **kwargs,
     )
-    
+
     # 调试日志：确认返回的任务配置中的分支
     print(f"🔍 build_task_config 返回的配置:")
     print(f"   - branch字段: {repr(task_config_result.get('branch'))}")
-    
+
     return task_config_result
 
 
