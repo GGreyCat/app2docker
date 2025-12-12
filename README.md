@@ -4,7 +4,8 @@
 
 支持 Java（JAR）、Node.js、Python、Go、静态网站等多种应用类型，提供 Web 界面操作，无需编写 Dockerfile。
 
-![输入图片说明](img.png)
+![输入图片说明](docs/App2Docker%20-%20Docker%20镜像构建平台.png)
+![输入图片说明](docs/App2Docker%20-%20仪表盘.png)
 
 ---
 
@@ -70,6 +71,9 @@ docker run -d \
 - **Docker 仓库配置**：支持多个仓库，可设置激活仓库
 - **仓库认证测试**：测试仓库登录是否正常
 - **自动推送**：构建完成后自动推送到激活仓库
+
+![输入图片说明](docs/App2Docker%20-%20数据源.png)
+![输入图片说明](docs/App2Docker%20-%20流水线.png)
 
 ---
 
