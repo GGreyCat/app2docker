@@ -2190,6 +2190,16 @@ const buildConfigJson = computed(() => {
   return JSON.stringify(config, null, 2)
 })
 
+// 监听模态框打开，更新JSON文本
+watch(showBuildConfigJsonModal, (isVisible) => {
+  if (isVisible) {
+    // 使用 nextTick 确保在模态框完全显示后再更新
+    nextTick(() => {
+      buildConfigJsonText.value = buildConfigJson.value;
+    });
+  }
+});
+
 // 复制构建配置JSON（带降级方案）
 async function copyBuildConfigJson() {
   const text = buildConfigJson.value
