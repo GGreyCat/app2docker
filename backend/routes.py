@@ -4486,25 +4486,35 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 branch = configured_branch
         else:
             # 未启用分支过滤，根据配置决定使用哪个分支
-            if webhook_use_push_branch:
-                # 启用使用推送分支，优先使用推送的分支
-                if webhook_branch:
+            # 如果 webhook 提供了分支信息，优先使用推送的分支（更符合 webhook 的预期行为）
+            if webhook_branch:
+                # Webhook 提供了分支信息，优先使用推送的分支
+                if webhook_use_push_branch:
+                    # 明确配置了使用推送分支，使用推送的分支
                     branch = webhook_branch
                     print(
                         f"🔔 Webhook 触发，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}"
                     )
                 else:
-                    # 没有推送分支信息，使用配置的分支
+                    # 虽然配置了不使用推送分支，但 webhook 提供了分支信息
+                    # 为了符合 webhook 的预期行为，仍然使用推送的分支
+                    branch = webhook_branch
+                    print(
+                        f"🔔 Webhook 触发，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch} (webhook_use_push_branch=False 但 webhook 提供了分支信息)"
+                    )
+            else:
+                # Webhook 未提供分支信息，根据配置决定
+                if webhook_use_push_branch:
+                    # 配置了使用推送分支，但没有推送分支信息，使用配置的分支
                     branch = configured_branch
                     print(
                         f"⚠️ Webhook未提供分支信息，使用配置的分支: pipeline={pipeline.get('name')}, branch={branch}"
                     )
-            else:
-                # 禁用使用推送分支，使用配置的分支
-                branch = configured_branch
-                if not branch:
-                    # 如果配置的分支为空，且没有推送分支信息，无法确定使用哪个分支
-                    if not webhook_branch:
+                else:
+                    # 禁用使用推送分支，使用配置的分支
+                    branch = configured_branch
+                    if not branch:
+                        # 如果配置的分支为空，且没有推送分支信息，无法确定使用哪个分支
                         print(
                             f"❌ 无法触发构建: pipeline={pipeline.get('name')}, 配置分支为空且Webhook未提供分支信息"
                         )
@@ -4517,15 +4527,9 @@ async def webhook_trigger(webhook_token: str, request: Request):
                             status_code=400,
                         )
                     else:
-                        # 配置分支为空，但Webhook提供了分支信息，使用推送的分支
-                        branch = webhook_branch
                         print(
-                            f"⚠️ 配置分支为空，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}"
+                            f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (Webhook未提供分支信息)"
                         )
-                else:
-                    print(
-                        f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (忽略推送分支: {webhook_branch})"
-                    )
 
         # 根据推送的分支查找对应的标签（分支标签映射应该基于推送的分支，而不是用于构建的分支）
         branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
