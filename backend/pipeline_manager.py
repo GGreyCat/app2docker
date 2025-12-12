@@ -595,12 +595,35 @@ class PipelineManager:
             pipeline.updated_at = datetime.now()
 
             # 提交更改
-            db.commit()
-
-            # 刷新对象以确保数据已更新
-            db.refresh(pipeline)
-            if not pipeline:
-                return False
+            try:
+                db.commit()
+            except Exception as commit_error:
+                # 如果 commit 失败，记录错误并回滚
+                db.rollback()
+                error_msg = str(commit_error)
+                print(f"⚠️ 数据库提交失败: {error_msg}")
+                print(f"⚠️ 流水线ID: {pipeline_id}")
+                # 如果是更新行数不匹配的错误，可能是对象已被删除或并发修改
+                if (
+                    "expected to update" in error_msg.lower()
+                    and "0 were matched" in error_msg.lower()
+                ):
+                    print(f"⚠️ 流水线可能在更新过程中被删除或并发修改: {pipeline_id}")
+                    # 重新查询确认流水线是否还存在
+                    check_pipeline = (
+                        db.query(Pipeline)
+                        .filter(Pipeline.pipeline_id == pipeline_id)
+                        .first()
+                    )
+                    if not check_pipeline:
+                        print(f"⚠️ 确认：流水线已被删除: {pipeline_id}")
+                        return False
+                    else:
+                        print(
+                            f"⚠️ 确认：流水线仍然存在，可能是并发修改导致: {pipeline_id}"
+                        )
+                        raise ValueError(f"流水线更新失败，可能是并发修改: {error_msg}")
+                raise
 
             return True
         except Exception as e:
