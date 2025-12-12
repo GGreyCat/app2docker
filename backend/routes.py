@@ -4446,7 +4446,7 @@ async def webhook_trigger(webhook_token: str, request: Request):
             "webhook_use_push_branch", True
         )  # 默认为True
         configured_branch = pipeline.get("branch")
-        
+
         # 调试信息：输出配置值
         print(f"🔍 Webhook 分支配置:")
         print(f"   - webhook_branch_filter: {webhook_branch_filter}")
@@ -4536,7 +4536,7 @@ async def webhook_trigger(webhook_token: str, request: Request):
         print(f"   - webhook_branch: {webhook_branch}")
         print(f"   - configured_branch: {configured_branch}")
         print(f"   - 最终使用的 branch: {branch}")
-        
+
         # 使用webhook推送的分支来查找标签映射（如果有的话）
         branch_for_tag_mapping = webhook_branch if webhook_branch else branch
 
@@ -4596,7 +4596,9 @@ async def webhook_trigger(webhook_token: str, request: Request):
                 webhook_branch=webhook_branch,
                 branch_tag_mapping=branch_tag_mapping,
             )
-            print(f"🔍 pipeline_to_task_config 返回的 task_config.branch: {task_config.get('branch')}")
+            print(
+                f"🔍 pipeline_to_task_config 返回的 task_config.branch: {task_config.get('branch')}"
+            )
 
             if is_debounced:
                 task_id = build_manager._trigger_task_from_config(task_config)
