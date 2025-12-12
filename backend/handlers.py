@@ -1388,25 +1388,55 @@ class BuildManager:
         def do_extract_archive(file_path: str, extract_to: str):
             """解压压缩文件"""
             try:
+                # 获取压缩包大小
+                archive_size = os.path.getsize(file_path)
+                if archive_size < 1024:
+                    archive_size_str = f"{archive_size} B"
+                elif archive_size < 1024 * 1024:
+                    archive_size_str = f"{archive_size / 1024:.2f} KB"
+                else:
+                    archive_size_str = f"{archive_size / (1024 * 1024):.2f} MB"
+                
+                log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+                log(f"📦 开始解压压缩包\n")
+                log(f"  文件路径: {file_path}\n")
+                log(f"  文件大小: {archive_size_str}\n")
+                log(f"  解压目标: {extract_to}\n")
+                log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+                
                 if file_path.endswith(".zip"):
-                    log("📦 解压 ZIP 文件...\n")
+                    log("📦 检测到 ZIP 格式，开始解压...\n")
                     with zipfile.ZipFile(file_path, "r") as zip_ref:
+                        # 获取压缩包内的文件列表
+                        file_list = zip_ref.namelist()
+                        log(f"  压缩包内包含 {len(file_list)} 个文件/目录\n")
                         zip_ref.extractall(extract_to)
                 elif file_path.endswith((".tar.gz", ".tgz")):
-                    log("📦 解压 TAR.GZ 文件...\n")
+                    log("📦 检测到 TAR.GZ 格式，开始解压...\n")
                     with tarfile.open(file_path, "r:gz") as tar_ref:
+                        # 获取压缩包内的文件列表
+                        file_list = tar_ref.getnames()
+                        log(f"  压缩包内包含 {len(file_list)} 个文件/目录\n")
                         tar_ref.extractall(extract_to)
                 elif file_path.endswith(".tar"):
-                    log("📦 解压 TAR 文件...\n")
+                    log("📦 检测到 TAR 格式，开始解压...\n")
                     with tarfile.open(file_path, "r") as tar_ref:
+                        # 获取压缩包内的文件列表
+                        file_list = tar_ref.getnames()
+                        log(f"  压缩包内包含 {len(file_list)} 个文件/目录\n")
                         tar_ref.extractall(extract_to)
                 else:
+                    log(f"❌ 不支持的压缩格式: {file_path}\n")
                     return False
-                log("✅ 解压完成\n")
+                
+                log("✅ 解压操作完成\n")
+                log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
                 # 列出解压后的目录概况和文件
                 try:
-                    log("📂 解压后目录概况：\n")
+                    log("📂 解压后构建根目录概况：\n")
+                    log(f"  构建上下文路径: {extract_to}\n")
+                    
                     if os.path.exists(extract_to):
                         # 统计根目录下的直接内容
                         root_items = os.listdir(extract_to)
@@ -1435,23 +1465,31 @@ class BuildManager:
                             size_str = f"{total_size} B"
                         elif total_size < 1024 * 1024:
                             size_str = f"{total_size / 1024:.2f} KB"
-                        else:
+                        elif total_size < 1024 * 1024 * 1024:
                             size_str = f"{total_size / (1024 * 1024):.2f} MB"
+                        else:
+                            size_str = f"{total_size / (1024 * 1024 * 1024):.2f} GB"
 
                         log(f"  📁 根目录下目录数: {len(dirs)}\n")
                         log(f"  📄 根目录下文件数: {len(files)}\n")
-                        log(f"  📊 总文件数: {total_files}\n")
-                        log(f"  💾 总大小: {size_str}\n")
+                        log(f"  📊 解压后总文件数: {total_files}\n")
+                        log(f"  💾 解压后总大小: {size_str}\n")
+                        log(f"\n")
 
                         if dirs:
-                            log("  📁 根目录列表：\n")
+                            log("  📁 根目录下的目录列表：\n")
                             for d in sorted(dirs)[:20]:  # 最多显示20个
-                                log(f"    - {d}/\n")
+                                dir_path = os.path.join(extract_to, d)
+                                if os.path.isdir(dir_path):
+                                    # 统计目录下的文件数
+                                    dir_file_count = sum(len(files) for _, _, files in os.walk(dir_path))
+                                    log(f"    📂 {d}/ ({dir_file_count} 个文件)\n")
                             if len(dirs) > 20:
                                 log(f"    ... 还有 {len(dirs) - 20} 个目录\n")
+                            log(f"\n")
 
                         if files:
-                            log("  📄 根目录文件列表：\n")
+                            log("  📄 根目录下的文件列表：\n")
                             for f in sorted(files)[:30]:  # 最多显示30个
                                 file_path_full = os.path.join(extract_to, f)
                                 if os.path.isfile(file_path_full):
@@ -1460,25 +1498,58 @@ class BuildManager:
                                         f_size_str = f"{size} B"
                                     elif size < 1024 * 1024:
                                         f_size_str = f"{size / 1024:.2f} KB"
-                                    else:
+                                    elif size < 1024 * 1024 * 1024:
                                         f_size_str = f"{size / (1024 * 1024):.2f} MB"
-                                    log(f"    - {f} ({f_size_str})\n")
+                                    else:
+                                        f_size_str = f"{size / (1024 * 1024 * 1024):.2f} GB"
+                                    log(f"    📄 {f} ({f_size_str})\n")
                             if len(files) > 30:
                                 log(f"    ... 还有 {len(files) - 30} 个文件\n")
+                            log(f"\n")
+                        
+                        log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+                        log(f"✅ 解压完成，构建上下文已准备就绪\n")
+                        log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
                 except Exception as e:
                     log(f"⚠️  无法列出目录内容: {str(e)}\n")
+                    import traceback
+                    log(f"    {traceback.format_exc()}\n")
 
                 return True
             except Exception as e:
+                log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
                 log(f"❌ 解压失败: {str(e)}\n")
+                import traceback
+                log(f"    {traceback.format_exc()}\n")
+                log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
                 return False
 
         try:
+            log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+            log(f"🚀 开始构建任务\n")
+            log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
             log(f"📦 开始处理上传: {original_filename}\n")
-            log(f"📝 上传的文件名: {original_filename}（在构建上下文中已统一处理）\n")
+            log(f"📝 上传的文件名: {original_filename}\n")
             log(f"🏷️ 镜像名: {full_tag}\n")
             log(f"🧱 模板: {selected_template}\n")
             log(f"📂 项目类型: {project_type}\n")
+            log(f"📁 构建上下文路径: {build_context}\n")
+            
+            # 判断文件类型
+            is_jar = original_filename.lower().endswith(".jar")
+            is_archive = any(
+                original_filename.lower().endswith(ext)
+                for ext in [".zip", ".tar", ".tar.gz", ".tgz"]
+            )
+            
+            if is_archive:
+                log(f"📦 文件类型: 压缩包\n")
+                log(f"🔧 解压选项: {'已启用（将解压到构建根目录）' if extract_archive else '未启用（保持压缩包原样）'}\n")
+            elif is_jar:
+                log(f"📦 文件类型: JAR 文件\n")
+            else:
+                log(f"📦 文件类型: 普通文件\n")
+            log(f"\n")
 
             # === 模拟模式 ===
             if not DOCKER_AVAILABLE:
@@ -1495,29 +1566,44 @@ class BuildManager:
                 if is_archive:
                     # 压缩包：根据用户选择决定是否解压
                     file_path = os.path.join(build_context, original_filename)
+                    log(f"🧪 模拟模式：保存压缩包文件...\n")
+                    log(f"  构建上下文路径: {build_context}\n")
+                    log(f"  压缩包文件路径: {file_path}\n")
+                    
                     with open(file_path, "wb") as f:
                         f.write(file_data)
+                    
+                    file_size = os.path.getsize(file_path)
+                    if file_size < 1024:
+                        file_size_str = f"{file_size} B"
+                    elif file_size < 1024 * 1024:
+                        file_size_str = f"{file_size / 1024:.2f} KB"
+                    else:
+                        file_size_str = f"{file_size / (1024 * 1024):.2f} MB"
+                    log(f"  文件大小: {file_size_str}\n")
+                    log(f"✅ 模拟模式：压缩包文件保存完成\n\n")
 
                     if extract_archive:
                         # 用户选择解压
-                        log(
-                            f"🧪 模拟模式：检测到压缩包: {original_filename}，开始解压...\n"
-                        )
+                        log(f"🧪 模拟模式：解压选项已启用（将解压到构建根目录）\n")
                         if do_extract_archive(file_path, build_context):
                             log(
                                 f"🧪 模拟模式：压缩包已解压到构建上下文根目录（原始文件名: {original_filename}）\n"
                             )
                             try:
                                 os.remove(file_path)
+                                log(f"🧪 模拟模式：原始压缩包文件已删除\n\n")
                             except:
                                 pass
                         else:
                             log("⚠️ 模拟模式：解压失败（不支持的格式）\n")
                     else:
                         # 用户选择不解压，保持压缩包原样
+                        log(f"🧪 模拟模式：解压选项未启用（保持压缩包原样）\n")
                         log(
                             f"🧪 模拟模式：压缩包已保存: {original_filename}（未解压，保持原样）\n"
                         )
+                        log(f"  构建时将使用压缩包文件本身\n\n")
                 elif is_jar:
                     # JAR 文件：保存为固定名称 app.jar
                     with open(os.path.join(build_context, "app.jar"), "wb") as f:
@@ -1580,27 +1666,43 @@ class BuildManager:
             if is_archive:
                 # 压缩包：根据用户选择决定是否解压
                 file_path = os.path.join(build_context, original_filename)
+                log(f"📦 保存压缩包文件到构建上下文...\n")
+                log(f"  构建上下文路径: {build_context}\n")
+                log(f"  压缩包文件路径: {file_path}\n")
+                
                 with open(file_path, "wb") as f:
                     f.write(file_data)
+                
+                file_size = os.path.getsize(file_path)
+                if file_size < 1024:
+                    file_size_str = f"{file_size} B"
+                elif file_size < 1024 * 1024:
+                    file_size_str = f"{file_size / 1024:.2f} KB"
+                else:
+                    file_size_str = f"{file_size / (1024 * 1024):.2f} MB"
+                log(f"  文件大小: {file_size_str}\n")
+                log(f"✅ 压缩包文件保存完成\n\n")
 
                 if extract_archive:
                     # 用户选择解压
-                    log(f"📦 检测到压缩包: {original_filename}，开始解压...\n")
+                    log(f"🔧 解压选项: 已启用（将解压到构建根目录）\n")
                     if do_extract_archive(file_path, build_context):
                         # 解压成功，删除临时文件
-                        log(
-                            f"✅ 压缩包已解压到构建上下文根目录（原始文件名: {original_filename}）\n"
-                        )
+                        log(f"🗑️  删除原始压缩包文件: {original_filename}\n")
                         try:
                             os.remove(file_path)
-                        except:
-                            pass
+                            log(f"✅ 原始压缩包文件已删除\n\n")
+                        except Exception as e:
+                            log(f"⚠️  删除原始压缩包文件失败: {str(e)}\n")
                     else:
                         log(f"❌ 解压失败: {original_filename}\n")
+                        self.task_manager.update_task_status(task_id, "failed")
                         return
                 else:
                     # 用户选择不解压，保持压缩包原样
+                    log(f"🔧 解压选项: 未启用（保持压缩包原样）\n")
                     log(f"📦 压缩包已保存: {original_filename}（未解压，保持原样）\n")
+                    log(f"  构建时将使用压缩包文件本身\n\n")
             elif is_jar:
                 # JAR 文件：保存为固定名称 app.jar
                 jar_path = os.path.join(build_context, "app.jar")

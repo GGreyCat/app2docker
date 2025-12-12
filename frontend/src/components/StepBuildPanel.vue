@@ -130,6 +130,24 @@
               formatFileSize(buildConfig.file.size)
             }})
           </div>
+          <!-- 解压选项（仅压缩包显示） -->
+          <div
+            v-if="buildConfig.file && isArchiveFile(buildConfig.file.name)"
+            class="form-check mt-3"
+          >
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="extractArchiveCheck"
+              v-model="buildConfig.extractArchive"
+            />
+            <label class="form-check-label" for="extractArchiveCheck">
+              <i class="fas fa-folder-open"></i> 解压到构建根目录
+            </label>
+            <div class="form-text small text-muted">
+              解压后压缩包内容将提取到构建根目录，压缩包文件将被删除
+            </div>
+          </div>
           <div class="form-text small text-muted">
             <i class="fas fa-info-circle"></i> 支持 .jar 文件或
             .zip、.tar、.tar.gz 压缩包
@@ -1635,6 +1653,7 @@ const buildConfig = ref({
   selectedService: "", // 单服务推送模式选中的服务（单选）
   servicePushConfig: {},
   serviceTemplateParams: {}, // 每个服务的模板参数 {serviceName: {paramName: value}}
+  extractArchive: true, // 是否解压压缩包（默认解压）
 });
 
 // 数据源相关
@@ -1814,7 +1833,21 @@ function handleFileChange(e) {
       .replace(/[^a-z0-9]/g, "-");
     // 文件上传模式不支持项目 Dockerfile
     buildConfig.value.useProjectDockerfile = false;
+    // 如果是压缩包，默认启用解压选项
+    if (isArchiveFile(buildConfig.value.file.name)) {
+      buildConfig.value.extractArchive = true;
+    }
   }
+}
+
+// 判断文件是否是压缩包
+function isArchiveFile(fileName) {
+  if (!fileName) return false;
+  const lowerName = fileName.toLowerCase();
+  return lowerName.endsWith(".zip") ||
+         lowerName.endsWith(".tar") ||
+         lowerName.endsWith(".tar.gz") ||
+         lowerName.endsWith(".tgz");
 }
 
 function formatFileSize(bytes) {
@@ -2924,6 +2957,12 @@ async function startBuild() {
       formData.append("tag", buildConfig.value.tag || "latest");
       if (buildConfig.value.push) {
         formData.append("push", "on");
+      }
+      // 添加解压选项（默认解压）
+      if (buildConfig.value.extractArchive !== undefined) {
+        formData.append("extract_archive", buildConfig.value.extractArchive ? "on" : "off");
+      } else {
+        formData.append("extract_archive", "on"); // 默认解压
       }
       if (Object.keys(buildConfig.value.templateParams).length > 0) {
         formData.append(
