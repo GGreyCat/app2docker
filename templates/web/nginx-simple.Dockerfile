@@ -12,8 +12,9 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
 # 复制静态文件到 nginx 默认目录
 COPY . /usr/share/nginx/html/
 
-# 修改默认端口
-RUN sed -i 's/listen       80;/listen       {{EXPOSE_PORT:80}};/g' /etc/nginx/conf.d/default.conf
+
+# 打印目录查看
+RUN ls -la /usr/share/nginx/html/
 
 # 暴露端口
 EXPOSE {{EXPOSE_PORT:80}}
