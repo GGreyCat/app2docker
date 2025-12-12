@@ -3827,13 +3827,13 @@ watch(
       //     body: JSON.stringify({
       //       location: "PipelinePanel.vue:1834",
       //       message: "Dockerfile name changed, reloading services",
-            data: { old: oldName, new: newName },
-            timestamp: Date.now(),
-            sessionId: "debug-session",
-            runId: "run1",
-            hypothesisId: "D",
-          // }),
-        // }
+      //       data: { old: oldName, new: newName },
+      //       timestamp: Date.now(),
+      //       sessionId: "debug-session",
+      //       runId: "run1",
+      //       hypothesisId: "D",
+      //     }),
+      //   }
       // ).catch(() => {});
       // #endregion
       // Dockerfile 名称变化是用户主动切换，需要重新识别服务
@@ -4239,20 +4239,20 @@ function editPipeline(pipeline) {
   //   method: "POST",
   //   headers: { "Content-Type": "application/json" },
   //   body: JSON.stringify({
-      location: "PipelinePanel.vue:1956",
-      message: "formData initialized",
-      data: {
-        dockerfile_name: formData.value.dockerfile_name,
-        template: formData.value.template,
-        use_project_dockerfile: formData.value.use_project_dockerfile,
-        branch: formData.value.branch,
-      },
-      timestamp: Date.now(),
-      sessionId: "debug-session",
-      runId: "run1",
-      hypothesisId: "B",
-    }),
-  }).catch(() => {});
+  //     location: "PipelinePanel.vue:1956",
+  //     message: "formData initialized",
+  //     data: {
+  //       dockerfile_name: formData.value.dockerfile_name,
+  //       template: formData.value.template,
+  //       use_project_dockerfile: formData.value.use_project_dockerfile,
+  //       branch: formData.value.branch,
+  //     },
+  //     timestamp: Date.now(),
+  //     sessionId: "debug-session",
+  //     runId: "run1",
+  //     hypothesisId: "B",
+  //   }),
+  // }).catch(() => {});
   // #endregion
 
   // 如果数据源有分支信息，加载分支列表
@@ -4294,18 +4294,18 @@ function editPipeline(pipeline) {
   //   method: "POST",
   //   headers: { "Content-Type": "application/json" },
   //   body: JSON.stringify({
-      location: "PipelinePanel.vue:1980",
-      message: "editPipeline completed",
-      data: {
-        final_dockerfile_name: formData.value.dockerfile_name,
-        final_template: formData.value.template,
-      },
-      timestamp: Date.now(),
-      sessionId: "debug-session",
-      runId: "run1",
-      hypothesisId: "B",
-    }),
-  }).catch(() => {});
+  //     location: "PipelinePanel.vue:1980",
+  //     message: "editPipeline completed",
+  //     data: {
+  //       final_dockerfile_name: formData.value.dockerfile_name,
+  //       final_template: formData.value.template,
+  //     },
+  //     timestamp: Date.now(),
+  //     sessionId: "debug-session",
+  //     runId: "run1",
+  //     hypothesisId: "B",
+  //   }),
+  // }).catch(() => {});
   // #endregion
 }
 
@@ -5016,22 +5016,22 @@ async function scanDockerfiles(
   //   method: "POST",
   //   headers: { "Content-Type": "application/json" },
   //   body: JSON.stringify({
-      location: "PipelinePanel.vue:2316",
-      message: "scanDockerfiles started",
-      data: {
-        source_id: formData.value.source_id,
-        git_url: formData.value.git_url,
-        dockerfile_name: formData.value.dockerfile_name,
-        branch: formData.value.branch,
-        keep_current_selection: keepCurrentSelection,
-        editing: !!editingPipeline.value,
-      },
-      timestamp: Date.now(),
-      sessionId: "debug-session",
-      runId: "run1",
-      hypothesisId: "A",
-    }),
-  }).catch(() => {});
+  //     location: "PipelinePanel.vue:2316",
+  //     message: "scanDockerfiles started",
+  //     data: {
+  //       source_id: formData.value.source_id,
+  //       git_url: formData.value.git_url,
+  //       dockerfile_name: formData.value.dockerfile_name,
+  //       branch: formData.value.branch,
+  //       keep_current_selection: keepCurrentSelection,
+  //       editing: !!editingPipeline.value,
+  //     },
+  //     timestamp: Date.now(),
+  //     sessionId: "debug-session",
+  //     runId: "run1",
+  //     hypothesisId: "A",
+  //   }),
+  // }).catch(() => {});
   // #endregion
   const sourceId = formData.value.source_id;
   if (!sourceId && !formData.value.git_url) {
@@ -5123,24 +5123,24 @@ async function scanDockerfiles(
 
     // #region agent log (disabled - causes connection errors)
     // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "PipelinePanel.vue:2402",
-        message: "Dockerfiles scanned",
-        data: {
-          count: availableDockerfiles.value.length,
-          saved_dockerfile_name: savedDockerfileName,
-          available_paths: availableDockerfiles.value.map((df) => df.path),
-          is_editing: isEditing,
-          keep_current_selection: keepCurrentSelection,
-        },
-        timestamp: Date.now(),
-        sessionId: "debug-session",
-        runId: "run1",
-        hypothesisId: "A",
-      }),
-    }).catch(() => {});
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   body: JSON.stringify({
+    //     location: "PipelinePanel.vue:2402",
+    //     message: "Dockerfiles scanned",
+    //     data: {
+    //       count: availableDockerfiles.value.length,
+    //       saved_dockerfile_name: savedDockerfileName,
+    //       available_paths: availableDockerfiles.value.map((df) => df.path),
+    //       is_editing: isEditing,
+    //       keep_current_selection: keepCurrentSelection,
+    //     },
+    //     timestamp: Date.now(),
+    //     sessionId: "debug-session",
+    //     runId: "run1",
+    //     hypothesisId: "A",
+    //   }),
+    // }).catch(() => {});
     // #endregion
 
     // 在编辑模式下，始终保持原有的 dockerfile_name，不进行任何自动选择
@@ -5158,20 +5158,20 @@ async function scanDockerfiles(
       //     method: "POST",
       //     headers: { "Content-Type": "application/json" },
       //     body: JSON.stringify({
-            location: "PipelinePanel.vue:2412",
-            message:
-              "Dockerfile name preserved (editing mode or has saved selection)",
-            data: {
-              dockerfile_name: savedDockerfileName,
-              in_list: currentInList,
-              is_editing: isEditing,
-            },
-            timestamp: Date.now(),
-            sessionId: "debug-session",
-            runId: "run1",
-            hypothesisId: "A",
-          // }),
-        // }
+      //       location: "PipelinePanel.vue:2412",
+      //       message:
+      //         "Dockerfile name preserved (editing mode or has saved selection)",
+      //       data: {
+      //         dockerfile_name: savedDockerfileName,
+      //         in_list: currentInList,
+      //         is_editing: isEditing,
+      //       },
+      //       timestamp: Date.now(),
+      //       sessionId: "debug-session",
+      //       runId: "run1",
+      //       hypothesisId: "A",
+      //     }),
+      //   }
       // ).catch(() => {});
       // #endregion
     } else if (availableDockerfiles.value.length > 0) {
@@ -5188,27 +5188,27 @@ async function scanDockerfiles(
         formData.value.dockerfile_name = rootDockerfile
           ? "Dockerfile"
           : availableDockerfiles.value[0].path;
-        // #region agent log
-        fetch(
-          "http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              location: "PipelinePanel.vue:2420",
-              message:
-                "Dockerfile name auto-selected (new mode, no previous selection)",
-              data: {
-                new: formData.value.dockerfile_name,
-                old: savedDockerfileName,
-              },
-              timestamp: Date.now(),
-              sessionId: "debug-session",
-              runId: "run1",
-              hypothesisId: "A",
-            }),
-          }
-        ).catch(() => {});
+        // #region agent log (disabled - causes connection errors)
+        // fetch(
+        //   "http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e",
+        //   {
+        //     method: "POST",
+        //     headers: { "Content-Type": "application/json" },
+        //     body: JSON.stringify({
+        //       location: "PipelinePanel.vue:2420",
+        //       message:
+        //         "Dockerfile name auto-selected (new mode, no previous selection)",
+        //       data: {
+        //         new: formData.value.dockerfile_name,
+        //         old: savedDockerfileName,
+        //       },
+        //       timestamp: Date.now(),
+        //       sessionId: "debug-session",
+        //       runId: "run1",
+        //       hypothesisId: "A",
+        //     }),
+        //   }
+        // ).catch(() => {});
         // #endregion
       } else {
         // 有保存的选择（非编辑模式），检查是否在新列表中，如果在则保持，否则选择第一个
@@ -5225,28 +5225,28 @@ async function scanDockerfiles(
             ? "Dockerfile"
             : availableDockerfiles.value[0].path;
         }
-        // #region agent log
-        fetch(
-          "http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              location: "PipelinePanel.vue:2430",
-              message:
-                "Dockerfile name handled (new mode with previous selection)",
-              data: {
-                saved: savedDockerfileName,
-                final: formData.value.dockerfile_name,
-                in_list: currentInList,
-              },
-              timestamp: Date.now(),
-              sessionId: "debug-session",
-              runId: "run1",
-              hypothesisId: "A",
-            }),
-          }
-        ).catch(() => {});
+        // #region agent log (disabled - causes connection errors)
+        // fetch(
+        //   "http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e",
+        //   {
+        //     method: "POST",
+        //     headers: { "Content-Type": "application/json" },
+        //     body: JSON.stringify({
+        //       location: "PipelinePanel.vue:2430",
+        //       message:
+        //         "Dockerfile name handled (new mode with previous selection)",
+        //       data: {
+        //         saved: savedDockerfileName,
+        //         final: formData.value.dockerfile_name,
+        //         in_list: currentInList,
+        //       },
+        //       timestamp: Date.now(),
+        //       sessionId: "debug-session",
+        //       runId: "run1",
+        //       hypothesisId: "A",
+        //     }),
+        //   }
+        // ).catch(() => {});
         // #endregion
       }
       // 扫描后重新加载服务（如果是用户主动切换 Dockerfile，传入 true）
@@ -5268,39 +5268,39 @@ async function scanDockerfiles(
     // availableDockerfiles.value 保持原值
     // #region agent log (disabled - causes connection errors)
     // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "PipelinePanel.vue:2404",
-        message: "scanDockerfiles error",
-        data: {
-          error: error.message,
-          response: error.response?.data,
-          preserved_list_count: availableDockerfiles.value.length,
-        },
-        timestamp: Date.now(),
-        sessionId: "debug-session",
-        runId: "run1",
-        hypothesisId: "A",
-      }),
-    }).catch(() => {});
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   body: JSON.stringify({
+    //     location: "PipelinePanel.vue:2404",
+    //     message: "scanDockerfiles error",
+    //     data: {
+    //       error: error.message,
+    //       response: error.response?.data,
+    //       preserved_list_count: availableDockerfiles.value.length,
+    //     },
+    //     timestamp: Date.now(),
+    //     sessionId: "debug-session",
+    //     runId: "run1",
+    //     hypothesisId: "A",
+    //   }),
+    // }).catch(() => {});
     // #endregion
   } finally {
     scanningDockerfiles.value = false;
     // #region agent log (disabled - causes connection errors)
     // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "PipelinePanel.vue:2320",
-        message: "scanDockerfiles completed",
-        data: { final_dockerfile_name: formData.value.dockerfile_name },
-        timestamp: Date.now(),
-        sessionId: "debug-session",
-        runId: "run1",
-        hypothesisId: "A",
-      }),
-    }).catch(() => {});
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   body: JSON.stringify({
+    //     location: "PipelinePanel.vue:2320",
+    //     message: "scanDockerfiles completed",
+    //     data: { final_dockerfile_name: formData.value.dockerfile_name },
+    //     timestamp: Date.now(),
+    //     sessionId: "debug-session",
+    //     runId: "run1",
+    //     hypothesisId: "A",
+    //   }),
+    // }).catch(() => {});
     // #endregion
   }
 }
@@ -5914,21 +5914,21 @@ async function onDockerfileSourceChange() {
   //   method: "POST",
   //   headers: { "Content-Type": "application/json" },
   //   body: JSON.stringify({
-      location: "PipelinePanel.vue:2744",
-      message: "Dockerfile source changed",
-      data: {
-        use_project_dockerfile: formData.value.use_project_dockerfile,
-        template: formData.value.template,
-        dockerfile_name: formData.value.dockerfile_name,
-        git_url: formData.value.git_url,
-        branch: formData.value.branch,
-      },
-      timestamp: Date.now(),
-      sessionId: "debug-session",
-      runId: "run1",
-      hypothesisId: "D",
-    }),
-  }).catch(() => {});
+  //     location: "PipelinePanel.vue:2744",
+  //     message: "Dockerfile source changed",
+  //     data: {
+  //       use_project_dockerfile: formData.value.use_project_dockerfile,
+  //       template: formData.value.template,
+  //       dockerfile_name: formData.value.dockerfile_name,
+  //       git_url: formData.value.git_url,
+  //       branch: formData.value.branch,
+  //     },
+  //     timestamp: Date.now(),
+  //     sessionId: "debug-session",
+  //     runId: "run1",
+  //     hypothesisId: "D",
+  //   }),
+  // }).catch(() => {});
   // #endregion
   if (formData.value.use_project_dockerfile) {
     // 使用项目 Dockerfile 时，清空模板
