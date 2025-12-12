@@ -3818,23 +3818,23 @@ watch(
       oldName
     ) {
       // 确保是真正的变化（不是初始化）
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            location: "PipelinePanel.vue:1834",
-            message: "Dockerfile name changed, reloading services",
+      // #region agent log (disabled - causes connection errors)
+      // fetch(
+      //   "http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e",
+      //   {
+      //     method: "POST",
+      //     headers: { "Content-Type": "application/json" },
+      //     body: JSON.stringify({
+      //       location: "PipelinePanel.vue:1834",
+      //       message: "Dockerfile name changed, reloading services",
             data: { old: oldName, new: newName },
             timestamp: Date.now(),
             sessionId: "debug-session",
             runId: "run1",
             hypothesisId: "D",
-          }),
-        }
-      ).catch(() => {});
+          // }),
+        // }
+      // ).catch(() => {});
       // #endregion
       // Dockerfile 名称变化是用户主动切换，需要重新识别服务
       loadServices(true);
@@ -4149,27 +4149,27 @@ function showCreateModal() {
 }
 
 function editPipeline(pipeline) {
-  // #region agent log
-  fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "PipelinePanel.vue:1918",
-      message: "editPipeline started",
-      data: {
-        pipeline_id: pipeline.id,
-        pipeline_name: pipeline.name,
-        dockerfile_name: pipeline.dockerfile_name,
-        template: pipeline.template,
-        use_project_dockerfile: pipeline.use_project_dockerfile,
-        project_type: pipeline.project_type,
-      },
-      timestamp: Date.now(),
-      sessionId: "debug-session",
-      runId: "run1",
-      hypothesisId: "B",
-    }),
-  }).catch(() => {});
+  // #region agent log (disabled - causes connection errors)
+  // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
+  //   method: "POST",
+  //   headers: { "Content-Type": "application/json" },
+  //   body: JSON.stringify({
+  //     location: "PipelinePanel.vue:1918",
+  //     message: "editPipeline started",
+  //     data: {
+  //       pipeline_id: pipeline.id,
+  //       pipeline_name: pipeline.name,
+  //       dockerfile_name: pipeline.dockerfile_name,
+  //       template: pipeline.template,
+  //       use_project_dockerfile: pipeline.use_project_dockerfile,
+  //       project_type: pipeline.project_type,
+  //     },
+  //     timestamp: Date.now(),
+  //     sessionId: "debug-session",
+  //     runId: "run1",
+  //     hypothesisId: "B",
+  //   }),
+  // }).catch(() => {});
   // #endregion
 
   // 先重置Tab，确保显示基本信息Tab，而不是自动跳转到build Tab
@@ -4234,11 +4234,11 @@ function editPipeline(pipeline) {
     resource_package_configs: pipeline.resource_package_configs || [],
   };
 
-  // #region agent log
-  fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  // #region agent log (disabled - causes connection errors)
+  // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
+  //   method: "POST",
+  //   headers: { "Content-Type": "application/json" },
+  //   body: JSON.stringify({
       location: "PipelinePanel.vue:1956",
       message: "formData initialized",
       data: {
@@ -4289,11 +4289,11 @@ function editPipeline(pipeline) {
 
   showModal.value = true;
 
-  // #region agent log
-  fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  // #region agent log (disabled - causes connection errors)
+  // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
+  //   method: "POST",
+  //   headers: { "Content-Type": "application/json" },
+  //   body: JSON.stringify({
       location: "PipelinePanel.vue:1980",
       message: "editPipeline completed",
       data: {
@@ -5011,11 +5011,11 @@ async function scanDockerfiles(
   keepCurrentSelection = true,
   forceRefresh = false
 ) {
-  // #region agent log
-  fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  // #region agent log (disabled - causes connection errors)
+  // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
+  //   method: "POST",
+  //   headers: { "Content-Type": "application/json" },
+  //   body: JSON.stringify({
       location: "PipelinePanel.vue:2316",
       message: "scanDockerfiles started",
       data: {
@@ -5121,8 +5121,8 @@ async function scanDockerfiles(
       // 否则保持原列表不变
     }
 
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
+    // #region agent log (disabled - causes connection errors)
+    // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -5151,13 +5151,13 @@ async function scanDockerfiles(
       const currentInList = availableDockerfiles.value.some(
         (df) => df.path === savedDockerfileName
       );
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+      // #region agent log (disabled - causes connection errors)
+      // fetch(
+      //   "http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e",
+      //   {
+      //     method: "POST",
+      //     headers: { "Content-Type": "application/json" },
+      //     body: JSON.stringify({
             location: "PipelinePanel.vue:2412",
             message:
               "Dockerfile name preserved (editing mode or has saved selection)",
@@ -5170,9 +5170,9 @@ async function scanDockerfiles(
             sessionId: "debug-session",
             runId: "run1",
             hypothesisId: "A",
-          }),
-        }
-      ).catch(() => {});
+          // }),
+        // }
+      // ).catch(() => {});
       // #endregion
     } else if (availableDockerfiles.value.length > 0) {
       // 新建模式且没有保存的选择：自动选择第一个
@@ -5266,8 +5266,8 @@ async function scanDockerfiles(
       error.response?.data?.detail || "扫描 Dockerfile 失败";
     // 扫描失败时不清空列表，保持之前的列表（如果有），这样已保存的值还能显示
     // availableDockerfiles.value 保持原值
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
+    // #region agent log (disabled - causes connection errors)
+    // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -5287,8 +5287,8 @@ async function scanDockerfiles(
     // #endregion
   } finally {
     scanningDockerfiles.value = false;
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
+    // #region agent log (disabled - causes connection errors)
+    // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -5909,11 +5909,11 @@ function updateResourcePackagePath(packageId, targetPath) {
 
 // Dockerfile 来源变化处理
 async function onDockerfileSourceChange() {
-  // #region agent log
-  fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  // #region agent log (disabled - causes connection errors)
+  // fetch("http://127.0.0.1:7242/ingest/eabdd98b-6281-463e-ab2f-b0646adc831e", {
+  //   method: "POST",
+  //   headers: { "Content-Type": "application/json" },
+  //   body: JSON.stringify({
       location: "PipelinePanel.vue:2744",
       message: "Dockerfile source changed",
       data: {
