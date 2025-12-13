@@ -201,92 +201,96 @@
               <div class="col-md-6">
                 <h6 class="border-bottom pb-2">基本信息</h6>
                 <table class="table table-sm">
-                  <tr>
-                    <td width="40%"><strong>主机名称:</strong></td>
-                    <td>{{ selectedHost.name }}</td>
-                  </tr>
-                  <tr>
-                    <td><strong>连接状态:</strong></td>
-                    <td>
-                      <span :class="getStatusBadgeClass(selectedHost.status)" class="badge">
-                        <i :class="getStatusIcon(selectedHost.status)"></i>
-                        {{ getStatusText(selectedHost.status) }}
-                      </span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td><strong>Token:</strong></td>
-                    <td>
-                      <code class="small">{{ selectedHost.token }}</code>
-                      <button class="btn btn-sm btn-outline-secondary ms-2" @click="copyToClipboard(selectedHost.token)">
-                        <i class="fas fa-copy"></i>
-                      </button>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td><strong>创建时间:</strong></td>
-                    <td>{{ formatTime(selectedHost.created_at) }}</td>
-                  </tr>
-                  <tr>
-                    <td><strong>最后心跳:</strong></td>
-                    <td>{{ selectedHost.last_heartbeat ? formatTime(selectedHost.last_heartbeat) : '-' }}</td>
-                  </tr>
-                  <tr>
-                    <td><strong>描述:</strong></td>
-                    <td>{{ selectedHost.description || '-' }}</td>
-                  </tr>
+                  <tbody>
+                    <tr>
+                      <td width="40%"><strong>主机名称:</strong></td>
+                      <td>{{ selectedHost.name }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>连接状态:</strong></td>
+                      <td>
+                        <span :class="getStatusBadgeClass(selectedHost.status)" class="badge">
+                          <i :class="getStatusIcon(selectedHost.status)"></i>
+                          {{ getStatusText(selectedHost.status) }}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><strong>Token:</strong></td>
+                      <td>
+                        <code class="small">{{ selectedHost.token }}</code>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" @click="copyToClipboard(selectedHost.token)">
+                          <i class="fas fa-copy"></i>
+                        </button>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><strong>创建时间:</strong></td>
+                      <td>{{ formatTime(selectedHost.created_at) }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>最后心跳:</strong></td>
+                      <td>{{ selectedHost.last_heartbeat ? formatTime(selectedHost.last_heartbeat) : '-' }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>描述:</strong></td>
+                      <td>{{ selectedHost.description || '-' }}</td>
+                    </tr>
+                  </tbody>
                 </table>
               </div>
               <div class="col-md-6">
                 <h6 class="border-bottom pb-2">主机信息</h6>
                 <div v-if="selectedHost.host_info && Object.keys(selectedHost.host_info).length > 0">
                   <table class="table table-sm">
-                    <tr v-if="selectedHost.host_info.hostname">
-                      <td width="40%"><strong>主机名:</strong></td>
-                      <td>{{ selectedHost.host_info.hostname }}</td>
-                    </tr>
-                    <tr v-if="selectedHost.host_info.ip">
-                      <td><strong>IP地址:</strong></td>
-                      <td>{{ selectedHost.host_info.ip }}</td>
-                    </tr>
-                    <tr v-if="selectedHost.host_info.os">
-                      <td><strong>操作系统:</strong></td>
-                      <td>{{ selectedHost.host_info.os }}</td>
-                    </tr>
-                    <tr v-if="selectedHost.host_info.kernel">
-                      <td><strong>内核版本:</strong></td>
-                      <td>{{ selectedHost.host_info.kernel }}</td>
-                    </tr>
-                    <tr v-if="selectedHost.host_info.cpu_usage !== undefined">
-                      <td><strong>CPU使用率:</strong></td>
-                      <td>
-                        <div class="progress" style="height: 20px;">
-                          <div class="progress-bar" :style="{ width: selectedHost.host_info.cpu_usage + '%' }">
-                            {{ selectedHost.host_info.cpu_usage }}%
+                    <tbody>
+                      <tr v-if="selectedHost.host_info.hostname">
+                        <td width="40%"><strong>主机名:</strong></td>
+                        <td>{{ selectedHost.host_info.hostname }}</td>
+                      </tr>
+                      <tr v-if="selectedHost.host_info.ip">
+                        <td><strong>IP地址:</strong></td>
+                        <td>{{ selectedHost.host_info.ip }}</td>
+                      </tr>
+                      <tr v-if="selectedHost.host_info.os">
+                        <td><strong>操作系统:</strong></td>
+                        <td>{{ selectedHost.host_info.os }}</td>
+                      </tr>
+                      <tr v-if="selectedHost.host_info.kernel">
+                        <td><strong>内核版本:</strong></td>
+                        <td>{{ selectedHost.host_info.kernel }}</td>
+                      </tr>
+                      <tr v-if="selectedHost.host_info.cpu_usage !== undefined">
+                        <td><strong>CPU使用率:</strong></td>
+                        <td>
+                          <div class="progress" style="height: 20px;">
+                            <div class="progress-bar" :style="{ width: selectedHost.host_info.cpu_usage + '%' }">
+                              {{ selectedHost.host_info.cpu_usage }}%
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                    </tr>
-                    <tr v-if="selectedHost.host_info.memory_usage !== undefined">
-                      <td><strong>内存使用率:</strong></td>
-                      <td>
-                        <div class="progress" style="height: 20px;">
-                          <div class="progress-bar bg-warning" :style="{ width: selectedHost.host_info.memory_usage + '%' }">
-                            {{ selectedHost.host_info.memory_usage }}%
+                        </td>
+                      </tr>
+                      <tr v-if="selectedHost.host_info.memory_usage !== undefined">
+                        <td><strong>内存使用率:</strong></td>
+                        <td>
+                          <div class="progress" style="height: 20px;">
+                            <div class="progress-bar bg-warning" :style="{ width: selectedHost.host_info.memory_usage + '%' }">
+                              {{ selectedHost.host_info.memory_usage }}%
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                    </tr>
-                    <tr v-if="selectedHost.host_info.disk_usage !== undefined">
-                      <td><strong>磁盘使用率:</strong></td>
-                      <td>
-                        <div class="progress" style="height: 20px;">
-                          <div class="progress-bar bg-danger" :style="{ width: selectedHost.host_info.disk_usage + '%' }">
-                            {{ selectedHost.host_info.disk_usage }}%
+                        </td>
+                      </tr>
+                      <tr v-if="selectedHost.host_info.disk_usage !== undefined">
+                        <td><strong>磁盘使用率:</strong></td>
+                        <td>
+                          <div class="progress" style="height: 20px;">
+                            <div class="progress-bar bg-danger" :style="{ width: selectedHost.host_info.disk_usage + '%' }">
+                              {{ selectedHost.host_info.disk_usage }}%
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                    </tbody>
                   </table>
                 </div>
                 <div v-else class="text-muted">
@@ -299,22 +303,24 @@
                 <h6 class="border-bottom pb-2">Docker信息</h6>
                 <div v-if="selectedHost.docker_info && Object.keys(selectedHost.docker_info).length > 0">
                   <table class="table table-sm">
-                    <tr v-if="selectedHost.docker_info.version">
-                      <td width="40%"><strong>Docker版本:</strong></td>
-                      <td>{{ selectedHost.docker_info.version }}</td>
-                    </tr>
-                    <tr v-if="selectedHost.docker_info.containers !== undefined">
-                      <td><strong>容器数量:</strong></td>
-                      <td>{{ selectedHost.docker_info.containers }}</td>
-                    </tr>
-                    <tr v-if="selectedHost.docker_info.images !== undefined">
-                      <td><strong>镜像数量:</strong></td>
-                      <td>{{ selectedHost.docker_info.images }}</td>
-                    </tr>
-                    <tr v-if="selectedHost.docker_info.networks !== undefined">
-                      <td><strong>网络数量:</strong></td>
-                      <td>{{ selectedHost.docker_info.networks }}</td>
-                    </tr>
+                    <tbody>
+                      <tr v-if="selectedHost.docker_info.version">
+                        <td width="40%"><strong>Docker版本:</strong></td>
+                        <td>{{ selectedHost.docker_info.version }}</td>
+                      </tr>
+                      <tr v-if="selectedHost.docker_info.containers !== undefined">
+                        <td><strong>容器数量:</strong></td>
+                        <td>{{ selectedHost.docker_info.containers }}</td>
+                      </tr>
+                      <tr v-if="selectedHost.docker_info.images !== undefined">
+                        <td><strong>镜像数量:</strong></td>
+                        <td>{{ selectedHost.docker_info.images }}</td>
+                      </tr>
+                      <tr v-if="selectedHost.docker_info.networks !== undefined">
+                        <td><strong>网络数量:</strong></td>
+                        <td>{{ selectedHost.docker_info.networks }}</td>
+                      </tr>
+                    </tbody>
                   </table>
                 </div>
                 <div v-else class="text-muted">
