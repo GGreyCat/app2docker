@@ -979,6 +979,30 @@ async def verify_git_repo(
             "dockerfiles": dockerfiles,  # 扫描到的 Dockerfile 列表
         }
 
+        # 如果提供了 source_id，更新数据源的缓存（即使 save_as_source=False）
+        if source_id:
+            try:
+                source_manager = GitSourceManager()
+                source = source_manager.get_source(source_id, include_password=False)
+                if source:
+                    # 更新数据源的分支、标签和默认分支缓存
+                    source_manager.update_source(
+                        source_id=source_id,
+                        branches=result["branches"],
+                        tags=result["tags"],
+                        default_branch=result["default_branch"],
+                    )
+                    # 更新扫描到的 Dockerfile
+                    if result.get("dockerfiles"):
+                        for dockerfile_path, content in result["dockerfiles"].items():
+                            source_manager.update_dockerfile(
+                                source_id, dockerfile_path, content
+                            )
+                    print(f"✅ 已更新数据源 {source_id} 的缓存（分支、标签、Dockerfile）")
+            except Exception as e:
+                print(f"⚠️ 更新数据源缓存失败: {e}")
+                # 即使更新失败，也继续返回验证结果
+
         # 如果需要保存为数据源
         if save_as_source:
             if not source_name:
