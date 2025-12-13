@@ -96,8 +96,9 @@ async def health_check_api():
 @app.on_event("startup")
 async def startup_event():
     """应用启动时执行"""
-    from backend.config import ensure_config_exists
+    from backend.config import ensure_config_exists, load_config
     from backend.scheduler import start_scheduler
+    from backend.agent_host_manager import AgentHostManager
 
     # 确保配置文件存在
     ensure_config_exists()
@@ -107,6 +108,32 @@ async def startup_event():
     
     # 启动流水线调度器
     start_scheduler()
+    
+    # 自动注册主程序为 Agent
+    try:
+        agent_manager = AgentHostManager()
+        agent_hosts = agent_manager.list_agent_hosts()
+        
+        # 检查是否已存在名为"本地主机"的 Agent
+        local_agent_exists = False
+        for host in agent_hosts:
+            if host.get("name") == "本地主机":
+                local_agent_exists = True
+                print(f"✅ 本地 Agent 已存在: {host.get('host_id')}")
+                break
+        
+        # 如果不存在，创建本地 Agent
+        if not local_agent_exists:
+            local_agent = agent_manager.add_agent_host(
+                name="本地主机",
+                description="主程序自动注册的本地 Agent"
+            )
+            print(f"✅ 已自动注册本地 Agent: {local_agent.get('host_id')}")
+            print(f"   Token: {local_agent.get('token')}")
+    except Exception as e:
+        print(f"⚠️ 自动注册本地 Agent 失败: {e}")
+        import traceback
+        traceback.print_exc()
 
     print("\n" + "=" * 60)
     print("🚀 App2Docker 服务已启动")

@@ -3,7 +3,7 @@
 import os
 import shutil
 import tempfile
-from typing import Optional
+from typing import Optional, List
 from fastapi import (
     APIRouter,
     File,
@@ -45,6 +45,7 @@ from backend.resource_package_manager import ResourcePackageManager
 from backend.host_manager import HostManager
 from backend.agent_host_manager import AgentHostManager
 from backend.websocket_handler import handle_agent_websocket
+from backend.deploy_task_manager import DeployTaskManager
 from backend.config import (
     load_config,
     save_config,
@@ -5938,6 +5939,16 @@ class AgentHostUpdateRequest(BaseModel):
     description: Optional[str] = None
 
 
+class DeployTaskCreateRequest(BaseModel):
+    config_content: str
+    registry: Optional[str] = None
+    tag: Optional[str] = None
+
+
+class DeployTaskExecuteRequest(BaseModel):
+    target_names: Optional[List[str]] = None
+
+
 @router.post("/agent-hosts")
 async def add_agent_host(request: Request, host_req: AgentHostRequest):
     """创建Agent主机"""
@@ -6086,7 +6097,199 @@ async def get_deploy_command(
         raise HTTPException(status_code=500, detail=f"生成部署命令失败: {str(e)}")
 
 
-@router.websocket("/ws/agent/{token}")
-async def websocket_agent_endpoint(websocket: WebSocket, token: str):
-    """Agent WebSocket连接端点"""
+@router.websocket("/ws/agent")
+async def websocket_agent_endpoint(websocket: WebSocket, token: str = Query(...)):
+    """Agent WebSocket连接端点（通过查询参数传递token）"""
     await handle_agent_websocket(websocket, token)
+
+
+# ==================== 部署任务管理 ====================
+
+@router.post("/deploy-tasks")
+async def create_deploy_task(request: Request, task_req: DeployTaskCreateRequest):
+    """创建部署任务"""
+    try:
+        username = get_current_username(request)
+        task_manager = DeployTaskManager()
+        
+        task = task_manager.create_task(
+            config_content=task_req.config_content,
+            registry=task_req.registry,
+            tag=task_req.tag
+        )
+        
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "deploy_task_create",
+            {"task_id": task["task_id"]}
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "task": task
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"创建部署任务失败: {str(e)}")
+
+
+@router.get("/deploy-tasks")
+async def list_deploy_tasks(request: Request):
+    """列出所有部署任务"""
+    try:
+        username = get_current_username(request)
+        task_manager = DeployTaskManager()
+        
+        tasks = task_manager.list_tasks()
+        
+        return JSONResponse({
+            "success": True,
+            "tasks": tasks
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取部署任务列表失败: {str(e)}")
+
+
+@router.get("/deploy-tasks/{task_id}")
+async def get_deploy_task(request: Request, task_id: str):
+    """获取部署任务详情"""
+    try:
+        username = get_current_username(request)
+        task_manager = DeployTaskManager()
+        
+        task = task_manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="部署任务不存在")
+        
+        return JSONResponse({
+            "success": True,
+            "task": task
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取部署任务失败: {str(e)}")
+
+
+@router.post("/deploy-tasks/{task_id}/execute")
+async def execute_deploy_task(
+    request: Request,
+    task_id: str,
+    execute_req: Optional[DeployTaskExecuteRequest] = None
+):
+    """执行部署任务"""
+    try:
+        username = get_current_username(request)
+        task_manager = DeployTaskManager()
+        
+        target_names = None
+        if execute_req and execute_req.target_names:
+            target_names = execute_req.target_names
+        
+        result = await task_manager.execute_task(task_id, target_names=target_names)
+        
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "deploy_task_execute",
+            {"task_id": task_id, "target_names": target_names}
+        )
+        
+        return JSONResponse(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"执行部署任务失败: {str(e)}")
+
+
+@router.post("/deploy-tasks/import")
+async def import_deploy_task(request: Request, file: UploadFile = File(...)):
+    """导入部署任务（从YAML文件）"""
+    try:
+        username = get_current_username(request)
+        
+        # 读取文件内容
+        content = await file.read()
+        config_content = content.decode("utf-8")
+        
+        task_manager = DeployTaskManager()
+        task = task_manager.create_task(config_content=config_content)
+        
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "deploy_task_import",
+            {"task_id": task["task_id"], "filename": file.filename}
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "task": task
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"导入部署任务失败: {str(e)}")
+
+
+@router.get("/deploy-tasks/{task_id}/export")
+async def export_deploy_task(request: Request, task_id: str):
+    """导出部署任务（YAML格式）"""
+    try:
+        username = get_current_username(request)
+        task_manager = DeployTaskManager()
+        
+        task = task_manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="部署任务不存在")
+        
+        config_content = task.get("config_content", "")
+        
+        return PlainTextResponse(
+            content=config_content,
+            media_type="application/x-yaml",
+            headers={
+                "Content-Disposition": f'attachment; filename="deploy-task-{task_id}.yaml"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"导出部署任务失败: {str(e)}")
+
+
+@router.delete("/deploy-tasks/{task_id}")
+async def delete_deploy_task(request: Request, task_id: str):
+    """删除部署任务"""
+    try:
+        username = get_current_username(request)
+        task_manager = DeployTaskManager()
+        
+        success = task_manager.delete_task(task_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="部署任务不存在")
+        
+        # 记录操作日志
+        OperationLogger.log(username, "deploy_task_delete", {"task_id": task_id})
+        
+        return JSONResponse({"success": True, "message": "部署任务已删除"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"删除部署任务失败: {str(e)}")
