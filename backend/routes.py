@@ -4423,29 +4423,63 @@ async def webhook_trigger(webhook_token: str, request: Request):
         else:
             print(f"⚠️ 未能从 payload 中提取分支信息")
 
-        # 检查是否启用分支过滤和使用推送分支
+        # 统一分支策略处理（与手动触发保持一致）
+        # 支持新的webhook_branch_strategy字段，同时兼容旧的webhook_branch_filter和webhook_use_push_branch字段
+        webhook_branch_strategy = pipeline.get("webhook_branch_strategy")
+        webhook_allowed_branches = pipeline.get("webhook_allowed_branches", [])
         webhook_branch_filter = pipeline.get("webhook_branch_filter", False)
-        webhook_use_push_branch = pipeline.get(
-            "webhook_use_push_branch", True
-        )  # 默认为True
+        webhook_use_push_branch = pipeline.get("webhook_use_push_branch", True)
         configured_branch = pipeline.get("branch")
+
+        # 如果没有新策略字段，根据旧字段推断策略
+        if not webhook_branch_strategy:
+            if webhook_allowed_branches and len(webhook_allowed_branches) > 0:
+                webhook_branch_strategy = "select_branches"
+            elif webhook_branch_filter:
+                webhook_branch_strategy = "filter_match"
+            elif webhook_use_push_branch:
+                webhook_branch_strategy = "use_push"
+            else:
+                webhook_branch_strategy = "use_configured"
 
         # 调试信息：输出配置值
         print(f"🔍 Webhook 分支配置:")
-        print(f"   - webhook_branch_filter: {webhook_branch_filter}")
-        print(f"   - webhook_use_push_branch: {webhook_use_push_branch}")
+        print(f"   - webhook_branch_strategy: {webhook_branch_strategy}")
+        print(f"   - webhook_allowed_branches: {webhook_allowed_branches}")
         print(f"   - configured_branch: {configured_branch}")
         print(f"   - webhook_branch: {webhook_branch}")
 
-        # 分支触发逻辑：优先使用推送的分支进行构建
-        if webhook_branch_filter and configured_branch:
-            # 如果启用了分支过滤，检查推送的分支是否匹配配置的分支
+        # 根据分支策略确定使用的分支（统一逻辑）
+        branch = None
+        if webhook_branch_strategy == "select_branches":
+            # 选择分支触发策略：只允许匹配的分支触发
             if webhook_branch:
-                if webhook_branch != configured_branch:
-                    # 分支不匹配，忽略触发
-                    print(
-                        f"⚠️ 分支不匹配，忽略触发: pipeline={pipeline.get('name')}, webhook_branch={webhook_branch}, configured_branch={configured_branch}"
+                if webhook_branch in webhook_allowed_branches:
+                    branch = webhook_branch
+                    print(f"✅ 分支在允许列表中，使用推送分支: {branch}")
+                else:
+                    print(f"⚠️ 分支不在允许列表中，忽略触发: webhook_branch={webhook_branch}, allowed={webhook_allowed_branches}")
+                    return JSONResponse(
+                        {
+                            "message": f"分支不在允许列表中，已忽略触发（推送分支: {webhook_branch}）",
+                            "pipeline": pipeline.get("name"),
+                            "webhook_branch": webhook_branch,
+                            "allowed_branches": webhook_allowed_branches,
+                            "ignored": True,
+                        }
                     )
+            else:
+                # Webhook未提供分支信息，使用配置的分支
+                branch = configured_branch
+                print(f"⚠️ Webhook未提供分支信息，使用配置分支: {branch}")
+        elif webhook_branch_strategy == "filter_match":
+            # 只允许匹配分支触发：检查推送分支是否匹配配置分支
+            if webhook_branch:
+                if webhook_branch == configured_branch:
+                    branch = webhook_branch
+                    print(f"✅ 分支匹配，使用推送分支: {branch}")
+                else:
+                    print(f"⚠️ 分支不匹配，忽略触发: webhook_branch={webhook_branch}, configured={configured_branch}")
                     return JSONResponse(
                         {
                             "message": f"分支不匹配，已忽略触发（推送分支: {webhook_branch}, 配置分支: {configured_branch}）",
@@ -4455,64 +4489,35 @@ async def webhook_trigger(webhook_token: str, request: Request):
                             "ignored": True,
                         }
                     )
-                else:
-                    # 分支匹配，使用推送的分支进行构建
-                    branch = webhook_branch
-                    print(
-                        f"✅ 分支匹配，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}"
-                    )
             else:
-                # Webhook未提供分支信息，且启用了分支过滤，无法确定是否应该触发
-                print(
-                    f"⚠️ Webhook未提供分支信息，但启用了分支过滤，使用配置的分支: pipeline={pipeline.get('name')}, configured_branch={configured_branch}"
-                )
+                # Webhook未提供分支信息，使用配置的分支
                 branch = configured_branch
-        else:
-            # 未启用分支过滤，根据配置决定使用哪个分支
-            # 如果 webhook 提供了分支信息，优先使用推送的分支（更符合 webhook 的预期行为）
+                print(f"⚠️ Webhook未提供分支信息，使用配置分支: {branch}")
+        elif webhook_branch_strategy == "use_push":
+            # 使用推送分支构建：优先使用webhook推送的分支
             if webhook_branch:
-                # Webhook 提供了分支信息，优先使用推送的分支
-                if webhook_use_push_branch:
-                    # 明确配置了使用推送分支，使用推送的分支
-                    branch = webhook_branch
-                    print(
-                        f"🔔 Webhook 触发，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch}"
-                    )
-                else:
-                    # 虽然配置了不使用推送分支，但 webhook 提供了分支信息
-                    # 为了符合 webhook 的预期行为，仍然使用推送的分支
-                    branch = webhook_branch
-                    print(
-                        f"🔔 Webhook 触发，使用推送分支构建: pipeline={pipeline.get('name')}, branch={branch} (webhook_use_push_branch=False 但 webhook 提供了分支信息)"
-                    )
+                branch = webhook_branch
+                print(f"✅ 使用推送分支构建: {branch}")
             else:
-                # Webhook 未提供分支信息，根据配置决定
-                if webhook_use_push_branch:
-                    # 配置了使用推送分支，但没有推送分支信息，使用配置的分支
-                    branch = configured_branch
-                    print(
-                        f"⚠️ Webhook未提供分支信息，使用配置的分支: pipeline={pipeline.get('name')}, branch={branch}"
-                    )
-                else:
-                    # 禁用使用推送分支，使用配置的分支
-                    branch = configured_branch
-                    if not branch:
-                        # 如果配置的分支为空，且没有推送分支信息，无法确定使用哪个分支
-                        print(
-                            f"❌ 无法触发构建: pipeline={pipeline.get('name')}, 配置分支为空且Webhook未提供分支信息"
-                        )
-                        return JSONResponse(
-                            {
-                                "message": "无法触发构建：配置分支为空且Webhook未提供分支信息",
-                                "pipeline": pipeline.get("name"),
-                                "error": "missing_branch",
-                            },
-                            status_code=400,
-                        )
-                    else:
-                        print(
-                            f"🔔 Webhook 触发，使用配置分支构建: pipeline={pipeline.get('name')}, branch={branch} (Webhook未提供分支信息)"
-                        )
+                # Webhook未提供分支信息，使用配置的分支
+                branch = configured_branch
+                print(f"⚠️ Webhook未提供分支信息，使用配置分支: {branch}")
+        else:  # use_configured
+            # 使用配置分支构建：始终使用配置的分支
+            branch = configured_branch
+            print(f"✅ 使用配置分支构建: {branch}")
+
+        # 如果最终没有确定分支，报错
+        if not branch:
+            print(f"❌ 无法触发构建: pipeline={pipeline.get('name')}, 无法确定分支")
+            return JSONResponse(
+                {
+                    "message": "无法触发构建：无法确定分支",
+                    "pipeline": pipeline.get("name"),
+                    "error": "missing_branch",
+                },
+                status_code=400,
+            )
 
         # 根据推送的分支查找对应的标签（分支标签映射应该基于推送的分支，而不是用于构建的分支）
         branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
