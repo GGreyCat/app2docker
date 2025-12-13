@@ -170,7 +170,7 @@
             <RegistryPanel v-if="activeTab === 'registry'" />
             <TaskManager v-if="activeTab === 'tasks'" />
             <ResourcePackagePanel v-if="activeTab === 'resource-package'" />
-            <HostManager v-if="activeTab === 'host'" />
+            <UnifiedHostManager v-if="activeTab === 'host'" />
             <BuildConfigEditor 
               v-if="activeTab === 'build-config-editor'" 
               :initial-config="buildConfigToEdit"
@@ -204,7 +204,7 @@ import DockerManager from './components/DockerManager.vue'
 import RegistryPanel from './components/RegistryPanel.vue'
 import ResourcePackagePanel from './components/ResourcePackagePanel.vue'
 import ExportPanel from './components/ExportPanel.vue'
-import HostManager from './components/HostManager.vue'
+import UnifiedHostManager from './components/UnifiedHostManager.vue'
 import LoginPage from './components/LoginPage.vue'
 import OperationLogs from './components/OperationLogs.vue'
 import PipelinePanel from './components/PipelinePanel.vue'

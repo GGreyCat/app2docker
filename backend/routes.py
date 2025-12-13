@@ -14,6 +14,7 @@ from fastapi import (
     Request,
     Response,
     Body,
+    WebSocket,
 )
 from fastapi.responses import (
     JSONResponse,
@@ -42,6 +43,8 @@ from backend.handlers import (
 )
 from backend.resource_package_manager import ResourcePackageManager
 from backend.host_manager import HostManager
+from backend.agent_host_manager import AgentHostManager
+from backend.websocket_handler import handle_agent_websocket
 from backend.config import (
     load_config,
     save_config,
@@ -2977,246 +2980,60 @@ async def delete_template(request: DeleteTemplateRequest, http_request: Request)
 
 # === Docker 管理相关 ===
 @router.get("/docker/info")
-async def get_docker_info():
-    """获取 Docker 服务信息"""
+async def get_docker_info(force_refresh: bool = Query(False, description="是否强制刷新缓存")):
+    """获取 Docker 服务信息（带30分钟缓存）"""
     try:
-        from backend.handlers import docker_builder, DOCKER_AVAILABLE
-
-        info = {
-            "connected": DOCKER_AVAILABLE,
-            "builder_type": "unknown",
-            "version": None,
-            "api_version": None,
-            "remote_host": None,
-            "images_count": 0,
-            "images_size": 0,
-            "containers_total": 0,
-            "containers_running": 0,
-            "containers_size": 0,
-            "storage_driver": None,
-            "os_type": None,
-            "arch": None,
-            "kernel_version": None,
-            "docker_root": None,
-            "ncpu": None,
-            "mem_total": None,
-            "runtime": None,
-            "volumes_count": 0,
-            "networks_count": 0,
-            "buildx_available": False,
-            "buildx_version": None,
-        }
-
-        # 优先从配置中读取远程 Docker 信息（即使连接失败也要显示配置）
-        from backend.config import load_config
-
-        config = load_config()
-        docker_config = config.get("docker", {})
-        use_remote = docker_config.get("use_remote", False)
-        remote_config = docker_config.get("remote", {})
-
-        # 设置构建器类型和远程配置（即使连接失败也要显示）
-        if use_remote:
-            info["builder_type"] = "remote"
-            remote_host = remote_config.get("host", "")
-            remote_port = remote_config.get("port", 2375)
-            if remote_host:
-                info["remote_host"] = f"{remote_host}:{remote_port}"
-                info["remote_config"] = {
-                    "host": remote_host,
-                    "port": remote_port,
-                    "use_tls": remote_config.get("use_tls", False),
-                    "cert_path": remote_config.get("cert_path", ""),
-                    "verify_tls": remote_config.get("verify_tls", False),
-                }
-                print(f"✅ 从配置读取远程 Docker: {remote_host}:{remote_port}")
-
-        # 如果 docker_builder 存在，尝试获取连接信息和错误信息
-        connection_info = ""
-        if docker_builder:
-            try:
-                connection_info = docker_builder.get_connection_info()
-                connection_error = None
-                if hasattr(docker_builder, "get_connection_error"):
-                    connection_error = docker_builder.get_connection_error()
-                    if connection_error and connection_error != "未知错误":
-                        info["connection_error"] = connection_error
-            except Exception as e:
-                print(f"⚠️ 获取连接信息失败: {e}")
-
-        # 如果配置中没有设置，尝试从连接信息中获取
-        if not use_remote and connection_info:
-            if "本地" in connection_info:
-                info["builder_type"] = "local"
-            elif "远程" in connection_info:
-                # 兼容旧逻辑：从连接信息字符串判断
-                info["builder_type"] = "remote"
-                import re
-
-                match = re.search(r"\((.+?)\)", connection_info)
-                if match:
-                    info["remote_host"] = match.group(1)
-            elif "模拟" in connection_info:
-                info["builder_type"] = "mock"
-        elif use_remote:
-            # 如果配置中有 host 但 remote_host 还没设置，补充设置
-            if not info.get("remote_host") and remote_config.get("host"):
-                remote_host = remote_config.get("host", "")
-                remote_port = remote_config.get("port", 2375)
-                info["remote_host"] = f"{remote_host}:{remote_port}"
-                if not info.get("remote_config"):
-                    info["remote_config"] = {
-                        "host": remote_host,
-                        "port": remote_port,
-                        "use_tls": remote_config.get("use_tls", False),
-                        "cert_path": remote_config.get("cert_path", ""),
-                        "verify_tls": remote_config.get("verify_tls", False),
-                    }
-        elif "本地" in connection_info:
-            info["builder_type"] = "local"
-        elif "远程" in connection_info:
-            # 兼容旧逻辑：从连接信息字符串判断
-            info["builder_type"] = "remote"
-            import re
-
-            match = re.search(r"\((.+?)\)", connection_info)
-            if match:
-                info["remote_host"] = match.group(1)
-        elif "模拟" in connection_info:
-            info["builder_type"] = "mock"
-
-        # 获取 Docker 详细信息
-        # 注意：即使 DOCKER_AVAILABLE 为 False，也尝试获取信息（可能只是初始化时连接失败，但 client 可能还存在）
-        try:
-            # 检查 client 是否存在且可用
-            if (
-                docker_builder
-                and hasattr(docker_builder, "client")
-                and docker_builder.client
-            ):
-                try:
-                    # 获取版本信息
-                    version_info = docker_builder.client.version()
-                    info["version"] = version_info.get("Version", "Unknown")
-                    info["api_version"] = version_info.get("ApiVersion", "Unknown")
-                    info["os_type"] = version_info.get("Os", "Unknown")
-                    info["arch"] = version_info.get("Arch", "Unknown")
-                    info["kernel_version"] = version_info.get("KernelVersion", "")
-                    print(f"✅ 成功获取 Docker 版本信息: {info['version']}")
-                except Exception as version_error:
-                    print(f"⚠️ 获取 Docker 版本信息失败: {version_error}")
-                    # 继续尝试获取其他信息
-
-                # 获取系统信息
-                try:
-                    system_info = docker_builder.client.info()
-                    info["images_count"] = system_info.get("Images", 0)
-                    info["containers_total"] = system_info.get("Containers", 0)
-                    info["containers_running"] = system_info.get("ContainersRunning", 0)
-                    info["storage_driver"] = system_info.get("Driver", "Unknown")
-                    info["docker_root"] = system_info.get("DockerRootDir", "")
-                    info["ncpu"] = system_info.get("NCPU", 0)
-                    info["mem_total"] = system_info.get("MemTotal", 0)
-                    info["runtime"] = system_info.get("DefaultRuntime", "runc")
-                    print(f"✅ 成功获取 Docker 系统信息")
-                except Exception as system_error:
-                    print(f"⚠️ 获取 Docker 系统信息失败: {system_error}")
-
-                # 获取卷和网络数量
-                try:
-                    info["volumes_count"] = len(docker_builder.client.volumes.list())
-                    info["networks_count"] = len(docker_builder.client.networks.list())
-                except:
-                    pass
-
-                # 获取磁盘使用信息
-                try:
-                    df_info = docker_builder.client.df()
-                    if "Images" in df_info:
-                        info["images_size"] = sum(
-                            img.get("Size", 0) for img in df_info["Images"]
-                        )
-                    if "Containers" in df_info:
-                        info["containers_size"] = sum(
-                            c.get("SizeRw", 0) or 0 for c in df_info["Containers"]
-                        )
-                except:
-                    pass
-
-                # 检测 buildx 支持情况
-                try:
-                    import subprocess
-                    import re
-
-                    # 方法1: 检查 docker buildx 命令是否可用
-                    docker_cli_path = shutil.which("docker")
-                    if docker_cli_path:
-                        try:
-                            result = subprocess.run(
-                                ["docker", "buildx", "version"],
-                                capture_output=True,
-                                text=True,
-                                timeout=5,
-                                env=os.environ.copy(),
-                            )
-                            if result.returncode == 0:
-                                info["buildx_available"] = True
-                                # 提取版本号
-                                version_output = result.stdout.strip()
-                                # 提取版本号，例如：v0.12.1 或 github.com/docker/buildx v0.12.1
-                                version_match = re.search(
-                                    r"v(\d+\.\d+\.\d+)", version_output
-                                )
-                                if version_match:
-                                    info["buildx_version"] = version_match.group(1)
-                                else:
-                                    info["buildx_version"] = "已安装"
-                        except (
-                            subprocess.TimeoutExpired,
-                            FileNotFoundError,
-                            Exception,
-                        ) as e:
-                            # buildx 命令不可用或超时
-                            pass
-
-                    # 方法2: 检查 Docker 版本（Docker 23+ 内置 buildx）
-                    if not info["buildx_available"] and info["version"]:
-                        try:
-                            # 解析版本号，例如 "24.0.0" 或 "23.0.0"
-                            version_parts = info["version"].split(".")
-                            if len(version_parts) >= 1:
-                                major_version = int(version_parts[0])
-                                if major_version >= 23:
-                                    info["buildx_available"] = True
-                                    info["buildx_version"] = (
-                                        "内置 (Docker " + info["version"] + ")"
-                                    )
-                        except (ValueError, IndexError):
-                            pass
-
-                    # 方法3: 检查 BuildKit 是否可用（通过环境变量）
-                    # 注意：BuildKit 可用不代表 buildx 可用，但 Docker 23+ 内置 buildx
-                    if (
-                        os.environ.get("DOCKER_BUILDKIT") == "1"
-                        and not info["buildx_available"]
-                    ):
-                        # 如果 BuildKit 已启用但 buildx 未检测到，可能是旧版本 Docker
-                        # 这种情况下不设置 buildx_available，因为旧版本需要手动安装 buildx
-                        pass
-                except Exception as e:
-                    print(f"⚠️ 检测 buildx 支持情况失败: {e}")
-                    import traceback
-
-                    traceback.print_exc()
-        except Exception as e:
-            print(f"⚠️ 获取 Docker 详细信息失败: {e}")
-
+        from backend.docker_info_cache import docker_info_cache
+        
+        # 使用缓存获取Docker信息
+        info = docker_info_cache.get_docker_info(force_refresh=force_refresh)
+        
+        # 添加缓存年龄信息
+        cache_age = docker_info_cache.get_cache_age()
+        if cache_age is not None:
+            info["cache_age_seconds"] = int(cache_age)
+            info["cache_age_minutes"] = round(cache_age / 60, 1)
+        
         return JSONResponse(info)
     except Exception as e:
         import traceback
-
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"获取 Docker 信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取Docker信息失败: {str(e)}")
+
+
+@router.post("/docker/info/refresh")
+async def refresh_docker_info(request: Request):
+    """强制刷新Docker信息缓存"""
+    try:
+        username = get_current_username(request)
+        from backend.docker_info_cache import docker_info_cache
+        
+        # 强制刷新缓存
+        info = docker_info_cache.refresh_cache()
+        
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "docker_info_refresh",
+            {"cache_age_seconds": docker_info_cache.get_cache_age() or 0}
+        )
+        
+        cache_age = docker_info_cache.get_cache_age()
+        if cache_age is not None:
+            info["cache_age_seconds"] = int(cache_age)
+            info["cache_age_minutes"] = round(cache_age / 60, 1)
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Docker信息已刷新",
+            "info": info
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"刷新Docker信息失败: {str(e)}")
+
+
 
 
 @router.get("/docker/images")
@@ -6107,3 +5924,169 @@ async def delete_host(request: Request, host_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除主机失败: {str(e)}")
+
+
+# ==================== Agent主机管理 ====================
+
+class AgentHostRequest(BaseModel):
+    name: str
+    description: str = ""
+
+
+class AgentHostUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+@router.post("/agent-hosts")
+async def add_agent_host(request: Request, host_req: AgentHostRequest):
+    """创建Agent主机"""
+    try:
+        username = get_current_username(request)
+        manager = AgentHostManager()
+
+        host_info = manager.add_agent_host(
+            name=host_req.name,
+            description=host_req.description,
+        )
+
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "agent_host_add",
+            {
+                "host_id": host_info["host_id"],
+                "name": host_info["name"],
+            },
+        )
+
+        return JSONResponse({"success": True, "host": host_info})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"创建Agent主机失败: {str(e)}")
+
+
+@router.get("/agent-hosts")
+async def list_agent_hosts(request: Request):
+    """获取Agent主机列表"""
+    try:
+        username = get_current_username(request)
+        manager = AgentHostManager()
+        hosts = manager.list_agent_hosts()
+        return JSONResponse({"hosts": hosts})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取Agent主机列表失败: {str(e)}")
+
+
+@router.get("/agent-hosts/{host_id}")
+async def get_agent_host(request: Request, host_id: str):
+    """获取Agent主机详情"""
+    try:
+        username = get_current_username(request)
+        manager = AgentHostManager()
+        host = manager.get_agent_host(host_id)
+        if not host:
+            raise HTTPException(status_code=404, detail="Agent主机不存在")
+        return JSONResponse(host)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取Agent主机详情失败: {str(e)}")
+
+
+@router.put("/agent-hosts/{host_id}")
+async def update_agent_host(request: Request, host_id: str, host_req: AgentHostUpdateRequest):
+    """更新Agent主机信息"""
+    try:
+        username = get_current_username(request)
+        manager = AgentHostManager()
+
+        host_info = manager.update_host_info(
+            host_id=host_id,
+            name=host_req.name,
+            description=host_req.description,
+        )
+
+        if not host_info:
+            raise HTTPException(status_code=404, detail="Agent主机不存在")
+
+        # 记录操作日志
+        OperationLogger.log(
+            username,
+            "agent_host_update",
+            {"host_id": host_id, "name": host_info.get("name")},
+        )
+
+        return JSONResponse({"success": True, "host": host_info})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"更新Agent主机失败: {str(e)}")
+
+
+@router.delete("/agent-hosts/{host_id}")
+async def delete_agent_host(request: Request, host_id: str):
+    """删除Agent主机"""
+    try:
+        username = get_current_username(request)
+        manager = AgentHostManager()
+
+        success = manager.delete_agent_host(host_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Agent主机不存在")
+
+        # 记录操作日志
+        OperationLogger.log(username, "agent_host_delete", {"host_id": host_id})
+
+        return JSONResponse({"success": True, "message": "Agent主机已删除"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除Agent主机失败: {str(e)}")
+
+
+@router.get("/agent-hosts/{host_id}/deploy-command")
+async def get_deploy_command(
+    request: Request,
+    host_id: str,
+    type: str = Query("run", description="部署类型: run 或 stack"),
+    agent_image: str = Query("jar2docker/agent:latest", description="Agent镜像"),
+    server_url: Optional[str] = Query(None, description="服务器URL（可选）"),
+):
+    """获取Agent部署命令"""
+    try:
+        username = get_current_username(request)
+        manager = AgentHostManager()
+
+        if type not in ["run", "stack"]:
+            raise HTTPException(status_code=400, detail="部署类型必须是 'run' 或 'stack'")
+
+        result = manager.generate_deploy_command(
+            host_id=host_id,
+            deploy_type=type,
+            agent_image=agent_image,
+            server_url=server_url,
+        )
+
+        return JSONResponse(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"生成部署命令失败: {str(e)}")
+
+
+@router.websocket("/ws/agent/{token}")
+async def websocket_agent_endpoint(websocket: WebSocket, token: str):
+    """Agent WebSocket连接端点"""
+    await handle_agent_websocket(websocket, token)

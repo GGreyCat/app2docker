@@ -283,3 +283,27 @@ class PipelineTaskHistory(Base):
         Index("idx_pipeline_history_task", "task_id"),
         Index("idx_pipeline_history_time", "triggered_at"),
     )
+
+
+class AgentHost(Base):
+    """Agent主机表"""
+
+    __tablename__ = "agent_hosts"
+
+    host_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String(255), nullable=False, unique=True)
+    token = Column(String(64), unique=True, nullable=False)  # 用于WebSocket连接认证
+    status = Column(String(20), default="offline")  # offline, online, connecting
+    last_heartbeat = Column(DateTime)  # 最后心跳时间
+    host_info = Column(JSON, default=dict)  # 主机信息（IP、操作系统、CPU、内存、磁盘等）
+    docker_info = Column(JSON, default=dict)  # Docker信息（版本、容器数、镜像数等）
+    description = Column(Text, default="")
+
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        Index("idx_agent_host_token", "token"),
+        Index("idx_agent_host_status", "status"),
+        Index("idx_agent_host_name", "name"),
+    )

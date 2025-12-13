@@ -8,18 +8,34 @@
         <div>
           <i class="fas fa-server"></i>
           <strong class="ms-1">Docker 服务信息</strong>
-          <small v-if="infoLastSync" class="ms-3 opacity-75">
-            <i class="fas fa-clock"></i> {{ formatTime(infoLastSync) }}
+          <small v-if="dockerInfo && dockerInfo.cached_at" class="ms-3 opacity-75">
+            <i class="fas fa-clock"></i> 
+            缓存时间: {{ formatTime(dockerInfo.cached_at) }}
+            <span v-if="dockerInfo.cache_age_minutes" class="ms-1">
+              ({{ dockerInfo.cache_age_minutes }}分钟前)
+            </span>
           </small>
         </div>
-        <button
-          class="btn btn-sm btn-light"
-          @click="refreshDockerInfo(true)"
-          :disabled="loadingInfo"
-          title="刷新"
-        >
-          <i class="fas fa-sync-alt" :class="{ 'fa-spin': loadingInfo }"></i>
-        </button>
+        <div class="d-flex gap-2">
+          <button
+            class="btn btn-sm btn-light"
+            @click="refreshDockerInfo(false)"
+            :disabled="loadingInfo"
+            title="刷新（使用缓存）"
+          >
+            <i class="fas fa-sync-alt" :class="{ 'fa-spin': loadingInfo }"></i>
+          </button>
+          <button
+            class="btn btn-sm btn-warning"
+            @click="forceRefreshDockerInfo()"
+            :disabled="loadingInfo"
+            title="强制刷新（重新获取）"
+          >
+            <i class="fas fa-sync-alt fa-spin" v-if="loadingInfo"></i>
+            <i class="fas fa-redo" v-else></i>
+            <span class="ms-1 d-none d-md-inline">强制刷新</span>
+          </button>
+        </div>
       </div>
       <div class="card-body py-2">
         <div v-if="loadingInfo" class="text-center py-3">
@@ -724,20 +740,35 @@ const infoLastSync = ref(null);
 const infoCacheTimeout = 5 * 60 * 1000;
 
 async function refreshDockerInfo(force = false) {
-  if (
-    !force &&
-    infoLastSync.value &&
-    Date.now() - new Date(infoLastSync.value).getTime() < infoCacheTimeout
-  )
-    return;
   loadingInfo.value = true;
   try {
-    const res = await axios.get("/api/docker/info");
+    // 使用新的缓存API，force参数控制是否强制刷新
+    const res = await axios.get("/api/docker/info", {
+      params: { force_refresh: force }
+    });
     dockerInfo.value = res.data;
-    infoLastSync.value = new Date().toISOString();
+    infoLastSync.value = dockerInfo.value.cached_at || new Date().toISOString();
   } catch (error) {
     console.error("获取 Docker 信息失败:", error);
     dockerInfo.value = null;
+  } finally {
+    loadingInfo.value = false;
+  }
+}
+
+async function forceRefreshDockerInfo() {
+  loadingInfo.value = true;
+  try {
+    // 使用强制刷新API
+    const res = await axios.post("/api/docker/info/refresh");
+    if (res.data.success && res.data.info) {
+      dockerInfo.value = res.data.info;
+      infoLastSync.value = dockerInfo.value.cached_at || new Date().toISOString();
+      alert("Docker信息已强制刷新");
+    }
+  } catch (error) {
+    console.error("强制刷新 Docker 信息失败:", error);
+    alert("强制刷新失败: " + (error.response?.data?.detail || error.message));
   } finally {
     loadingInfo.value = false;
   }

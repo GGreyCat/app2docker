@@ -41,9 +41,26 @@ class PipelineScheduler:
     
     def _run(self):
         """调度器主循环"""
+        last_agent_check = 0
+        agent_check_interval = 60  # 每60秒检查一次Agent主机
+        last_docker_refresh = 0
+        docker_refresh_interval = 1800  # 每30分钟刷新一次Docker信息缓存
+        
         while self.running:
             try:
                 self._check_pipelines()
+                
+                current_time = time.time()
+                
+                # 定期检查Agent主机离线状态
+                if current_time - last_agent_check >= agent_check_interval:
+                    self._check_agent_hosts()
+                    last_agent_check = current_time
+                
+                # 定期刷新Docker信息缓存
+                if current_time - last_docker_refresh >= docker_refresh_interval:
+                    self._refresh_docker_info()
+                    last_docker_refresh = current_time
             except Exception as e:
                 print(f"❌ 调度器执行出错: {e}")
                 import traceback
@@ -175,6 +192,24 @@ class PipelineScheduler:
             print(f"❌ 触发流水线 {pipeline_name} 失败: {e}")
             import traceback
             traceback.print_exc()
+    
+    def _check_agent_hosts(self):
+        """检查并更新离线Agent主机"""
+        try:
+            from backend.agent_host_manager import AgentHostManager
+            manager = AgentHostManager()
+            manager.check_offline_hosts(timeout_seconds=60)
+        except Exception as e:
+            print(f"⚠️ 检查Agent主机状态失败: {e}")
+    
+    def _refresh_docker_info(self):
+        """刷新Docker信息缓存"""
+        try:
+            from backend.docker_info_cache import docker_info_cache
+            docker_info_cache.refresh_cache()
+            print("✅ Docker信息缓存已刷新（后台任务）")
+        except Exception as e:
+            print(f"⚠️ 刷新Docker信息缓存失败: {e}")
 
 
 # 全局调度器实例
