@@ -4030,15 +4030,64 @@ async def run_pipeline(
         )
         print(f"   - selected_branch is not None: {selected_branch is not None}")
 
+        # 处理分支标签映射（与webhook使用相同的逻辑）
+        branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
+        default_tag = pipeline.get("tag", "latest")  # 默认标签
+        
+        # 获取标签列表（支持单个标签或多个标签）
+        tags = [default_tag]  # 默认只有一个标签
+        
+        if final_branch and branch_tag_mapping:
+            mapped_tag_value = None
+            # 优先精确匹配
+            if final_branch in branch_tag_mapping:
+                mapped_tag_value = branch_tag_mapping[final_branch]
+            else:
+                # 尝试通配符匹配（如 feature/* -> feature）
+                import fnmatch
+                
+                for pattern, mapped_tag in branch_tag_mapping.items():
+                    if fnmatch.fnmatch(final_branch, pattern):
+                        mapped_tag_value = mapped_tag
+                        break
+            
+            # 处理标签值（支持字符串、数组或逗号分隔的字符串）
+            if mapped_tag_value:
+                if isinstance(mapped_tag_value, list):
+                    # 如果是数组，直接使用
+                    tags = mapped_tag_value
+                elif isinstance(mapped_tag_value, str):
+                    # 如果是字符串，检查是否包含逗号
+                    if "," in mapped_tag_value:
+                        # 逗号分隔的多个标签
+                        tags = [
+                            t.strip() for t in mapped_tag_value.split(",") if t.strip()
+                        ]
+                    else:
+                        # 单个标签
+                        tags = [mapped_tag_value]
+        
         # 检查防抖（5秒内重复触发直接加入队列）
         if manager.check_debounce(pipeline_id, debounce_seconds=5):
             from backend.handlers import pipeline_to_task_config
-
-            task_config = pipeline_to_task_config(
-                pipeline, trigger_source="manual", branch=final_branch
-            )
-            task_config["username"] = username
-            queue_id = manager.add_task_to_queue(pipeline_id, task_config)
+            from backend.build_manager import BuildManager
+            
+            build_manager = BuildManager()
+            task_ids = []
+            
+            # 为每个标签创建任务
+            for tag in tags:
+                task_config = pipeline_to_task_config(
+                    pipeline,
+                    trigger_source="manual",
+                    branch=final_branch,
+                    tag=tag,
+                    branch_tag_mapping=branch_tag_mapping,
+                )
+                task_config["username"] = username
+                task_id = build_manager._trigger_task_from_config(task_config)
+                task_ids.append(task_id)
+            
             queue_length = manager.get_queue_length(pipeline_id)
 
             OperationLogger.log(
@@ -4047,7 +4096,8 @@ async def run_pipeline(
                 {
                     "pipeline_id": pipeline_id,
                     "pipeline_name": pipeline.get("name"),
-                    "queue_id": queue_id,
+                    "task_ids": task_ids if len(task_ids) > 1 else None,
+                    "task_id": task_ids[0] if task_ids else None,
                     "queue_length": queue_length,
                     "branch": final_branch,
                     "trigger_source": "manual",
@@ -4055,105 +4105,161 @@ async def run_pipeline(
                 },
             )
 
-            return JSONResponse(
-                {
-                    "message": "触发过于频繁，任务已加入队列",
-                    "status": "queued",
-                    "queue_id": queue_id,
-                    "queue_length": queue_length,
-                    "pipeline": pipeline.get("name"),
-                    "branch": final_branch,
-                }
-            )
-
-        # 从流水线配置生成任务配置JSON
-        from backend.handlers import pipeline_to_task_config
-
-        print(f"🔍 准备调用 pipeline_to_task_config:")
-        print(f"   - 传递的branch参数: {repr(final_branch)}")
-        task_config = pipeline_to_task_config(
-            pipeline, trigger_source="manual", branch=final_branch
-        )
-        print(f"🔍 pipeline_to_task_config 返回的task_config:")
-        print(f"   - task_config中的branch: {repr(task_config.get('branch'))}")
-        task_config["username"] = username
-
-        # 检查是否有正在运行的任务
-        current_task_id = manager.get_pipeline_running_task(pipeline_id)
-        if current_task_id:
-            # 检查任务是否真的在运行
-            build_manager = BuildManager()
-            task = build_manager.task_manager.get_task(current_task_id)
-            if task and task.get("status") in ["pending", "running"]:
-                # 有任务正在运行，立即创建新任务（状态为 pending，等待执行）
-                task_id = build_manager._trigger_task_from_config(task_config)
-                queue_length = manager.get_queue_length(pipeline_id)
-
-                # 记录操作日志
-                OperationLogger.log(
-                    username,
-                    "pipeline_run_queued",
-                    {
-                        "pipeline_id": pipeline_id,
-                        "pipeline_name": pipeline.get("name"),
-                        "task_id": task_id,
-                        "queue_length": queue_length,
-                        "branch": final_branch,
-                        "trigger_source": "manual",
-                    },
-                )
-
+            if len(task_ids) > 1:
                 return JSONResponse(
                     {
-                        "message": "构建任务已创建并加入队列",
+                        "message": f"触发过于频繁，已创建 {len(task_ids)} 个任务并加入队列",
                         "status": "queued",
-                        "task_id": task_id,
+                        "task_id": task_ids[0] if task_ids else None,
+                        "task_ids": task_ids if len(task_ids) > 1 else None,
                         "queue_length": queue_length,
                         "pipeline": pipeline.get("name"),
                         "branch": final_branch,
                     }
                 )
             else:
-                # 任务已完成或不存在，解绑
-                manager.unbind_task(pipeline_id)
+                return JSONResponse(
+                    {
+                        "message": "触发过于频繁，任务已加入队列",
+                        "status": "queued",
+                        "task_id": task_ids[0] if task_ids else None,
+                        "queue_length": queue_length,
+                        "pipeline": pipeline.get("name"),
+                        "branch": final_branch,
+                    }
+                )
 
-        # 没有运行中的任务，立即启动构建任务
+        # 处理分支标签映射（与webhook使用相同的逻辑）
+        branch_tag_mapping = pipeline.get("branch_tag_mapping", {})
+        default_tag = pipeline.get("tag", "latest")  # 默认标签
+        
+        # 获取标签列表（支持单个标签或多个标签）
+        tags = [default_tag]  # 默认只有一个标签
+        
+        if final_branch and branch_tag_mapping:
+            mapped_tag_value = None
+            # 优先精确匹配
+            if final_branch in branch_tag_mapping:
+                mapped_tag_value = branch_tag_mapping[final_branch]
+            else:
+                # 尝试通配符匹配（如 feature/* -> feature）
+                import fnmatch
+                
+                for pattern, mapped_tag in branch_tag_mapping.items():
+                    if fnmatch.fnmatch(final_branch, pattern):
+                        mapped_tag_value = mapped_tag
+                        break
+            
+            # 处理标签值（支持字符串、数组或逗号分隔的字符串）
+            if mapped_tag_value:
+                if isinstance(mapped_tag_value, list):
+                    # 如果是数组，直接使用
+                    tags = mapped_tag_value
+                elif isinstance(mapped_tag_value, str):
+                    # 如果是字符串，检查是否包含逗号
+                    if "," in mapped_tag_value:
+                        # 逗号分隔的多个标签
+                        tags = [
+                            t.strip() for t in mapped_tag_value.split(",") if t.strip()
+                        ]
+                    else:
+                        # 单个标签
+                        tags = [mapped_tag_value]
+        
+        # 为每个标签创建任务（与webhook使用相同的逻辑）
+        from backend.handlers import pipeline_to_task_config
+        
         build_manager = BuildManager()
-        task_id = build_manager._trigger_task_from_config(task_config)
-
-        # 记录触发并绑定任务（手动触发）
-        manager.record_trigger(
-            pipeline_id,
-            task_id,
-            trigger_source="manual",
-            trigger_info={
-                "username": username,
-                "branch": final_branch,
-            },
-        )
-
-        # 记录操作日志
-        OperationLogger.log(
-            username,
-            "pipeline_run",
-            {
-                "pipeline_id": pipeline_id,
-                "pipeline_name": pipeline.get("name"),
-                "task_id": task_id,
-                "branch": final_branch,
-                "trigger_source": "manual",
-            },
-        )
-
-        return JSONResponse(
-            {
-                "message": "构建任务已启动",
-                "status": "running",
-                "task_id": task_id,
-                "pipeline": pipeline.get("name"),
-                "branch": final_branch,
-            }
-        )
+        task_ids = []
+        
+        for tag in tags:
+            print(f"🔍 调用 pipeline_to_task_config:")
+            print(f"   - branch 参数: {final_branch}")
+            print(f"   - tag 参数: {tag}")
+            task_config = pipeline_to_task_config(
+                pipeline,
+                trigger_source="manual",
+                branch=final_branch,
+                tag=tag,
+                branch_tag_mapping=branch_tag_mapping,
+            )
+            task_config["username"] = username
+            
+            # 检查是否有正在运行的任务
+            current_task_id = manager.get_pipeline_running_task(pipeline_id)
+            if current_task_id:
+                # 检查任务是否真的在运行
+                task = build_manager.task_manager.get_task(current_task_id)
+                if task and task.get("status") in ["pending", "running"]:
+                    # 有任务正在运行，立即创建新任务（状态为 pending，等待执行）
+                    task_id = build_manager._trigger_task_from_config(task_config)
+                    task_ids.append(task_id)
+                else:
+                    # 任务已完成或不存在，解绑
+                    manager.unbind_task(pipeline_id)
+                    # 没有运行中的任务，立即启动构建任务
+                    task_id = build_manager._trigger_task_from_config(task_config)
+                    task_ids.append(task_id)
+            else:
+                # 没有运行中的任务，立即启动构建任务
+                task_id = build_manager._trigger_task_from_config(task_config)
+                task_ids.append(task_id)
+        
+        # 如果创建了多个任务，只绑定第一个任务
+        if task_ids:
+            first_task_id = task_ids[0]
+            
+            # 记录触发并绑定任务（手动触发）
+            manager.record_trigger(
+                pipeline_id,
+                first_task_id,
+                trigger_source="manual",
+                trigger_info={
+                    "username": username,
+                    "branch": final_branch,
+                },
+            )
+            
+            # 记录操作日志
+            OperationLogger.log(
+                username,
+                "pipeline_run" if len(task_ids) == 1 else "pipeline_run_queued",
+                {
+                    "pipeline_id": pipeline_id,
+                    "pipeline_name": pipeline.get("name"),
+                    "task_id": first_task_id,
+                    "task_ids": task_ids if len(task_ids) > 1 else None,
+                    "branch": final_branch,
+                    "trigger_source": "manual",
+                },
+            )
+            
+            queue_length = manager.get_queue_length(pipeline_id)
+            
+            if len(task_ids) > 1:
+                return JSONResponse(
+                    {
+                        "message": f"构建任务已启动（共 {len(task_ids)} 个任务）",
+                        "status": "running",
+                        "task_id": first_task_id,
+                        "task_ids": task_ids,
+                        "queue_length": queue_length,
+                        "pipeline": pipeline.get("name"),
+                        "branch": final_branch,
+                    }
+                )
+            else:
+                return JSONResponse(
+                    {
+                        "message": "构建任务已启动",
+                        "status": "running",
+                        "task_id": first_task_id,
+                        "pipeline": pipeline.get("name"),
+                        "branch": final_branch,
+                    }
+                )
+        else:
+            raise HTTPException(status_code=500, detail="未能创建构建任务")
     except HTTPException:
         raise
     except Exception as e:

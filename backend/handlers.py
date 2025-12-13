@@ -3948,6 +3948,37 @@ def pipeline_to_task_config(
     push_mode = pipeline.get("push_mode", "multi")
     service_push_config = pipeline.get("service_push_config", {})
     selected_services = pipeline.get("selected_services", [])
+    
+    # 在多服务模式下，如果标签已被映射更新，需要同步到 service_push_config 中每个服务的 tag
+    if push_mode == "multi" and trigger_source in ["webhook", "manual"]:
+        original_tag = tag or pipeline.get("tag", "latest")
+        if final_tag != original_tag:
+            # 标签已被映射更新，需要同步到多服务配置中
+            if selected_services and service_push_config:
+                # 深拷贝 service_push_config，避免修改原始 pipeline 数据
+                import copy
+                service_push_config = copy.deepcopy(service_push_config)
+                
+                # 更新每个服务的 tag（如果服务配置中没有明确指定 tag，或者 tag 等于原始标签，则使用映射后的标签）
+                for service_name in selected_services:
+                    if service_name in service_push_config:
+                        service_config = service_push_config[service_name]
+                        if isinstance(service_config, dict):
+                            service_tag = service_config.get("tag", "")
+                            # 如果服务配置中没有明确指定 tag，或者 tag 等于原始标签，则使用映射后的标签
+                            if not service_tag or service_tag == original_tag:
+                                service_push_config[service_name] = service_config.copy()
+                                service_push_config[service_name]["tag"] = final_tag
+                                print(f"   - 更新服务 {service_name} 的标签为: {final_tag}")
+                    else:
+                        # 如果服务没有配置，创建一个默认配置并使用映射后的标签
+                        service_push_config[service_name] = {
+                            "enabled": True,
+                            "push": False,
+                            "imageName": "",
+                            "tag": final_tag,
+                        }
+                        print(f"   - 为服务 {service_name} 创建配置，标签为: {final_tag}")
 
     should_push = False
     if push_mode == "single":
