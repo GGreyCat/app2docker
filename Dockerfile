@@ -103,7 +103,9 @@ RUN python -m venv .venv && \
     .venv/bin/pip config set global.retries 5 && \
     .venv/bin/pip install --upgrade pip && \
     .venv/bin/pip install --no-cache-dir -r requirements.txt && \
-    echo "✅ docker-compose version:" && docker-compose --version || echo "⚠️ docker-compose not found"
+    echo "✅ docker-compose version:" && docker-compose --version || echo "⚠️ docker-compose not found" && \
+    echo "✅ 验证虚拟环境:" && /app/.venv/bin/python -c "import fastapi; print(f'fastapi version: {fastapi.__version__}')" && \
+    echo "✅ Python 路径:" && which python || echo "⚠️ python not in PATH"
 
 # ✅ 设置 PATH，让 .venv/bin 优先（等效于 source .venv/bin/activate）
 ENV PATH="/app/.venv/bin:$PATH"
@@ -135,7 +137,7 @@ FROM backend-base AS app2docker-agent
 #   jar2docker-agent:latest
 
 # 启动 Agent 程序
-CMD ["python", "backend/agent/main.py"]
+CMD ["/app/.venv/bin/python", "backend/agent/main.py"]
 
 # ============ 阶段 4: 主程序镜像（默认） ============
 FROM backend-base AS app2docker
@@ -181,4 +183,4 @@ EXPOSE ${APP_PORT}
 
 # 启动后端服务（后端会服务前端构建文件）
 # 端口可通过环境变量 APP_PORT 设置
-CMD ["python", "backend/app.py"]
+CMD ["/app/.venv/bin/python", "backend/app.py"]
