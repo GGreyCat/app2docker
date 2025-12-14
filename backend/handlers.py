@@ -72,6 +72,53 @@ def natural_sort_key(s):
     ]
 
 
+def validate_and_clean_image_name(image_name: str) -> str:
+    """
+    验证和清理镜像名称
+
+    Args:
+        image_name: 原始镜像名称
+
+    Returns:
+        清理后的镜像名称
+
+    Raises:
+        ValueError: 如果镜像名称格式无效
+    """
+    if not image_name:
+        raise ValueError("镜像名称不能为空")
+
+    # 去除首尾空格
+    image_name = image_name.strip()
+
+    if not image_name:
+        raise ValueError("镜像名称不能为空")
+
+    # 检查协议前缀（http:// 或 https://）- Docker API 不接受协议前缀
+    if image_name.startswith("https://") or image_name.startswith("http://"):
+        # 提取正确的镜像名称（移除协议前缀）
+        if image_name.startswith("https://"):
+            cleaned_name = image_name[8:]
+        else:
+            cleaned_name = image_name[7:]
+
+        raise ValueError(
+            f"镜像名称不能包含协议前缀（http:// 或 https://）。"
+            f"请使用格式: {cleaned_name}，而不是 {image_name}"
+        )
+
+    # 验证镜像名称格式（Docker 镜像名称的基本规则）
+    # 镜像名称不能包含空格、特殊字符等
+    if " " in image_name:
+        raise ValueError("镜像名称不能包含空格")
+
+    # 验证镜像名称长度
+    if len(image_name) > 255:
+        raise ValueError("镜像名称长度不能超过 255 个字符")
+
+    return image_name
+
+
 # === 模板目录辅助函数 ===
 def get_all_templates():
     """获取所有模板列表（内置 + 用户自定义），支持子目录分类，用户模板优先"""
@@ -663,6 +710,13 @@ class App2DockerHandler(BaseHTTPRequestHandler):
             image_name, inferred_tag = image_name.rsplit(":", 1)
             if inferred_tag:
                 tag = inferred_tag
+
+        # 验证和清理镜像名称（检查格式，移除协议前缀等）
+        try:
+            image_name = validate_and_clean_image_name(image_name)
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+            return
 
         full_tag = f"{image_name}:{tag}"
         compress_enabled = compress_param in ("gzip", "gz", "tgz", "1", "true", "yes")
@@ -1396,14 +1450,14 @@ class BuildManager:
                     archive_size_str = f"{archive_size / 1024:.2f} KB"
                 else:
                     archive_size_str = f"{archive_size / (1024 * 1024):.2f} MB"
-                
+
                 log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
                 log(f"📦 开始解压压缩包\n")
                 log(f"  文件路径: {file_path}\n")
                 log(f"  文件大小: {archive_size_str}\n")
                 log(f"  解压目标: {extract_to}\n")
                 log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-                
+
                 if file_path.endswith(".zip"):
                     log("📦 检测到 ZIP 格式，开始解压...\n")
                     with zipfile.ZipFile(file_path, "r") as zip_ref:
@@ -1428,7 +1482,7 @@ class BuildManager:
                 else:
                     log(f"❌ 不支持的压缩格式: {file_path}\n")
                     return False
-                
+
                 log("✅ 解压操作完成\n")
                 log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
@@ -1436,7 +1490,7 @@ class BuildManager:
                 try:
                     log("📂 解压后构建根目录概况：\n")
                     log(f"  构建上下文路径: {extract_to}\n")
-                    
+
                     if os.path.exists(extract_to):
                         # 统计根目录下的直接内容
                         root_items = os.listdir(extract_to)
@@ -1482,7 +1536,9 @@ class BuildManager:
                                 dir_path = os.path.join(extract_to, d)
                                 if os.path.isdir(dir_path):
                                     # 统计目录下的文件数
-                                    dir_file_count = sum(len(files) for _, _, files in os.walk(dir_path))
+                                    dir_file_count = sum(
+                                        len(files) for _, _, files in os.walk(dir_path)
+                                    )
                                     log(f"    📂 {d}/ ({dir_file_count} 个文件)\n")
                             if len(dirs) > 20:
                                 log(f"    ... 还有 {len(dirs) - 20} 个目录\n")
@@ -1501,18 +1557,21 @@ class BuildManager:
                                     elif size < 1024 * 1024 * 1024:
                                         f_size_str = f"{size / (1024 * 1024):.2f} MB"
                                     else:
-                                        f_size_str = f"{size / (1024 * 1024 * 1024):.2f} GB"
+                                        f_size_str = (
+                                            f"{size / (1024 * 1024 * 1024):.2f} GB"
+                                        )
                                     log(f"    📄 {f} ({f_size_str})\n")
                             if len(files) > 30:
                                 log(f"    ... 还有 {len(files) - 30} 个文件\n")
                             log(f"\n")
-                        
+
                         log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
                         log(f"✅ 解压完成，构建上下文已准备就绪\n")
                         log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
                 except Exception as e:
                     log(f"⚠️  无法列出目录内容: {str(e)}\n")
                     import traceback
+
                     log(f"    {traceback.format_exc()}\n")
 
                 return True
@@ -1520,6 +1579,7 @@ class BuildManager:
                 log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
                 log(f"❌ 解压失败: {str(e)}\n")
                 import traceback
+
                 log(f"    {traceback.format_exc()}\n")
                 log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
                 return False
@@ -1534,17 +1594,19 @@ class BuildManager:
             log(f"🧱 模板: {selected_template}\n")
             log(f"📂 项目类型: {project_type}\n")
             log(f"📁 构建上下文路径: {build_context}\n")
-            
+
             # 判断文件类型
             is_jar = original_filename.lower().endswith(".jar")
             is_archive = any(
                 original_filename.lower().endswith(ext)
                 for ext in [".zip", ".tar", ".tar.gz", ".tgz"]
             )
-            
+
             if is_archive:
                 log(f"📦 文件类型: 压缩包\n")
-                log(f"🔧 解压选项: {'已启用（将解压到构建根目录）' if extract_archive else '未启用（保持压缩包原样）'}\n")
+                log(
+                    f"🔧 解压选项: {'已启用（将解压到构建根目录）' if extract_archive else '未启用（保持压缩包原样）'}\n"
+                )
             elif is_jar:
                 log(f"📦 文件类型: JAR 文件\n")
             else:
@@ -1569,10 +1631,10 @@ class BuildManager:
                     log(f"🧪 模拟模式：保存压缩包文件...\n")
                     log(f"  构建上下文路径: {build_context}\n")
                     log(f"  压缩包文件路径: {file_path}\n")
-                    
+
                     with open(file_path, "wb") as f:
                         f.write(file_data)
-                    
+
                     file_size = os.path.getsize(file_path)
                     if file_size < 1024:
                         file_size_str = f"{file_size} B"
@@ -1669,10 +1731,10 @@ class BuildManager:
                 log(f"📦 保存压缩包文件到构建上下文...\n")
                 log(f"  构建上下文路径: {build_context}\n")
                 log(f"  压缩包文件路径: {file_path}\n")
-                
+
                 with open(file_path, "wb") as f:
                     f.write(file_data)
-                
+
                 file_size = os.path.getsize(file_path)
                 if file_size < 1024:
                     file_size_str = f"{file_size} B"
@@ -2368,36 +2430,58 @@ class BuildManager:
 
         try:
             log(f"🚀 开始从 Git 源码构建: {git_url}\n")
-            
+
             # 打印构建配置信息（过滤敏感信息）
             def sanitize_config(config_dict):
                 """过滤敏感信息"""
                 if not isinstance(config_dict, dict):
                     return config_dict
-                
-                sensitive_patterns = ['password', 'token', 'secret', 'credential', 'auth', 
-                                      'access_token', 'api_key', 'apikey', 'private_key', 
-                                      'privatekey', 'pwd', 'passwd']
+
+                sensitive_patterns = [
+                    "password",
+                    "token",
+                    "secret",
+                    "credential",
+                    "auth",
+                    "access_token",
+                    "api_key",
+                    "apikey",
+                    "private_key",
+                    "privatekey",
+                    "pwd",
+                    "passwd",
+                ]
                 sanitized = {}
                 for k, v in config_dict.items():
                     key_lower = k.lower()
                     # 检查键名是否包含敏感词（但排除一些安全的键，如 image_name, tag_name 等）
-                    is_sensitive = any(pattern in key_lower for pattern in sensitive_patterns)
+                    is_sensitive = any(
+                        pattern in key_lower for pattern in sensitive_patterns
+                    )
                     # 排除一些安全的键名（即使包含敏感词）
-                    safe_keys = ['image_name', 'tag', 'tag_name', 'dockerfile_name', 'template_name']
+                    safe_keys = [
+                        "image_name",
+                        "tag",
+                        "tag_name",
+                        "dockerfile_name",
+                        "template_name",
+                    ]
                     if k in safe_keys:
                         is_sensitive = False
-                    
+
                     if is_sensitive:
                         sanitized[k] = "***已隐藏***"
                     elif isinstance(v, dict):
                         sanitized[k] = sanitize_config(v)
                     elif isinstance(v, list):
-                        sanitized[k] = [sanitize_config(item) if isinstance(item, dict) else item for item in v]
+                        sanitized[k] = [
+                            sanitize_config(item) if isinstance(item, dict) else item
+                            for item in v
+                        ]
                     else:
                         sanitized[k] = v
                 return sanitized
-            
+
             build_config = {
                 "git_url": git_url,
                 "image_name": image_name,
@@ -2417,18 +2501,20 @@ class BuildManager:
                 "service_template_params": service_template_params or {},
                 "resource_package_ids": resource_package_ids or [],
             }
-            
+
             sanitized_config = sanitize_config(build_config)
-            
+
             # 判断构建模式
             is_multi_service = selected_services and len(selected_services) > 1
             build_mode = "多服务构建" if is_multi_service else "单服务构建"
             if is_multi_service:
                 build_mode += f" (共 {len(selected_services)} 个服务)"
-            
+
             log(f"📋 构建配置解析结果:\n")
             log(f"   构建模式: {build_mode}\n")
-            log(f"   配置详情:\n{json.dumps(sanitized_config, indent=4, ensure_ascii=False)}\n")
+            log(
+                f"   配置详情:\n{json.dumps(sanitized_config, indent=4, ensure_ascii=False)}\n"
+            )
 
             # 清理旧的构建上下文
             if os.path.exists(build_context):
@@ -3884,10 +3970,10 @@ def pipeline_to_task_config(
         final_branch = branch
     else:
         final_branch = pipeline.get("branch")
-    
+
     # 保存流水线的原始标签（用于多服务模式下的标签更新判断）
     pipeline_original_tag = pipeline.get("tag", "latest")
-    
+
     # 如果传入了tag参数，使用它；否则使用流水线配置的标签
     # 注意：即使传入了tag参数，我们仍然需要检查分支标签映射，因为tag可能是外层已经映射过的
     final_tag = tag if tag is not None else pipeline_original_tag
@@ -3941,11 +4027,13 @@ def pipeline_to_task_config(
                 elif isinstance(mapped_tag_value, str):
                     if "," in mapped_tag_value:
                         # 逗号分隔的多个标签
-                        tag_list = [t.strip() for t in mapped_tag_value.split(",") if t.strip()]
+                        tag_list = [
+                            t.strip() for t in mapped_tag_value.split(",") if t.strip()
+                        ]
                     else:
                         # 单个标签
                         tag_list = [mapped_tag_value]
-                
+
                 # 如果传入了tag参数，且该tag在映射值列表中，使用传入的tag
                 # 这样可以支持多个标签的场景（如test分支映射到dev,test两个标签）
                 if tag and tag in tag_list:
@@ -3971,7 +4059,7 @@ def pipeline_to_task_config(
     push_mode = pipeline.get("push_mode", "multi")
     service_push_config = pipeline.get("service_push_config", {})
     selected_services = pipeline.get("selected_services", [])
-    
+
     # 在多服务模式下，如果标签已被映射更新，需要同步到 service_push_config 中每个服务的 tag
     if push_mode == "multi" and trigger_source in ["webhook", "manual"]:
         # 使用流水线的原始标签作为基准，用于判断是否需要更新服务标签
@@ -3981,8 +4069,9 @@ def pipeline_to_task_config(
             if selected_services and service_push_config:
                 # 深拷贝 service_push_config，避免修改原始 pipeline 数据
                 import copy
+
                 service_push_config = copy.deepcopy(service_push_config)
-                
+
                 # 更新每个服务的 tag（强制使用映射后的标签，因为这是分支标签映射的结果）
                 # 注意：即使服务配置中已经有tag，也要更新为映射后的标签，因为这是分支标签映射的要求
                 for service_name in selected_services:
@@ -3994,7 +4083,9 @@ def pipeline_to_task_config(
                             # 强制更新为映射后的标签（分支标签映射的优先级最高）
                             service_config["tag"] = final_tag
                             service_push_config[service_name] = service_config
-                            print(f"   - 更新服务 {service_name} 的标签为: {final_tag} (分支标签映射)")
+                            print(
+                                f"   - 更新服务 {service_name} 的标签为: {final_tag} (分支标签映射)"
+                            )
                         else:
                             # 兼容旧格式：只有 push 布尔值，转换为新格式
                             service_push_config[service_name] = {
@@ -4003,7 +4094,9 @@ def pipeline_to_task_config(
                                 "imageName": "",
                                 "tag": final_tag,
                             }
-                            print(f"   - 为服务 {service_name} 转换并设置标签为: {final_tag} (分支标签映射)")
+                            print(
+                                f"   - 为服务 {service_name} 转换并设置标签为: {final_tag} (分支标签映射)"
+                            )
                     else:
                         # 如果服务没有配置，创建一个默认配置并使用映射后的标签
                         service_push_config[service_name] = {
@@ -4012,7 +4105,9 @@ def pipeline_to_task_config(
                             "imageName": "",
                             "tag": final_tag,
                         }
-                        print(f"   - 为服务 {service_name} 创建配置，标签为: {final_tag} (分支标签映射)")
+                        print(
+                            f"   - 为服务 {service_name} 创建配置，标签为: {final_tag} (分支标签映射)"
+                        )
 
     should_push = False
     if push_mode == "single":
@@ -4685,9 +4780,7 @@ class ExportTaskManager:
         try:
             # 只标记 running 状态的任务为失败，pending 状态的任务可以继续执行
             lost_tasks = (
-                db.query(ExportTask)
-                .filter(ExportTask.status == "running")
-                .all()
+                db.query(ExportTask).filter(ExportTask.status == "running").all()
             )
             if lost_tasks:
                 for task in lost_tasks:
@@ -4696,15 +4789,15 @@ class ExportTaskManager:
                     task.completed_at = datetime.now()
                 db.commit()
                 print(f"⚠️ 已将 {len(lost_tasks)} 个运行中的导出任务标记为失败")
-            
+
             # pending 状态的任务保持原样，可以继续执行
             pending_tasks = (
-                db.query(ExportTask)
-                .filter(ExportTask.status == "pending")
-                .all()
+                db.query(ExportTask).filter(ExportTask.status == "pending").all()
             )
             if pending_tasks:
-                print(f"ℹ️ 发现 {len(pending_tasks)} 个待执行的导出任务，将保持 pending 状态")
+                print(
+                    f"ℹ️ 发现 {len(pending_tasks)} 个待执行的导出任务，将保持 pending 状态"
+                )
         except Exception as e:
             db.rollback()
             print(f"⚠️ 标记丢失导出任务失败: {e}")
@@ -4824,36 +4917,71 @@ class ExportTaskManager:
             db.close()
 
     def _export_task(self, task_id: str):
-        """执行导出任务"""
+        """执行导出任务（明确标识为导出任务，避免与其他任务混淆）"""
         from backend.database import get_db_session
         from backend.models import ExportTask
+
+        print(f"📦 [导出任务] 开始执行导出任务: {task_id[:8]}")
 
         # 检查任务是否存在
         db = get_db_session()
         try:
             task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
             if not task:
+                print(f"❌ [导出任务] 任务 {task_id[:8]} 不存在")
+                return
+
+            # 验证任务类型（确保是导出任务）
+            if task.task_type != "export":
+                error_msg = f"任务类型错误: 期望 'export'，实际 '{task.task_type}'，这不是导出任务"
+                print(f"❌ [导出任务] {error_msg}")
+                self._update_task_status(task_id, "failed", error=error_msg)
                 return
 
             # 检查是否已请求停止（通过状态判断）
             # 注意：只有在任务真正被用户停止时才返回，不要因为其他原因自动停止
             if task.status == "stopped":
-                print(f"⚠️ 导出任务 {task_id[:8]} 已被用户停止，不执行")
+                print(f"⚠️ [导出任务] 任务 {task_id[:8]} 已被用户停止，不执行")
                 return
 
             # 更新状态为 running（只有在 pending 状态时才更新）
             if task.status == "pending":
                 task.status = "running"
                 db.commit()
+                print(f"🔄 [导出任务] 任务 {task_id[:8]} 状态已更新为 running")
 
             image = task.image
             tag = task.tag
             compress = task.compress
             registry = task.registry
             use_local = task.use_local
+
+            # 清理镜像名称：移除 http:// 或 https:// 前缀（Docker API 不接受协议前缀）
+            # 注意：虽然创建任务时已经验证，但这里再次清理以确保安全
+            if image:
+                image = image.strip()
+                if image.startswith("https://"):
+                    image = image[8:]
+                elif image.startswith("http://"):
+                    image = image[7:]
+
+                # 验证清理后的镜像名称格式
+                if not image:
+                    raise ValueError("镜像名称不能为空（清理协议前缀后为空）")
+                if " " in image:
+                    raise ValueError("镜像名称不能包含空格")
+
+            print(
+                f"📋 [导出任务] 任务配置: image={image}, tag={tag}, compress={compress}, registry={registry}, use_local={use_local}"
+            )
         except Exception as e:
             db.rollback()
-            print(f"⚠️ 获取任务失败: {e}")
+            import traceback
+
+            error_msg = f"获取导出任务失败: {e}"
+            print(f"❌ [导出任务] {error_msg}")
+            traceback.print_exc()
+            self._update_task_status(task_id, "failed", error=error_msg)
             return
         finally:
             db.close()
@@ -4921,7 +5049,9 @@ class ExportTaskManager:
                             return
                         # 只有在明确被用户停止时才停止
                         if task.status == "stopped":
-                            print(f"⚠️ 导出任务 {task_id[:8]} 在拉取镜像过程中被用户停止")
+                            print(
+                                f"⚠️ 导出任务 {task_id[:8]} 在拉取镜像过程中被用户停止"
+                            )
                             return
                     if "error" in chunk:
                         # 有错误时先检查是否被停止
@@ -4994,6 +5124,7 @@ class ExportTaskManager:
                 file_size = os.path.getsize(final_path)
 
             # 更新任务状态
+            print(f"✅ [导出任务] 任务 {task_id[:8]} 执行成功: {final_path}")
             self._update_task_status(
                 task_id, "completed", file_path=final_path, file_size=file_size
             )
@@ -5002,6 +5133,7 @@ class ExportTaskManager:
             import traceback
 
             error_msg = str(e)
+            print(f"❌ [导出任务] 任务 {task_id[:8]} 执行失败: {error_msg}")
             traceback.print_exc()
             self._update_task_status(task_id, "failed", error=error_msg)
 
@@ -5103,9 +5235,9 @@ class ExportTaskManager:
             raise
         finally:
             db.close()
-    
+
     def retry_task(self, task_id: str) -> bool:
-        """重试失败或停止的任务"""
+        """重试失败或停止的任务（确保是导出任务）"""
         from backend.database import get_db_session
         from backend.models import ExportTask
 
@@ -5113,10 +5245,29 @@ class ExportTaskManager:
         try:
             task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
             if not task:
+                print(f"⚠️ 导出任务 {task_id[:8]} 不存在")
+                return False
+
+            # 验证任务类型（确保是导出任务）
+            if task.task_type != "export":
+                print(
+                    f"⚠️ 任务 {task_id[:8]} 不是导出任务（task_type={task.task_type}），无法重试"
+                )
                 return False
 
             # 只有失败或停止的任务才能重试
             if task.status not in ("failed", "stopped"):
+                print(
+                    f"⚠️ 导出任务 {task_id[:8]} 状态为 {task.status}，无法重试（只有失败或停止的任务才能重试）"
+                )
+                return False
+
+            # 验证必要参数
+            if not task.image:
+                print(f"⚠️ 导出任务 {task_id[:8]} 缺少镜像名称，无法重试")
+                task.error = "任务缺少镜像名称，无法重试"
+                task.status = "failed"
+                db.commit()
                 return False
 
             # 重置任务状态
@@ -5127,7 +5278,8 @@ class ExportTaskManager:
 
             db.commit()
 
-            # 启动导出任务
+            # 启动导出任务（明确调用导出任务方法）
+            print(f"🔄 重新启动导出任务: {task_id[:8]}, image={task.image}:{task.tag}")
             thread = threading.Thread(
                 target=self._export_task,
                 args=(task_id,),
@@ -5139,6 +5291,10 @@ class ExportTaskManager:
             return True
         except Exception as e:
             db.rollback()
+            import traceback
+
+            print(f"❌ 重试导出任务失败: {e}")
+            traceback.print_exc()
             raise
         finally:
             db.close()

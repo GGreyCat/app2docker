@@ -40,6 +40,7 @@ from backend.handlers import (
     docker_builder,
     DOCKER_AVAILABLE,
     parse_dockerfile_services,
+    validate_and_clean_image_name,
 )
 from backend.resource_package_manager import ResourcePackageManager
 from backend.host_manager import HostManager
@@ -2429,6 +2430,12 @@ async def create_export_task(
             image_name, inferred_tag = image_name.rsplit(":", 1)
             if inferred_tag:
                 tag_name = inferred_tag
+
+        # 验证和清理镜像名称（检查格式，移除协议前缀等）
+        try:
+            image_name = validate_and_clean_image_name(image_name)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         # 创建导出任务
         task_manager = ExportTaskManager()
