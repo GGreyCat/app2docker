@@ -4677,15 +4677,16 @@ class ExportTaskManager:
         self._start_cleanup_task()
 
     def _mark_lost_tasks_as_failed(self):
-        """将服务重启时丢失的任务标记为失败"""
+        """将服务重启时丢失的任务标记为失败（只标记运行中的任务，pending 状态的任务可以继续执行）"""
         from backend.database import get_db_session
         from backend.models import ExportTask
 
         db = get_db_session()
         try:
+            # 只标记 running 状态的任务为失败，pending 状态的任务可以继续执行
             lost_tasks = (
                 db.query(ExportTask)
-                .filter(ExportTask.status.in_(["running", "pending"]))
+                .filter(ExportTask.status == "running")
                 .all()
             )
             if lost_tasks:
@@ -4694,7 +4695,16 @@ class ExportTaskManager:
                     task.error = "服务重启，任务中断"
                     task.completed_at = datetime.now()
                 db.commit()
-                print(f"⚠️ 已将 {len(lost_tasks)} 个丢失的导出任务标记为失败")
+                print(f"⚠️ 已将 {len(lost_tasks)} 个运行中的导出任务标记为失败")
+            
+            # pending 状态的任务保持原样，可以继续执行
+            pending_tasks = (
+                db.query(ExportTask)
+                .filter(ExportTask.status == "pending")
+                .all()
+            )
+            if pending_tasks:
+                print(f"ℹ️ 发现 {len(pending_tasks)} 个待执行的导出任务，将保持 pending 状态")
         except Exception as e:
             db.rollback()
             print(f"⚠️ 标记丢失导出任务失败: {e}")
@@ -5087,6 +5097,45 @@ class ExportTaskManager:
 
             db.commit()
             print(f"✅ 导出任务 {task_id[:8]} 已停止")
+            return True
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+    
+    def retry_task(self, task_id: str) -> bool:
+        """重试失败或停止的任务"""
+        from backend.database import get_db_session
+        from backend.models import ExportTask
+
+        db = get_db_session()
+        try:
+            task = db.query(ExportTask).filter(ExportTask.task_id == task_id).first()
+            if not task:
+                return False
+
+            # 只有失败或停止的任务才能重试
+            if task.status not in ("failed", "stopped"):
+                return False
+
+            # 重置任务状态
+            task.status = "pending"
+            task.error = None
+            task.completed_at = None
+            # 保留原有的 file_path 和 file_size，但会在新任务完成时更新
+
+            db.commit()
+
+            # 启动导出任务
+            thread = threading.Thread(
+                target=self._export_task,
+                args=(task_id,),
+                daemon=True,
+            )
+            thread.start()
+
+            print(f"✅ 导出任务 {task_id[:8]} 已重新启动")
             return True
         except Exception as e:
             db.rollback()
