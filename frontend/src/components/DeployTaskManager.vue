@@ -66,10 +66,10 @@
                   <i class="fas fa-eye"></i>
                 </button>
                 <button 
-                  v-if="task.status?.status === 'pending' || task.status?.status === 'failed'"
                   class="btn btn-sm btn-outline-success" 
                   @click="executeTask(task)"
-                  title="执行任务"
+                  :disabled="task.status?.status === 'running'"
+                  :title="task.status?.status === 'running' ? '任务执行中' : '执行任务'"
                 >
                   <i class="fas fa-play"></i>
                 </button>
@@ -476,11 +476,12 @@
               <i class="fas fa-copy me-1"></i> 复制
             </button>
             <button 
-              v-if="selectedTask.status?.status === 'pending' || selectedTask.status?.status === 'failed'"
               class="btn btn-success" 
               @click="executeTask(selectedTask)"
+              :disabled="selectedTask.status?.status === 'running'"
             >
-              <i class="fas fa-play me-1"></i> 执行任务
+              <i class="fas fa-play me-1"></i> 
+              {{ selectedTask.status?.status === 'running' ? '执行中...' : '执行任务' }}
             </button>
           </div>
         </div>

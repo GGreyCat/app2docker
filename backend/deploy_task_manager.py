@@ -296,6 +296,20 @@ class DeployTaskManager:
         if target_names:
             targets = [t for t in targets if t.get("name") in target_names]
         
+        # 如果任务已完成或失败，重置要执行的目标状态为 pending
+        current_status = status.get("status")
+        if current_status in ["completed", "failed"]:
+            for target in targets:
+                target_name = target.get("name")
+                # 重置目标状态为 pending
+                self.update_task_status(
+                    task_id,
+                    target_name=target_name,
+                    status="pending",
+                    result=None,
+                    message="任务已重置，准备重新执行"
+                )
+        
         # 更新任务状态为运行中
         self.update_task_status(task_id, status="running")
         
