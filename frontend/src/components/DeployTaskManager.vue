@@ -111,13 +111,181 @@
             <button type="button" class="btn-close" @click="showSimpleCreateModal = false"></button>
           </div>
           <div class="modal-body">
+            <!-- 应用基本信息 -->
             <div class="mb-3">
               <label class="form-label">应用名称 <span class="text-danger">*</span></label>
               <input v-model="simpleForm.appName" type="text" class="form-control" placeholder="my-app">
+              <small class="text-muted">用于标识此部署任务的应用名称</small>
             </div>
             
+            <!-- 统一部署配置 -->
+            <div class="card mb-3">
+              <div class="card-header bg-light">
+                <h6 class="mb-0">
+                  <i class="fas fa-cogs me-2"></i> 部署配置（统一配置，适用于所有目标主机）
+                </h6>
+              </div>
+              <div class="card-body">
+                <div class="mb-3">
+                  <label class="form-label">部署方式 <span class="text-danger">*</span></label>
+                  <div class="btn-group w-100" role="group">
+                    <input type="radio" class="btn-check" id="deploy-run" v-model="simpleForm.deployMode" value="docker_run" checked>
+                    <label class="btn btn-outline-primary" for="deploy-run">
+                      <i class="fas fa-terminal me-1"></i> Docker Run
+                    </label>
+                    
+                    <input type="radio" class="btn-check" id="deploy-compose" v-model="simpleForm.deployMode" value="docker_compose">
+                    <label class="btn btn-outline-primary" for="deploy-compose">
+                      <i class="fas fa-layer-group me-1"></i> Docker Compose
+                    </label>
+                    
+                    <input type="radio" class="btn-check" id="deploy-multi-step" v-model="simpleForm.deployMode" value="multi_step">
+                    <label class="btn btn-outline-primary" for="deploy-multi-step">
+                      <i class="fas fa-list-ol me-1"></i> 多步骤
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Docker Run 命令输入 -->
+                <div v-if="simpleForm.deployMode === 'docker_run'" class="mb-3">
+                  <label class="form-label">Docker Run 命令 <span class="text-danger">*</span></label>
+                  <textarea 
+                    v-model="simpleForm.runCommand" 
+                    class="form-control font-monospace" 
+                    rows="6"
+                    placeholder="-d --name my-app -p 8000:8000 registry.cn-hangzhou.aliyuncs.com/namespace/app:tag"
+                  ></textarea>
+                  <small class="text-muted">输入 docker run 的参数（可包含 "docker run" 前缀，系统会自动适配）</small>
+                </div>
+
+                <!-- Docker Compose 命令输入 -->
+                <div v-if="simpleForm.deployMode === 'docker_compose'" class="mb-3">
+                  <label class="form-label">Docker Compose 命令 <span class="text-danger">*</span></label>
+                  <input 
+                    v-model="simpleForm.composeCommand" 
+                    type="text" 
+                    class="form-control font-monospace" 
+                    placeholder="up -d"
+                  >
+                  <small class="text-muted">输入 docker-compose 命令参数（不包含 "docker-compose" 前缀，如：up -d）</small>
+                </div>
+
+                <div v-if="simpleForm.deployMode === 'docker_compose'" class="mb-3">
+                  <label class="form-label">docker-compose.yml 内容 <span class="text-danger">*</span></label>
+                  <textarea 
+                    v-model="simpleForm.composeContent" 
+                    class="form-control font-monospace" 
+                    rows="15"
+                    placeholder="version: '3.8'&#10;services:&#10;  app:&#10;    image: registry.cn-hangzhou.aliyuncs.com/namespace/app:tag&#10;    ports:&#10;      - '8000:8000'"
+                  ></textarea>
+                  <small class="text-muted">输入完整的 docker-compose.yml 内容</small>
+                </div>
+
+                <!-- 多步骤配置 -->
+                <div v-if="simpleForm.deployMode === 'multi_step'" class="mb-3">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                      <label class="form-label mb-0">部署步骤 <span class="text-danger">*</span></label>
+                      <small class="text-muted d-block">按顺序添加多个部署步骤，系统将依次执行</small>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" @click="addStep">
+                      <i class="fas fa-plus me-1"></i> 添加步骤
+                    </button>
+                  </div>
+                  
+                  <div v-if="simpleForm.steps.length === 0" class="alert alert-info mb-0">
+                    <i class="fas fa-info-circle me-1"></i>
+                    请至少添加一个部署步骤
+                  </div>
+                  
+                  <div v-else class="steps-list">
+                    <div 
+                      v-for="(step, index) in simpleForm.steps" 
+                      :key="index" 
+                      class="card mb-2 step-card"
+                      :class="{ 'border-primary': step.name || step.command }"
+                    >
+                      <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                          <div class="d-flex align-items-center">
+                            <span class="badge bg-primary me-2" style="min-width: 60px;">步骤 {{ index + 1 }}</span>
+                            <span v-if="step.name" class="text-muted small">{{ step.name }}</span>
+                            <span v-else class="text-muted small fst-italic">未命名步骤</span>
+                          </div>
+                          <div class="btn-group btn-group-sm">
+                            <button 
+                              type="button" 
+                              class="btn btn-outline-secondary" 
+                              @click="moveStep(index, -1)"
+                              :disabled="index === 0"
+                              title="上移"
+                            >
+                              <i class="fas fa-arrow-up"></i>
+                            </button>
+                            <button 
+                              type="button" 
+                              class="btn btn-outline-secondary" 
+                              @click="moveStep(index, 1)"
+                              :disabled="index === simpleForm.steps.length - 1"
+                              title="下移"
+                            >
+                              <i class="fas fa-arrow-down"></i>
+                            </button>
+                            <button 
+                              type="button" 
+                              class="btn btn-outline-danger" 
+                              @click="removeStep(index)" 
+                              title="删除步骤"
+                            >
+                              <i class="fas fa-trash"></i>
+                            </button>
+                          </div>
+                        </div>
+                        <div class="mb-2">
+                          <label class="form-label small mb-1">步骤名称</label>
+                          <input 
+                            v-model="step.name" 
+                            type="text" 
+                            class="form-control form-control-sm" 
+                            placeholder="例如：停止旧容器、拉取镜像、启动容器"
+                          >
+                        </div>
+                        <div>
+                          <label class="form-label small mb-1">执行命令</label>
+                          <textarea 
+                            v-model="step.command" 
+                            class="form-control font-monospace form-control-sm" 
+                            rows="4"
+                            placeholder="docker stop my-app || true&#10;或&#10;docker pull registry.cn-hangzhou.aliyuncs.com/namespace/app:latest"
+                          ></textarea>
+                          <small class="text-muted">输入要执行的命令或脚本，支持多行</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mb-0">
+                  <div class="form-check form-switch">
+                    <input 
+                      class="form-check-input" 
+                      type="checkbox" 
+                      id="redeploySwitch"
+                      v-model="simpleForm.redeploy"
+                    >
+                    <label class="form-check-label" for="redeploySwitch">
+                      <i class="fas fa-redo me-1"></i> 重新发布（如果主机上已存在，先停止并删除）
+                    </label>
+                  </div>
+                  <small class="text-muted">启用后，部署前会先停止并删除已有的容器或服务</small>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 目标主机选择 -->
             <div class="mb-3">
               <label class="form-label">选择目标主机 <span class="text-danger">*</span></label>
+              <small class="text-muted d-block mb-2">选择要部署到的主机，上述部署配置将应用到所有选中的主机</small>
               
               <!-- 主机类型筛选和搜索 -->
               <div class="mb-2">
@@ -244,71 +412,6 @@
                 </small>
               </div>
             </div>
-
-            <div class="mb-3">
-              <label class="form-label">部署方式 <span class="text-danger">*</span></label>
-              <div class="btn-group w-100" role="group">
-                <input type="radio" class="btn-check" id="deploy-run" v-model="simpleForm.deployMode" value="docker_run" checked>
-                <label class="btn btn-outline-primary" for="deploy-run">
-                  <i class="fas fa-terminal me-1"></i> Docker Run
-                </label>
-                
-                <input type="radio" class="btn-check" id="deploy-compose" v-model="simpleForm.deployMode" value="docker_compose">
-                <label class="btn btn-outline-primary" for="deploy-compose">
-                  <i class="fas fa-layer-group me-1"></i> Docker Compose
-                </label>
-              </div>
-            </div>
-
-            <!-- Docker Run 命令输入 -->
-            <div v-if="simpleForm.deployMode === 'docker_run'" class="mb-3">
-              <label class="form-label">Docker Run 命令 <span class="text-danger">*</span></label>
-              <textarea 
-                v-model="simpleForm.runCommand" 
-                class="form-control font-monospace" 
-                rows="6"
-                placeholder="-d --name my-app -p 8000:8000 registry.cn-hangzhou.aliyuncs.com/namespace/app:tag"
-              ></textarea>
-              <small class="text-muted">输入 docker run 的参数（不包含 "docker run" 前缀）</small>
-            </div>
-
-            <!-- Docker Compose 命令输入 -->
-            <div v-if="simpleForm.deployMode === 'docker_compose'" class="mb-3">
-              <label class="form-label">Docker Compose 命令 <span class="text-danger">*</span></label>
-              <input 
-                v-model="simpleForm.composeCommand" 
-                type="text" 
-                class="form-control font-monospace" 
-                placeholder="up -d"
-              >
-              <small class="text-muted">输入 docker-compose 命令参数（不包含 "docker-compose" 前缀，如：up -d）</small>
-            </div>
-
-            <div v-if="simpleForm.deployMode === 'docker_compose'" class="mb-3">
-              <label class="form-label">docker-compose.yml 内容 <span class="text-danger">*</span></label>
-              <textarea 
-                v-model="simpleForm.composeContent" 
-                class="form-control font-monospace" 
-                rows="15"
-                placeholder="version: '3.8'&#10;services:&#10;  app:&#10;    image: registry.cn-hangzhou.aliyuncs.com/namespace/app:tag&#10;    ports:&#10;      - '8000:8000'"
-              ></textarea>
-              <small class="text-muted">输入完整的 docker-compose.yml 内容</small>
-            </div>
-
-            <div class="mb-3">
-              <div class="form-check form-switch">
-                <input 
-                  class="form-check-input" 
-                  type="checkbox" 
-                  id="redeploySwitch"
-                  v-model="simpleForm.redeploy"
-                >
-                <label class="form-check-label" for="redeploySwitch">
-                  <i class="fas fa-redo me-1"></i> 重新发布（如果主机上已存在，先停止并删除）
-                </label>
-              </div>
-              <small class="text-muted">启用后，部署前会先停止并删除已有的容器或服务</small>
-            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" @click="showSimpleCreateModal = false">取消</button>
@@ -400,12 +503,17 @@
             <ul class="nav nav-tabs mb-3">
               <li class="nav-item">
                 <button class="nav-link" :class="{ active: detailTab === 'config' }" @click="detailTab = 'config'">
-                  配置信息
+                  <i class="fas fa-cog me-1"></i> 配置信息
                 </button>
               </li>
               <li class="nav-item">
                 <button class="nav-link" :class="{ active: detailTab === 'status' }" @click="detailTab = 'status'">
-                  执行状态
+                  <i class="fas fa-tasks me-1"></i> 执行状态
+                </button>
+              </li>
+              <li class="nav-item">
+                <button class="nav-link" :class="{ active: detailTab === 'logs' }" @click="detailTab = 'logs'">
+                  <i class="fas fa-file-alt me-1"></i> 执行日志
                 </button>
               </li>
             </ul>
@@ -419,6 +527,12 @@
                 <strong>任务状态:</strong>
                 <span :class="getStatusBadgeClass(selectedTask.status?.status)" class="badge ms-2">
                   {{ getStatusText(selectedTask.status?.status) }}
+                </span>
+                <span v-if="selectedTask.status?.created_at" class="text-muted small ms-3">
+                  创建时间: {{ formatTime(selectedTask.status.created_at) }}
+                </span>
+                <span v-if="selectedTask.status?.completed_at" class="text-muted small ms-3">
+                  完成时间: {{ formatTime(selectedTask.status.completed_at) }}
                 </span>
               </div>
               <div v-if="selectedTask.status?.targets" class="mb-3">
@@ -441,16 +555,15 @@
                       </td>
                       <td>
                         <div v-if="target.result" class="small">
-                          <div class="text-muted">
+                          <div :class="target.result.success ? 'text-success' : 'text-danger'">
+                            <strong>{{ target.result.success ? '✓' : '✗' }}</strong>
                             {{ target.result.message || '-' }}
                           </div>
                           <div v-if="target.result.error" class="text-danger mt-1">
                             <strong>错误:</strong> {{ target.result.error }}
                           </div>
-                        </div>
-                        <div v-else-if="target.messages && target.messages.length > 0" class="small">
-                          <div v-for="(msg, idx) in target.messages" :key="idx" class="text-info">
-                            [{{ formatTime(msg.time) }}] {{ msg.message }}
+                          <div v-if="target.result.output" class="text-muted mt-1 font-monospace small" style="max-height: 100px; overflow-y: auto;">
+                            {{ target.result.output }}
                           </div>
                         </div>
                         <span v-else class="text-muted">-</span>
@@ -458,6 +571,99 @@
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </div>
+
+            <!-- 执行日志标签页 -->
+            <div v-if="detailTab === 'logs'">
+              <div class="mb-2 d-flex justify-content-between align-items-center">
+                <strong>执行日志</strong>
+                <button 
+                  class="btn btn-sm btn-outline-secondary" 
+                  @click="refreshTask(selectedTask)"
+                  title="刷新日志"
+                >
+                  <i class="fas fa-sync-alt me-1"></i> 刷新
+                </button>
+              </div>
+              
+              <div v-if="selectedTask.status?.targets && selectedTask.status.targets.length > 0">
+                <div 
+                  v-for="target in selectedTask.status.targets" 
+                  :key="target.name"
+                  class="card mb-3"
+                >
+                  <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                      <strong>{{ target.name }}</strong>
+                      <span :class="getStatusBadgeClass(target.status)" class="badge ms-2">
+                        {{ getStatusText(target.status) }}
+                      </span>
+                    </div>
+                    <span v-if="target.updated_at" class="text-muted small">
+                      {{ formatTime(target.updated_at) }}
+                    </span>
+                  </div>
+                  <div class="card-body">
+                    <!-- 执行结果 -->
+                    <div v-if="target.result" class="mb-3">
+                      <div class="d-flex align-items-center mb-2">
+                        <strong class="me-2">执行结果:</strong>
+                        <span :class="target.result.success ? 'text-success' : 'text-danger'">
+                          <i :class="target.result.success ? 'fas fa-check-circle' : 'fas fa-times-circle'"></i>
+                          {{ target.result.success ? '成功' : '失败' }}
+                        </span>
+                      </div>
+                      <div v-if="target.result.message" class="alert" :class="target.result.success ? 'alert-success' : 'alert-danger'">
+                        {{ target.result.message }}
+                      </div>
+                      <div v-if="target.result.error" class="alert alert-danger">
+                        <strong>错误信息:</strong>
+                        <pre class="mb-0 mt-2">{{ target.result.error }}</pre>
+                      </div>
+                      <div v-if="target.result.output" class="mt-2">
+                        <strong>输出内容:</strong>
+                        <pre class="bg-dark text-light p-3 rounded mt-2" style="max-height: 300px; overflow-y: auto; font-size: 12px;">{{ target.result.output }}</pre>
+                      </div>
+                      <div v-if="target.result.command" class="mt-2">
+                        <strong>执行命令:</strong>
+                        <code class="d-block bg-light p-2 rounded mt-1">{{ target.result.command }}</code>
+                      </div>
+                      <div v-if="target.result.exit_status !== undefined" class="mt-2">
+                        <strong>退出状态码:</strong>
+                        <span :class="target.result.exit_status === 0 ? 'text-success' : 'text-danger'">
+                          {{ target.result.exit_status }}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <!-- 执行日志消息 -->
+                    <div v-if="target.messages && target.messages.length > 0">
+                      <strong class="mb-2 d-block">执行过程:</strong>
+                      <div class="log-container bg-dark text-light p-3 rounded" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px;">
+                        <div 
+                          v-for="(msg, idx) in target.messages" 
+                          :key="idx"
+                          class="log-line mb-1"
+                          :class="getLogLineClass(msg.message)"
+                        >
+                          <span class="text-muted">[{{ formatTime(msg.time) }}]</span>
+                          <span class="ms-2">{{ msg.message }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div v-if="!target.result && (!target.messages || target.messages.length === 0)" class="text-muted text-center py-3">
+                      <i class="fas fa-info-circle me-1"></i>
+                      暂无日志信息
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div v-else class="text-muted text-center py-4">
+                <i class="fas fa-info-circle me-1"></i>
+                暂无执行日志
               </div>
             </div>
           </div>
@@ -502,12 +708,22 @@
             <!-- 编辑方式切换标签页 -->
             <ul class="nav nav-tabs mb-3">
               <li class="nav-item">
-                <button class="nav-link" :class="{ active: editMode === 'form' }" @click="editMode = 'form'">
+                <button 
+                  class="nav-link" 
+                  :class="{ active: editMode === 'form' }" 
+                  @click="editMode = 'form'"
+                  type="button"
+                >
                   <i class="fas fa-edit me-1"></i> 表单编辑
                 </button>
               </li>
               <li class="nav-item">
-                <button class="nav-link" :class="{ active: editMode === 'yaml' }" @click="editMode = 'yaml'">
+                <button 
+                  class="nav-link" 
+                  :class="{ active: editMode === 'yaml' }" 
+                  @click="switchToYamlMode"
+                  type="button"
+                >
                   <i class="fas fa-code me-1"></i> YAML编辑
                 </button>
               </li>
@@ -515,13 +731,181 @@
 
             <!-- 表单编辑模式 -->
             <div v-if="editMode === 'form'">
+              <!-- 应用基本信息 -->
               <div class="mb-3">
                 <label class="form-label">应用名称 <span class="text-danger">*</span></label>
                 <input v-model="editForm.appName" type="text" class="form-control" placeholder="my-app">
+                <small class="text-muted">用于标识此部署任务的应用名称</small>
               </div>
               
+              <!-- 统一部署配置 -->
+              <div class="card mb-3">
+                <div class="card-header bg-light">
+                  <h6 class="mb-0">
+                    <i class="fas fa-cogs me-2"></i> 部署配置（统一配置，适用于所有目标主机）
+                  </h6>
+                </div>
+                <div class="card-body">
+                  <div class="mb-3">
+                    <label class="form-label">部署方式 <span class="text-danger">*</span></label>
+                    <div class="btn-group w-100" role="group">
+                      <input type="radio" class="btn-check" id="edit-deploy-run" v-model="editForm.deployMode" value="docker_run">
+                      <label class="btn btn-outline-primary" for="edit-deploy-run">
+                        <i class="fas fa-terminal me-1"></i> Docker Run
+                      </label>
+                      
+                      <input type="radio" class="btn-check" id="edit-deploy-compose" v-model="editForm.deployMode" value="docker_compose">
+                      <label class="btn btn-outline-primary" for="edit-deploy-compose">
+                        <i class="fas fa-layer-group me-1"></i> Docker Compose
+                      </label>
+                      
+                      <input type="radio" class="btn-check" id="edit-deploy-multi-step" v-model="editForm.deployMode" value="multi_step">
+                      <label class="btn btn-outline-primary" for="edit-deploy-multi-step">
+                        <i class="fas fa-list-ol me-1"></i> 多步骤
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- Docker Run 命令输入 -->
+                  <div v-if="editForm.deployMode === 'docker_run'" class="mb-3">
+                    <label class="form-label">Docker Run 命令 <span class="text-danger">*</span></label>
+                    <textarea 
+                      v-model="editForm.runCommand" 
+                      class="form-control font-monospace" 
+                      rows="6"
+                      placeholder="-d --name my-app -p 8000:8000 registry.cn-hangzhou.aliyuncs.com/namespace/app:tag"
+                    ></textarea>
+                    <small class="text-muted">输入 docker run 的参数（可包含 "docker run" 前缀，系统会自动适配）</small>
+                  </div>
+
+                  <!-- Docker Compose 命令输入 -->
+                  <div v-if="editForm.deployMode === 'docker_compose'" class="mb-3">
+                    <label class="form-label">Docker Compose 命令 <span class="text-danger">*</span></label>
+                    <input 
+                      v-model="editForm.composeCommand" 
+                      type="text" 
+                      class="form-control font-monospace" 
+                      placeholder="up -d"
+                    >
+                    <small class="text-muted">输入 docker-compose 命令参数（不包含 "docker-compose" 前缀，如：up -d）</small>
+                  </div>
+
+                  <div v-if="editForm.deployMode === 'docker_compose'" class="mb-3">
+                    <label class="form-label">docker-compose.yml 内容 <span class="text-danger">*</span></label>
+                    <textarea 
+                      v-model="editForm.composeContent" 
+                      class="form-control font-monospace" 
+                      rows="15"
+                      placeholder="version: '3.8'&#10;services:&#10;  app:&#10;    image: registry.cn-hangzhou.aliyuncs.com/namespace/app:tag&#10;    ports:&#10;      - '8000:8000'"
+                    ></textarea>
+                    <small class="text-muted">输入完整的 docker-compose.yml 内容</small>
+                  </div>
+
+                  <!-- 多步骤配置 -->
+                  <div v-if="editForm.deployMode === 'multi_step'" class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <div>
+                        <label class="form-label mb-0">部署步骤 <span class="text-danger">*</span></label>
+                        <small class="text-muted d-block">按顺序添加多个部署步骤，系统将依次执行</small>
+                      </div>
+                      <button type="button" class="btn btn-sm btn-outline-primary" @click="addEditStep">
+                        <i class="fas fa-plus me-1"></i> 添加步骤
+                      </button>
+                    </div>
+                    
+                    <div v-if="editForm.steps.length === 0" class="alert alert-info mb-0">
+                      <i class="fas fa-info-circle me-1"></i>
+                      请至少添加一个部署步骤
+                    </div>
+                    
+                    <div v-else class="steps-list">
+                      <div 
+                        v-for="(step, index) in editForm.steps" 
+                        :key="index" 
+                        class="card mb-2 step-card"
+                        :class="{ 'border-primary': step.name || step.command }"
+                      >
+                        <div class="card-body">
+                          <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div class="d-flex align-items-center">
+                              <span class="badge bg-primary me-2" style="min-width: 60px;">步骤 {{ index + 1 }}</span>
+                              <span v-if="step.name" class="text-muted small">{{ step.name }}</span>
+                              <span v-else class="text-muted small fst-italic">未命名步骤</span>
+                            </div>
+                            <div class="btn-group btn-group-sm">
+                              <button 
+                                type="button" 
+                                class="btn btn-outline-secondary" 
+                                @click="moveEditStep(index, -1)"
+                                :disabled="index === 0"
+                                title="上移"
+                              >
+                                <i class="fas fa-arrow-up"></i>
+                              </button>
+                              <button 
+                                type="button" 
+                                class="btn btn-outline-secondary" 
+                                @click="moveEditStep(index, 1)"
+                                :disabled="index === editForm.steps.length - 1"
+                                title="下移"
+                              >
+                                <i class="fas fa-arrow-down"></i>
+                              </button>
+                              <button 
+                                type="button" 
+                                class="btn btn-outline-danger" 
+                                @click="removeEditStep(index)" 
+                                title="删除步骤"
+                              >
+                                <i class="fas fa-trash"></i>
+                              </button>
+                            </div>
+                          </div>
+                          <div class="mb-2">
+                            <label class="form-label small mb-1">步骤名称</label>
+                            <input 
+                              v-model="step.name" 
+                              type="text" 
+                              class="form-control form-control-sm" 
+                              placeholder="例如：停止旧容器、拉取镜像、启动容器"
+                            >
+                          </div>
+                          <div>
+                            <label class="form-label small mb-1">执行命令</label>
+                            <textarea 
+                              v-model="step.command" 
+                              class="form-control font-monospace form-control-sm" 
+                              rows="4"
+                              placeholder="docker stop my-app || true&#10;或&#10;docker pull registry.cn-hangzhou.aliyuncs.com/namespace/app:latest"
+                            ></textarea>
+                            <small class="text-muted">输入要执行的命令或脚本，支持多行</small>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="mb-0">
+                    <div class="form-check form-switch">
+                      <input 
+                        class="form-check-input" 
+                        type="checkbox" 
+                        id="edit-redeploySwitch"
+                        v-model="editForm.redeploy"
+                      >
+                      <label class="form-check-label" for="edit-redeploySwitch">
+                        <i class="fas fa-redo me-1"></i> 重新发布（如果主机上已存在，先停止并删除）
+                      </label>
+                    </div>
+                    <small class="text-muted">启用后，部署前会先停止并删除已有的容器或服务</small>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 目标主机选择 -->
               <div class="mb-3">
                 <label class="form-label">选择目标主机 <span class="text-danger">*</span></label>
+                <small class="text-muted d-block mb-2">选择要部署到的主机，上述部署配置将应用到所有选中的主机</small>
                 
                 <!-- 主机类型筛选和搜索 -->
                 <div class="mb-2">
@@ -648,91 +1032,37 @@
                   </small>
                 </div>
               </div>
-
-              <div class="mb-3">
-                <label class="form-label">部署方式 <span class="text-danger">*</span></label>
-                <div class="btn-group w-100" role="group">
-                  <input type="radio" class="btn-check" id="edit-deploy-run" v-model="editForm.deployMode" value="docker_run">
-                  <label class="btn btn-outline-primary" for="edit-deploy-run">
-                    <i class="fas fa-terminal me-1"></i> Docker Run
-                  </label>
-                  
-                  <input type="radio" class="btn-check" id="edit-deploy-compose" v-model="editForm.deployMode" value="docker_compose">
-                  <label class="btn btn-outline-primary" for="edit-deploy-compose">
-                    <i class="fas fa-layer-group me-1"></i> Docker Compose
-                  </label>
-                </div>
-              </div>
-
-              <!-- Docker Run 命令输入 -->
-              <div v-if="editForm.deployMode === 'docker_run'" class="mb-3">
-                <label class="form-label">Docker Run 命令 <span class="text-danger">*</span></label>
-                <textarea 
-                  v-model="editForm.runCommand" 
-                  class="form-control font-monospace" 
-                  rows="6"
-                  placeholder="-d --name my-app -p 8000:8000 registry.cn-hangzhou.aliyuncs.com/namespace/app:tag"
-                ></textarea>
-                <small class="text-muted">输入 docker run 的参数（不包含 "docker run" 前缀）</small>
-              </div>
-
-              <!-- Docker Compose 命令输入 -->
-              <div v-if="editForm.deployMode === 'docker_compose'" class="mb-3">
-                <label class="form-label">Docker Compose 命令 <span class="text-danger">*</span></label>
-                <input 
-                  v-model="editForm.composeCommand" 
-                  type="text" 
-                  class="form-control font-monospace" 
-                  placeholder="up -d"
-                >
-                <small class="text-muted">输入 docker-compose 命令参数（不包含 "docker-compose" 前缀，如：up -d）</small>
-              </div>
-
-              <div v-if="editForm.deployMode === 'docker_compose'" class="mb-3">
-                <label class="form-label">docker-compose.yml 内容 <span class="text-danger">*</span></label>
-                <textarea 
-                  v-model="editForm.composeContent" 
-                  class="form-control font-monospace" 
-                  rows="15"
-                  placeholder="version: '3.8'&#10;services:&#10;  app:&#10;    image: registry.cn-hangzhou.aliyuncs.com/namespace/app:tag&#10;    ports:&#10;      - '8000:8000'"
-                ></textarea>
-                <small class="text-muted">输入完整的 docker-compose.yml 内容</small>
-              </div>
-
-              <div class="mb-3">
-                <div class="form-check form-switch">
-                  <input 
-                    class="form-check-input" 
-                    type="checkbox" 
-                    id="edit-redeploySwitch"
-                    v-model="editForm.redeploy"
-                  >
-                  <label class="form-check-label" for="edit-redeploySwitch">
-                    <i class="fas fa-redo me-1"></i> 重新发布（如果主机上已存在，先停止并删除）
-                  </label>
-                </div>
-                <small class="text-muted">启用后，部署前会先停止并删除已有的容器或服务</small>
-              </div>
             </div>
 
             <!-- YAML编辑模式 -->
-            <div v-if="editMode === 'yaml'">
+            <div v-if="editMode === 'yaml' && editingTask">
               <div class="mb-3">
                 <label class="form-label">YAML 配置内容</label>
                 <textarea 
                   v-model="editingTask.config_content" 
                   class="form-control font-monospace" 
                   rows="20"
+                  placeholder="请输入 deploy-config.yaml 格式的配置..."
                 ></textarea>
               </div>
               <div class="row">
                 <div class="col-md-6">
                   <label class="form-label">镜像仓库（可选）</label>
-                  <input v-model="editingTask.registry" type="text" class="form-control" placeholder="docker.io">
+                  <input 
+                    v-model="editingTask.registry" 
+                    type="text" 
+                    class="form-control" 
+                    placeholder="docker.io"
+                  >
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">镜像标签（可选）</label>
-                  <input v-model="editingTask.tag" type="text" class="form-control" placeholder="latest">
+                  <input 
+                    v-model="editingTask.tag" 
+                    type="text" 
+                    class="form-control" 
+                    placeholder="latest"
+                  >
                 </div>
               </div>
             </div>
@@ -773,7 +1103,6 @@ export default {
       editingTask: null,
       selectedTask: null,
       detailTab: 'config',
-      editMode: 'form', // 'form' or 'yaml'
       editHostFilter: 'all',
       editFilterOnlineOnly: true,
       editHostSearchKeyword: '',
@@ -1144,70 +1473,58 @@ export default {
         }
       }
 
-      // 将命令转换为统一的YAML配置格式
-      // 无论前端是表单输入还是直接输入YAML，最终都统一为YAML格式保存
-      // 后端会解析YAML并推送给Agent执行部署
+      // 将命令转换为统一的YAML配置格式（新格式）
+      // 新格式：统一的deploy配置 + targets列表
       const targets = []
       for (const hostId of this.simpleForm.selectedHosts) {
         // 在所有主机列表中查找（包括 Agent、Portainer 和 SSH）
         const host = [...this.agentHosts, ...this.sshHosts].find(h => h.host_id === hostId)
         if (!host) continue
         
-        // 确定主机类型和模式
-        let mode = 'agent'
-        let targetConfig = {}
-        
+        // 确定主机类型
+        let hostType = 'agent'
         if (host.host_type === 'portainer') {
-          // Portainer 主机：使用 agent 模式，但会通过 host_type 识别
-          mode = 'agent'
-          targetConfig = {
-            agent: {
-              name: host.name
-            }
-          }
+          hostType = 'portainer'
         } else if (host.host_type === 'agent') {
-          // Agent 主机
-          mode = 'agent'
-          targetConfig = {
-            agent: {
-              name: host.name
-            }
-          }
+          hostType = 'agent'
         } else {
-          // SSH 主机
-          mode = 'ssh'
-          targetConfig = {
-            host: host.name
-          }
-        }
-
-        const dockerConfig = {
-          deploy_mode: this.simpleForm.deployMode,
-          redeploy: this.simpleForm.redeploy
-        }
-
-        if (this.simpleForm.deployMode === 'docker_run') {
-          // Docker Run 模式：将命令保存到 command 字段
-          dockerConfig.command = this.simpleForm.runCommand.trim()
-          // 尝试从命令中提取镜像名称（用于显示）
-          const imageMatch = this.simpleForm.runCommand.match(/([\w\.\-:\/]+(?::[\w\.\-]+)?)$/)
-          if (imageMatch) {
-            dockerConfig.image_template = imageMatch[1]
-          } else {
-            dockerConfig.image_template = 'unknown'
-          }
-        } else {
-          // Docker Compose 模式：保存命令和compose内容
-          dockerConfig.command = this.simpleForm.composeCommand.trim()
-          dockerConfig.compose_content = this.simpleForm.composeContent.trim()
+          hostType = 'ssh'
         }
 
         targets.push({
           name: `${host.name}-deploy`,
-          mode: mode,
-          ...targetConfig,
-          docker: dockerConfig
+          host_type: hostType,
+          host_name: host.name
         })
+      }
+
+      // 构建统一的deploy配置
+      let deployConfig = {}
+      
+      if (this.simpleForm.deployMode === 'multi_step') {
+        // 多步骤模式
+        deployConfig = {
+          steps: this.simpleForm.steps.map(step => ({
+            name: step.name.trim(),
+            command: step.command.trim()
+          }))
+        }
+      } else {
+        // 单命令模式
+        deployConfig = {
+          type: this.simpleForm.deployMode === 'docker_compose' ? 'docker_compose' : 'docker_run',
+          command: this.simpleForm.deployMode === 'docker_run' 
+            ? this.simpleForm.runCommand.trim()
+            : this.simpleForm.composeCommand.trim()
+        }
+
+        if (this.simpleForm.deployMode === 'docker_compose') {
+          deployConfig.compose_content = this.simpleForm.composeContent.trim()
+        }
+      }
+
+      if (this.simpleForm.redeploy) {
+        deployConfig.redeploy = true
       }
 
       const yamlConfig = {
@@ -1215,6 +1532,7 @@ export default {
         app: {
           name: this.simpleForm.appName
         },
+        deploy: deployConfig,
         targets: targets
       }
 
@@ -1251,8 +1569,55 @@ export default {
         runCommand: '',
         composeCommand: '',
         composeContent: '',
-        redeploy: false
+        redeploy: false,
+        steps: []
       }
+    },
+    addStep() {
+      this.simpleForm.steps.push({
+        name: '',
+        command: ''
+      })
+    },
+    removeStep(index) {
+      this.simpleForm.steps.splice(index, 1)
+    },
+    addEditStep() {
+      this.editForm.steps.push({
+        name: '',
+        command: ''
+      })
+    },
+    removeEditStep(index) {
+      if (confirm(`确定要删除步骤 ${index + 1} 吗？`)) {
+        this.editForm.steps.splice(index, 1)
+      }
+    },
+    moveEditStep(index, direction) {
+      // direction: -1 上移, 1 下移
+      if (direction === -1 && index > 0) {
+        const temp = this.editForm.steps[index]
+        this.editForm.steps[index] = this.editForm.steps[index - 1]
+        this.editForm.steps[index - 1] = temp
+      } else if (direction === 1 && index < this.editForm.steps.length - 1) {
+        const temp = this.editForm.steps[index]
+        this.editForm.steps[index] = this.editForm.steps[index + 1]
+        this.editForm.steps[index + 1] = temp
+      }
+    },
+    switchToYamlMode() {
+      // 切换到YAML模式时，确保 editingTask 有正确的数据
+      if (!this.editingTask) {
+        return
+      }
+      // 确保 registry 和 tag 字段存在
+      if (this.editingTask.registry === undefined || this.editingTask.registry === null) {
+        this.editingTask.registry = ''
+      }
+      if (this.editingTask.tag === undefined || this.editingTask.tag === null) {
+        this.editingTask.tag = ''
+      }
+      this.editMode = 'yaml'
     },
     openSimpleCreateModal() {
       this.resetSimpleForm()
@@ -1263,11 +1628,12 @@ export default {
       try {
         const res = await axios.get(`/api/deploy-tasks/${task.task_id}`)
         const taskData = res.data.task
+        // 确保 editingTask 对象完整初始化，包括 registry 和 tag
         this.editingTask = {
           task_id: taskData.task_id,
           config_content: taskData.config_content || '',
-          registry: taskData.status?.registry || '',
-          tag: taskData.status?.tag || ''
+          registry: taskData.status?.registry || taskData.registry || '',
+          tag: taskData.status?.tag || taskData.tag || ''
         }
         
         // 先加载主机列表（解析表单时需要主机列表）
@@ -1297,7 +1663,8 @@ export default {
         runCommand: '',
         composeCommand: '',
         composeContent: '',
-        redeploy: false
+        redeploy: false,
+        steps: []
       }
       
       if (!config) {
@@ -1314,52 +1681,85 @@ export default {
         this.editForm.appName = config.app.name
       }
       
+      // 解析部署配置（新格式优先，向后兼容旧格式）
+      let deployConfig = config.deploy
+      if (!deployConfig) {
+        // 旧格式：从第一个target的docker配置提取
+        const targets = config.targets || []
+        if (targets.length > 0) {
+          const firstTarget = targets[0]
+          const dockerConfig = firstTarget.docker || {}
+          const deployMode = dockerConfig.deploy_mode || 'docker_run'
+          deployConfig = {
+            type: deployMode === 'docker_compose' ? 'docker_compose' : 'docker_run',
+            command: dockerConfig.command || ''
+          }
+          if (deployMode === 'docker_compose') {
+            deployConfig.compose_content = dockerConfig.compose_content || ''
+          }
+          if (dockerConfig.redeploy) {
+            deployConfig.redeploy = true
+          }
+        }
+      }
+      
+      if (deployConfig) {
+        // 判断是否为多步骤模式
+        if (deployConfig.steps && Array.isArray(deployConfig.steps)) {
+          // 多步骤模式
+          this.editForm.deployMode = 'multi_step'
+          this.editForm.steps = deployConfig.steps.map(step => ({
+            name: step.name || '',
+            command: step.command || ''
+          }))
+        } else {
+          // 单命令模式
+          this.editForm.deployMode = deployConfig.type === 'docker_compose' ? 'docker_compose' : 'docker_run'
+          
+          // 解析部署命令和内容
+          if (this.editForm.deployMode === 'docker_run') {
+            this.editForm.runCommand = deployConfig.command || ''
+          } else {
+            this.editForm.composeCommand = deployConfig.command || 'up -d'
+            this.editForm.composeContent = deployConfig.compose_content || ''
+          }
+        }
+        
+        this.editForm.redeploy = deployConfig.redeploy || false
+      }
+      
       // 解析目标主机
       const targets = config.targets || []
-      if (targets.length > 0) {
-        // 获取第一个目标的部署配置（假设所有目标使用相同的部署配置）
-        const firstTarget = targets[0]
-        const dockerConfig = firstTarget.docker || {}
+      const selectedHostIds = []
+      for (const target of targets) {
+        let hostName = null
         
-        // 解析部署模式
-        this.editForm.deployMode = dockerConfig.deploy_mode || 'docker_run'
-        this.editForm.redeploy = dockerConfig.redeploy || false
-        
-        // 解析部署命令和内容
-        if (this.editForm.deployMode === 'docker_run') {
-          this.editForm.runCommand = dockerConfig.command || ''
-        } else {
-          this.editForm.composeCommand = dockerConfig.command || 'up -d'
-          this.editForm.composeContent = dockerConfig.compose_content || ''
+        // 新格式：使用host_type和host_name
+        if (target.host_type && target.host_name) {
+          hostName = target.host_name
+        }
+        // 旧格式：向后兼容
+        else if (target.mode === 'agent' && target.agent && target.agent.name) {
+          hostName = target.agent.name
+        } else if (target.mode === 'ssh' && target.host) {
+          hostName = target.host
         }
         
-        // 解析选中的主机
-        const selectedHostIds = []
-        for (const target of targets) {
-          let hostName = null
-          
-          if (target.mode === 'agent' && target.agent && target.agent.name) {
-            hostName = target.agent.name
-          } else if (target.mode === 'ssh' && target.host) {
-            hostName = target.host
-          }
-          
-          if (hostName) {
-            // 在所有主机列表中查找匹配的主机
-            const allHosts = [...this.agentHosts, ...this.sshHosts]
-            const host = allHosts.find(h => h.name === hostName)
-            if (host && host.host_id) {
-              selectedHostIds.push(host.host_id)
-            }
+        if (hostName) {
+          // 在所有主机列表中查找匹配的主机
+          const allHosts = [...this.agentHosts, ...this.sshHosts]
+          const host = allHosts.find(h => h.name === hostName)
+          if (host && host.host_id) {
+            selectedHostIds.push(host.host_id)
           }
         }
-        this.editForm.selectedHosts = selectedHostIds
       }
+      this.editForm.selectedHosts = selectedHostIds
     },
     async saveEditTask() {
       let yamlContent = ''
-      let registry = this.editingTask.registry || null
-      let tag = this.editingTask.tag || null
+      const registry = this.editingTask.registry || null
+      const tag = this.editingTask.tag || null
       
       if (this.editMode === 'form') {
         // 表单模式：验证并转换为YAML
@@ -1385,13 +1785,30 @@ export default {
             return
           }
         }
+        if (this.editForm.deployMode === 'multi_step') {
+          if (this.editForm.steps.length === 0) {
+            alert('请至少添加一个部署步骤')
+            return
+          }
+          for (let i = 0; i < this.editForm.steps.length; i++) {
+            const step = this.editForm.steps[i]
+            if (!step.name || !step.name.trim()) {
+              alert(`步骤 ${i + 1} 的名称不能为空`)
+              return
+            }
+            if (!step.command || !step.command.trim()) {
+              alert(`步骤 ${i + 1} 的命令不能为空`)
+              return
+            }
+          }
+        }
         
         // 将表单数据转换为YAML
         yamlContent = this.formToYaml(this.editForm)
       } else {
         // YAML模式：直接使用YAML内容
-        if (!this.editingTask.config_content.trim()) {
-          alert('配置内容不能为空')
+        if (!this.editingTask.config_content || !this.editingTask.config_content.trim()) {
+          alert('YAML 配置内容不能为空')
           return
         }
         yamlContent = this.editingTask.config_content
@@ -1425,60 +1842,56 @@ export default {
       }
     },
     formToYaml(form) {
-      // 将表单数据转换为YAML配置（与createSimpleTask中的逻辑一致）
+      // 将表单数据转换为YAML配置（新格式）
       const targets = []
       for (const hostId of form.selectedHosts) {
         const host = [...this.agentHosts, ...this.sshHosts].find(h => h.host_id === hostId)
         if (!host) continue
         
-        let mode = 'agent'
-        let targetConfig = {}
-        
+        // 确定主机类型
+        let hostType = 'agent'
         if (host.host_type === 'portainer') {
-          mode = 'agent'
-          targetConfig = {
-            agent: {
-              name: host.name
-            }
-          }
+          hostType = 'portainer'
         } else if (host.host_type === 'agent') {
-          mode = 'agent'
-          targetConfig = {
-            agent: {
-              name: host.name
-            }
-          }
+          hostType = 'agent'
         } else {
-          mode = 'ssh'
-          targetConfig = {
-            host: host.name
-          }
-        }
-
-        const dockerConfig = {
-          deploy_mode: form.deployMode,
-          redeploy: form.redeploy
-        }
-
-        if (form.deployMode === 'docker_run') {
-          dockerConfig.command = form.runCommand.trim()
-          const imageMatch = form.runCommand.match(/([\w\.\-:\/]+(?::[\w\.\-]+)?)$/)
-          if (imageMatch) {
-            dockerConfig.image_template = imageMatch[1]
-          } else {
-            dockerConfig.image_template = 'unknown'
-          }
-        } else {
-          dockerConfig.command = form.composeCommand.trim()
-          dockerConfig.compose_content = form.composeContent.trim()
+          hostType = 'ssh'
         }
 
         targets.push({
           name: `${host.name}-deploy`,
-          mode: mode,
-          ...targetConfig,
-          docker: dockerConfig
+          host_type: hostType,
+          host_name: host.name
         })
+      }
+
+      // 构建统一的deploy配置
+      let deployConfig = {}
+      
+      if (form.deployMode === 'multi_step') {
+        // 多步骤模式
+        deployConfig = {
+          steps: form.steps.map(step => ({
+            name: step.name.trim(),
+            command: step.command.trim()
+          }))
+        }
+      } else {
+        // 单命令模式
+        deployConfig = {
+          type: form.deployMode === 'docker_compose' ? 'docker_compose' : 'docker_run',
+          command: form.deployMode === 'docker_run' 
+            ? form.runCommand.trim()
+            : form.composeCommand.trim()
+        }
+
+        if (form.deployMode === 'docker_compose') {
+          deployConfig.compose_content = form.composeContent.trim()
+        }
+      }
+
+      if (form.redeploy) {
+        deployConfig.redeploy = true
       }
 
       const yamlConfig = {
@@ -1486,6 +1899,7 @@ export default {
         app: {
           name: form.appName
         },
+        deploy: deployConfig,
         targets: targets
       }
 
@@ -1495,22 +1909,49 @@ export default {
       })
     },
     async copyTask(task) {
+      // 显示确认提示
+      // 尝试多种方式获取应用名称
+      let appName = '未知任务'
+      if (task.config && task.config.app && task.config.app.name) {
+        appName = task.config.app.name
+      } else if (task.status && task.status.app_name) {
+        appName = task.status.app_name
+      } else if (task.task_id) {
+        appName = `任务 ${task.task_id.substring(0, 8)}`
+      }
+      
+      // 显示确认对话框
+      const confirmed = window.confirm(
+        `确定要克隆部署任务 "${appName}" 吗？\n\n` +
+        `克隆后将创建一个新的任务，使用相同的配置。\n\n` +
+        `点击"确定"继续，点击"取消"放弃。`
+      )
+      
+      if (!confirmed) {
+        return
+      }
+      
       try {
         const res = await axios.get(`/api/deploy-tasks/${task.task_id}`)
         const taskData = res.data.task
         
         // 创建新任务（使用相同的配置）
-        await axios.post('/api/deploy-tasks', {
+        const createRes = await axios.post('/api/deploy-tasks', {
           config_content: taskData.config_content,
           registry: taskData.status?.registry || null,
           tag: taskData.status?.tag || null
         })
         
-        alert('复制成功')
+        alert('任务克隆成功！\n\n已创建新的部署任务，您可以对其进行编辑和执行。')
         this.loadTasks()
+        
+        // 如果详情模态框打开，刷新显示
+        if (this.showDetailModal && this.selectedTask?.task_id === task.task_id) {
+          // 可以选择打开新任务或保持当前任务
+        }
       } catch (error) {
         console.error('复制任务失败:', error)
-        alert('复制任务失败: ' + (error.response?.data?.detail || error.message))
+        alert('克隆任务失败: ' + (error.response?.data?.detail || error.message))
       }
     },
     async refreshTask(task) {
@@ -1520,6 +1961,24 @@ export default {
       if (this.showDetailModal && this.selectedTask?.task_id === task.task_id) {
         await this.viewTask(task)
       }
+    },
+    getLogLineClass(message) {
+      // 根据日志消息内容返回样式类
+      if (!message) return ''
+      const msg = message.toLowerCase()
+      if (msg.includes('错误') || msg.includes('error') || msg.includes('失败') || msg.includes('failed')) {
+        return 'text-danger'
+      }
+      if (msg.includes('成功') || msg.includes('success') || msg.includes('完成') || msg.includes('completed')) {
+        return 'text-success'
+      }
+      if (msg.includes('警告') || msg.includes('warning')) {
+        return 'text-warning'
+      }
+      if (msg.includes('信息') || msg.includes('info')) {
+        return 'text-info'
+      }
+      return 'text-light'
     }
   }
 }

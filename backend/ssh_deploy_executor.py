@@ -198,6 +198,20 @@ class SSHDeployExecutor:
                     # Docker Run 模式
                     command_str = docker_config.get("command", "").strip()
                     
+                    # 如果命令包含"docker run"前缀，保留它（SSH需要完整命令）
+                    # 如果命令不包含"docker run"前缀，添加它
+                    if command_str and not command_str.startswith("docker"):
+                        command_str = f"docker run {command_str}"
+                    elif command_str.startswith("docker run"):
+                        # 已经是完整命令，保持不变
+                        pass
+                    elif command_str.startswith("docker"):
+                        # 可能是"docker"开头但后面不是"run"，检查一下
+                        parts = command_str.split(None, 1)
+                        if len(parts) == 1 or parts[1].startswith("-"):
+                            # 只有"docker"或"docker"后面直接跟参数，添加"run"
+                            command_str = f"docker run {parts[1] if len(parts) > 1 else ''}"
+                    
                     # 如果没有 command，尝试从配置构建命令
                     if not command_str:
                         # 从配置构建 docker run 命令
@@ -249,13 +263,28 @@ class SSHDeployExecutor:
                     import shlex
                     cmd_parts = shlex.split(command_str)
                     container_name = None
-                    if "--name" in cmd_parts:
-                        name_idx = cmd_parts.index("--name")
+                    
+                    # 跳过"docker"和"run"（如果存在）
+                    start_idx = 0
+                    if len(cmd_parts) >= 2 and cmd_parts[0] == "docker" and cmd_parts[1] == "run":
+                        start_idx = 2
+                    
+                    # 在剩余部分查找--name
+                    if "--name" in cmd_parts[start_idx:]:
+                        name_idx = cmd_parts.index("--name", start_idx)
                         if name_idx + 1 < len(cmd_parts):
                             container_name = cmd_parts[name_idx + 1]
-                    elif container_name is None:
-                        # 尝试从 docker_config 获取
+                    
+                    # 如果还没找到，尝试从 docker_config 获取
+                    if not container_name:
                         container_name = docker_config.get("container_name")
+                    
+                    # 如果redeploy为true但没找到容器名，尝试从命令中提取（使用正则表达式）
+                    if redeploy and not container_name:
+                        # 尝试使用正则表达式提取 --name=value 或 --name value 格式
+                        name_match = re.search(r'--name[=\s]+([^\s]+)', command_str)
+                        if name_match:
+                            container_name = name_match.group(1)
                     
                     if redeploy and container_name:
                         # 停止并删除已有容器

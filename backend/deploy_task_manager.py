@@ -19,6 +19,8 @@ from backend.host_manager import HostManager
 from backend.ssh_deploy_executor import SSHDeployExecutor
 from backend.database import get_db_session
 from backend.models import AgentHost, Host
+from backend.deploy_executors.factory import ExecutorFactory
+from backend.command_adapter import CommandAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,8 @@ class DeployTaskManager:
         self.agent_manager = AgentHostManager()
         self.host_manager = HostManager()
         self.ssh_executor = SSHDeployExecutor()
+        self.executor_factory = ExecutorFactory()
+        self.command_adapter = CommandAdapter()
     
     def _get_task_file(self, task_id: str) -> str:
         """获取任务文件路径"""
@@ -291,6 +295,9 @@ class DeployTaskManager:
             task_id=task_id
         )
         
+        # 获取部署配置（统一格式）
+        deploy_config = self.parser.get_deploy_config(config)
+        
         # 获取要执行的目标
         targets = config.get("targets", [])
         if target_names:
@@ -317,17 +324,16 @@ class DeployTaskManager:
         results = {}
         for target in targets:
             target_name = target.get("name")
-            mode = target.get("mode")
             
             # 更新目标状态为运行中
             self.update_task_status(task_id, target_name=target_name, status="running")
             
             try:
-                # 统一执行接口：根据模式自动路由到对应的执行方法
-                result = await self._execute_target_unified(
+                # 使用新的执行器架构
+                result = await self._execute_target_with_executor(
                     task_id,
                     target,
-                    config,
+                    deploy_config,
                     context
                 )
                 
@@ -338,20 +344,25 @@ class DeployTaskManager:
                     task_id,
                     target_name=target_name,
                     status="completed" if result.get("success") else "failed",
-                    result=result
+                    result=result,
+                    message=result.get("message", "")
                 )
             
             except Exception as e:
+                import traceback
+                logger.exception(f"执行目标 {target_name} 时发生异常")
                 error_result = {
                     "success": False,
-                    "message": f"执行异常: {str(e)}"
+                    "message": f"执行异常: {str(e)}",
+                    "error": str(e)
                 }
                 results[target_name] = error_result
                 self.update_task_status(
                     task_id,
                     target_name=target_name,
                     status="failed",
-                    result=error_result
+                    result=error_result,
+                    message=f"执行异常: {str(e)}"
                 )
         
         # 检查整体状态
@@ -376,6 +387,156 @@ class DeployTaskManager:
             "results": results
         }
     
+    async def _execute_target_with_executor(
+        self,
+        task_id: str,
+        target: Dict[str, Any],
+        deploy_config: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        使用执行器执行目标（新架构）
+        
+        Args:
+            task_id: 任务ID
+            target: 目标配置
+            deploy_config: 部署配置（统一格式）
+            context: 模板变量上下文
+        
+        Returns:
+            执行结果字典（统一格式）
+        """
+        target_name = target.get("name")
+        
+        # 确定主机类型和名称
+        host_type = target.get("host_type")
+        host_name = target.get("host_name")
+        
+        # 向后兼容：如果没有host_type，使用旧的mode字段
+        if not host_type:
+            mode = target.get("mode", "agent")
+            if mode == "agent":
+                # 需要查询实际的主机类型
+                agent_config = target.get("agent", {})
+                host_name = agent_config.get("name")
+                # 查询主机类型
+                agent_hosts = self.agent_manager.list_agent_hosts()
+                for host in agent_hosts:
+                    if host.get("name") == host_name:
+                        host_type = host.get("host_type", "agent")
+                        break
+                if not host_type:
+                    host_type = "agent"
+            elif mode == "ssh":
+                host_type = "ssh"
+                host_name = target.get("host")
+            else:
+                return {
+                    "success": False,
+                    "message": f"未知的部署模式: {mode}",
+                    "host_type": "unknown",
+                    "deploy_mode": mode
+                }
+        
+        if not host_name:
+            return {
+                "success": False,
+                "message": f"目标 {target_name} 的主机名称未指定",
+                "host_type": host_type
+            }
+        
+        # 创建执行器
+        executor = self.executor_factory.create_executor(host_type, host_name)
+        if not executor:
+            return {
+                "success": False,
+                "message": f"无法创建执行器: 主机 {host_name} ({host_type}) 不存在或配置错误",
+                "host_type": host_type,
+                "host_name": host_name
+            }
+        
+        # 检查是否可以执行
+        if not executor.can_execute():
+            return {
+                "success": False,
+                "message": f"主机不可用: {host_name}",
+                "host_type": host_type,
+                "host_name": host_name
+            }
+        
+        # 检查是否为多步骤模式
+        steps = deploy_config.get("steps")
+        if steps and isinstance(steps, list):
+            # 多步骤模式：直接传递steps，不进行命令适配
+            adapted_config = {
+                "steps": steps,
+                "redeploy": deploy_config.get("redeploy", False)
+            }
+        else:
+            # 单命令模式：适配命令（根据主机类型）
+            deploy_type = deploy_config.get("type", "docker_run")
+            command = deploy_config.get("command", "")
+            compose_content = deploy_config.get("compose_content", "")
+            
+            # 检查是否有主机特定的覆盖配置
+            overrides = target.get("overrides", {})
+            if overrides.get("command"):
+                command = overrides["command"]
+            if overrides.get("compose_content"):
+                compose_content = overrides["compose_content"]
+            
+            # 适配命令
+            try:
+                adapted_config = self.command_adapter.adapt_command(
+                    command=command,
+                    deploy_type=deploy_type,
+                    host_type=host_type,
+                    compose_content=compose_content,
+                    context=context
+                )
+            except Exception as e:
+                logger.error(f"适配命令失败: {e}")
+                return {
+                    "success": False,
+                    "message": f"适配命令失败: {str(e)}",
+                    "host_type": host_type,
+                    "error": str(e)
+                }
+            
+            # 合并redeploy等配置
+            if deploy_config.get("redeploy"):
+                adapted_config["redeploy"] = True
+        
+        # 创建状态更新回调
+        def update_status_callback(message: str):
+            self.update_task_status(
+                task_id,
+                target_name=target_name,
+                status="running",
+                message=message
+            )
+        
+        # 执行部署
+        try:
+            result = await executor.execute(
+                deploy_config=adapted_config,
+                task_id=task_id,
+                target_name=target_name,
+                context=context,
+                update_status_callback=update_status_callback
+            )
+            return result
+        except Exception as e:
+            import traceback
+            logger.exception(f"执行器执行失败: {e}")
+            return {
+                "success": False,
+                "message": f"执行失败: {str(e)}",
+                "host_type": host_type,
+                "host_name": host_name,
+                "error": str(e)
+            }
+    
     async def _execute_target_unified(
         self,
         task_id: str,
@@ -384,8 +545,7 @@ class DeployTaskManager:
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        统一的目标执行接口
-        根据目标模式自动路由到对应的执行方法
+        统一的目标执行接口（向后兼容，内部调用新方法）
         
         Args:
             task_id: 任务ID
@@ -396,31 +556,13 @@ class DeployTaskManager:
         Returns:
             执行结果字典（统一格式）
         """
-        mode = target.get("mode", "agent")
-        
-        if mode == "agent":
-            # Agent 模式：可能是 Agent 主机或 Portainer 主机
-            return await self._execute_agent_target(
-                task_id,
-                target,
-                config,
-                context
-            )
-        elif mode == "ssh":
-            # SSH 模式：通过 SSH 连接执行
-            return await self._execute_ssh_target(
-                task_id,
-                target,
-                config,
-                context
-            )
-        else:
-            return {
-                "success": False,
-                "message": f"未知的部署模式: {mode}",
-                "host_type": "unknown",
-                "deploy_mode": mode
-            }
+        deploy_config = self.parser.get_deploy_config(config)
+        return await self._execute_target_with_executor(
+            task_id,
+            target,
+            deploy_config,
+            context
+        )
     
     async def _execute_agent_target(
         self,
