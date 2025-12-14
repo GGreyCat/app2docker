@@ -1470,17 +1470,17 @@ async function retryExportTask(task) {
       throw new Error('任务缺少镜像名称，无法重试导出')
     }
     
-    console.log('🔄 重试导出任务:', config)
+    console.log('🔄 重试导出任务:', task.task_id)
     
-    // 调用导出 API
-    const res = await axios.post('/api/export-tasks', config)
+    // 调用重试 API（使用任务 ID 重试，而不是创建新任务）
+    const res = await axios.post(`/api/export-tasks/${task.task_id}/retry`)
     
-    if (res.data.task_id) {
-      alert(`重试导出任务已创建！\n任务 ID: ${res.data.task_id}`)
+    if (res.data.success) {
+      alert(`重试导出任务已启动！\n任务 ID: ${task.task_id}`)
       // 刷新任务列表
       await loadTasks()
     } else {
-      throw new Error('创建任务失败，未返回任务 ID')
+      throw new Error(res.data.message || '重试导出失败')
     }
   } catch (err) {
     console.error('重试导出失败:', err)
