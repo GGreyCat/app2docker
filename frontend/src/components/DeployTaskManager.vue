@@ -499,28 +499,244 @@
             <button type="button" class="btn-close" @click="showEditModal = false"></button>
           </div>
           <div class="modal-body">
-            <div class="mb-3">
-              <label class="form-label">YAML 配置内容</label>
-              <textarea 
-                v-model="editingTask.config_content" 
-                class="form-control font-monospace" 
-                rows="20"
-              ></textarea>
-            </div>
-            <div class="row">
-              <div class="col-md-6">
-                <label class="form-label">镜像仓库（可选）</label>
-                <input v-model="editingTask.registry" type="text" class="form-control" placeholder="docker.io">
+            <!-- 编辑方式切换标签页 -->
+            <ul class="nav nav-tabs mb-3">
+              <li class="nav-item">
+                <button class="nav-link" :class="{ active: editMode === 'form' }" @click="editMode = 'form'">
+                  <i class="fas fa-edit me-1"></i> 表单编辑
+                </button>
+              </li>
+              <li class="nav-item">
+                <button class="nav-link" :class="{ active: editMode === 'yaml' }" @click="editMode = 'yaml'">
+                  <i class="fas fa-code me-1"></i> YAML编辑
+                </button>
+              </li>
+            </ul>
+
+            <!-- 表单编辑模式 -->
+            <div v-if="editMode === 'form'">
+              <div class="mb-3">
+                <label class="form-label">应用名称 <span class="text-danger">*</span></label>
+                <input v-model="editForm.appName" type="text" class="form-control" placeholder="my-app">
               </div>
-              <div class="col-md-6">
-                <label class="form-label">镜像标签（可选）</label>
-                <input v-model="editingTask.tag" type="text" class="form-control" placeholder="latest">
+              
+              <div class="mb-3">
+                <label class="form-label">选择目标主机 <span class="text-danger">*</span></label>
+                
+                <!-- 主机类型筛选和搜索 -->
+                <div class="mb-2">
+                  <div class="btn-group btn-group-sm mb-2" role="group">
+                    <input type="radio" class="btn-check" id="edit-filter-all" v-model="editHostFilter" value="all">
+                    <label class="btn btn-outline-secondary" for="edit-filter-all">全部</label>
+                    
+                    <input type="radio" class="btn-check" id="edit-filter-agent" v-model="editHostFilter" value="agent">
+                    <label class="btn btn-outline-secondary" for="edit-filter-agent">
+                      <i class="fas fa-network-wired me-1"></i> Agent
+                    </label>
+                    
+                    <input type="radio" class="btn-check" id="edit-filter-portainer" v-model="editHostFilter" value="portainer">
+                    <label class="btn btn-outline-secondary" for="edit-filter-portainer">
+                      <i class="fas fa-server me-1"></i> Portainer
+                    </label>
+                    
+                    <input type="radio" class="btn-check" id="edit-filter-ssh" v-model="editHostFilter" value="ssh">
+                    <label class="btn btn-outline-secondary" for="edit-filter-ssh">
+                      <i class="fas fa-terminal me-1"></i> SSH
+                    </label>
+                  </div>
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="edit-filter-online" v-model="editFilterOnlineOnly">
+                      <label class="form-check-label" for="edit-filter-online">仅在线</label>
+                    </div>
+                    <input 
+                      type="text" 
+                      class="form-control form-control-sm flex-grow-1" 
+                      v-model="editHostSearchKeyword"
+                      placeholder="搜索主机名称..."
+                    >
+                  </div>
+                </div>
+                
+                <!-- 主机列表（按类型分组） -->
+                <div v-if="loadingHosts" class="text-muted small text-center py-3">
+                  <span class="spinner-border spinner-border-sm me-2"></span>加载中...
+                </div>
+                <div v-else class="border rounded p-2" style="max-height: 300px; overflow-y: auto;">
+                  <!-- Agent 主机 -->
+                  <div v-if="editFilteredHostsByType.agent.length > 0" class="mb-3">
+                    <div class="fw-bold text-primary mb-2">
+                      <i class="fas fa-network-wired me-1"></i> Agent 主机 ({{ editFilteredHostsByType.agent.length }})
+                    </div>
+                    <div v-for="host in editFilteredHostsByType.agent" :key="host.host_id" class="form-check ms-3">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        :id="`edit-host-${host.host_id}`"
+                        :value="host.host_id"
+                        v-model="editForm.selectedHosts"
+                      >
+                      <label class="form-check-label" :for="`edit-host-${host.host_id}`">
+                        {{ host.name }}
+                        <span :class="getStatusBadgeClass(host.status)" class="badge ms-1">
+                          {{ getStatusText(host.status) }}
+                        </span>
+                        <span v-if="host.description" class="text-muted small ms-1">({{ host.description }})</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <!-- Portainer 主机 -->
+                  <div v-if="editFilteredHostsByType.portainer.length > 0" class="mb-3">
+                    <div class="fw-bold text-info mb-2">
+                      <i class="fas fa-server me-1"></i> Portainer 主机 ({{ editFilteredHostsByType.portainer.length }})
+                    </div>
+                    <div v-for="host in editFilteredHostsByType.portainer" :key="host.host_id" class="form-check ms-3">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        :id="`edit-host-${host.host_id}`"
+                        :value="host.host_id"
+                        v-model="editForm.selectedHosts"
+                      >
+                      <label class="form-check-label" :for="`edit-host-${host.host_id}`">
+                        {{ host.name }}
+                        <span :class="getStatusBadgeClass(host.status)" class="badge ms-1">
+                          {{ getStatusText(host.status) }}
+                        </span>
+                        <span v-if="host.portainer_url" class="text-muted small ms-1">({{ host.portainer_url }})</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <!-- SSH 主机 -->
+                  <div v-if="editFilteredHostsByType.ssh.length > 0" class="mb-3">
+                    <div class="fw-bold text-warning mb-2">
+                      <i class="fas fa-terminal me-1"></i> SSH 主机 ({{ editFilteredHostsByType.ssh.length }})
+                    </div>
+                    <div v-for="host in editFilteredHostsByType.ssh" :key="host.host_id" class="form-check ms-3">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        :id="`edit-host-${host.host_id}`"
+                        :value="host.host_id"
+                        v-model="editForm.selectedHosts"
+                      >
+                      <label class="form-check-label" :for="`edit-host-${host.host_id}`">
+                        {{ host.name }}
+                        <span v-if="host.docker_enabled" class="badge bg-info ms-1">Docker</span>
+                        <span v-if="host.docker_version" class="text-muted small ms-1">({{ host.docker_version }})</span>
+                        <span v-if="host.host" class="text-muted small ms-1">@{{ host.host }}:{{ host.port || 22 }}</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div v-if="editFilteredHosts.length === 0" class="text-muted small text-center py-3">
+                    <i class="fas fa-inbox me-1"></i>
+                    <span v-if="editHostSearchKeyword">未找到匹配的主机</span>
+                    <span v-else>暂无可用主机，请先在"主机管理"中添加主机</span>
+                  </div>
+                </div>
+                
+                <!-- 已选择的主机统计 -->
+                <div v-if="editForm.selectedHosts.length > 0" class="mt-2">
+                  <small class="text-muted">
+                    已选择 <strong>{{ editForm.selectedHosts.length }}</strong> 个主机
+                    <button type="button" class="btn btn-link btn-sm p-0 ms-2" @click="editForm.selectedHosts = []">
+                      清空
+                    </button>
+                  </small>
+                </div>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label">部署方式 <span class="text-danger">*</span></label>
+                <div class="btn-group w-100" role="group">
+                  <input type="radio" class="btn-check" id="edit-deploy-run" v-model="editForm.deployMode" value="docker_run">
+                  <label class="btn btn-outline-primary" for="edit-deploy-run">
+                    <i class="fas fa-terminal me-1"></i> Docker Run
+                  </label>
+                  
+                  <input type="radio" class="btn-check" id="edit-deploy-compose" v-model="editForm.deployMode" value="docker_compose">
+                  <label class="btn btn-outline-primary" for="edit-deploy-compose">
+                    <i class="fas fa-layer-group me-1"></i> Docker Compose
+                  </label>
+                </div>
+              </div>
+
+              <!-- Docker Run 命令输入 -->
+              <div v-if="editForm.deployMode === 'docker_run'" class="mb-3">
+                <label class="form-label">Docker Run 命令 <span class="text-danger">*</span></label>
+                <textarea 
+                  v-model="editForm.runCommand" 
+                  class="form-control font-monospace" 
+                  rows="6"
+                  placeholder="-d --name my-app -p 8000:8000 registry.cn-hangzhou.aliyuncs.com/namespace/app:tag"
+                ></textarea>
+                <small class="text-muted">输入 docker run 的参数（不包含 "docker run" 前缀）</small>
+              </div>
+
+              <!-- Docker Compose 命令输入 -->
+              <div v-if="editForm.deployMode === 'docker_compose'" class="mb-3">
+                <label class="form-label">Docker Compose 命令 <span class="text-danger">*</span></label>
+                <input 
+                  v-model="editForm.composeCommand" 
+                  type="text" 
+                  class="form-control font-monospace" 
+                  placeholder="up -d"
+                >
+                <small class="text-muted">输入 docker-compose 命令参数（不包含 "docker-compose" 前缀，如：up -d）</small>
+              </div>
+
+              <div v-if="editForm.deployMode === 'docker_compose'" class="mb-3">
+                <label class="form-label">docker-compose.yml 内容 <span class="text-danger">*</span></label>
+                <textarea 
+                  v-model="editForm.composeContent" 
+                  class="form-control font-monospace" 
+                  rows="15"
+                  placeholder="version: '3.8'&#10;services:&#10;  app:&#10;    image: registry.cn-hangzhou.aliyuncs.com/namespace/app:tag&#10;    ports:&#10;      - '8000:8000'"
+                ></textarea>
+                <small class="text-muted">输入完整的 docker-compose.yml 内容</small>
+              </div>
+
+              <div class="mb-3">
+                <div class="form-check form-switch">
+                  <input 
+                    class="form-check-input" 
+                    type="checkbox" 
+                    id="edit-redeploySwitch"
+                    v-model="editForm.redeploy"
+                  >
+                  <label class="form-check-label" for="edit-redeploySwitch">
+                    <i class="fas fa-redo me-1"></i> 重新发布（如果主机上已存在，先停止并删除）
+                  </label>
+                </div>
+                <small class="text-muted">启用后，部署前会先停止并删除已有的容器或服务</small>
               </div>
             </div>
-            <div class="alert alert-warning mt-3">
-              <i class="fas fa-exclamation-triangle me-2"></i>
-              注意：编辑任务会删除原任务并创建新任务，任务ID会发生变化。
+
+            <!-- YAML编辑模式 -->
+            <div v-if="editMode === 'yaml'">
+              <div class="mb-3">
+                <label class="form-label">YAML 配置内容</label>
+                <textarea 
+                  v-model="editingTask.config_content" 
+                  class="form-control font-monospace" 
+                  rows="20"
+                ></textarea>
+              </div>
+              <div class="row">
+                <div class="col-md-6">
+                  <label class="form-label">镜像仓库（可选）</label>
+                  <input v-model="editingTask.registry" type="text" class="form-control" placeholder="docker.io">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">镜像标签（可选）</label>
+                  <input v-model="editingTask.tag" type="text" class="form-control" placeholder="latest">
+                </div>
+              </div>
             </div>
+
             <div class="alert alert-warning mt-3">
               <i class="fas fa-exclamation-triangle me-2"></i>
               注意：编辑任务会删除原任务并创建新任务，任务ID会发生变化。
@@ -557,6 +773,19 @@ export default {
       editingTask: null,
       selectedTask: null,
       detailTab: 'config',
+      editMode: 'form', // 'form' or 'yaml'
+      editHostFilter: 'all',
+      editFilterOnlineOnly: true,
+      editHostSearchKeyword: '',
+      editForm: {
+        appName: '',
+        selectedHosts: [],
+        deployMode: 'docker_run',
+        runCommand: '',
+        composeCommand: '',
+        composeContent: '',
+        redeploy: false
+      },
       taskConfigContent: '',
       taskRegistry: '',
       taskTag: '',
@@ -638,6 +867,71 @@ export default {
       }
       
       this.filteredHosts.forEach(host => {
+        if (host.host_type === 'agent') {
+          result.agent.push(host)
+        } else if (host.host_type === 'portainer') {
+          result.portainer.push(host)
+        } else {
+          result.ssh.push(host)
+        }
+      })
+      
+      return result
+    },
+    // 编辑表单过滤后的主机列表
+    editFilteredHosts() {
+      let hosts = []
+      
+      // 合并所有类型的主机
+      if (this.editHostFilter === 'all' || this.editHostFilter === 'agent' || this.editHostFilter === 'portainer') {
+        hosts = hosts.concat(this.agentHosts || [])
+      }
+      if (this.editHostFilter === 'all' || this.editHostFilter === 'ssh') {
+        hosts = hosts.concat(this.sshHosts || [])
+      }
+      
+      // 按类型过滤
+      if (this.editHostFilter === 'agent') {
+        hosts = hosts.filter(h => h.host_type === 'agent')
+      } else if (this.editHostFilter === 'portainer') {
+        hosts = hosts.filter(h => h.host_type === 'portainer')
+      } else if (this.editHostFilter === 'ssh') {
+        hosts = hosts.filter(h => !h.host_type)
+      }
+      
+      // 仅在线过滤
+      if (this.editFilterOnlineOnly) {
+        hosts = hosts.filter(h => {
+          if (h.host_type) {
+            return h.status === 'online'
+          } else {
+            return true
+          }
+        })
+      }
+      
+      // 搜索过滤
+      if (this.editHostSearchKeyword) {
+        const keyword = this.editHostSearchKeyword.toLowerCase()
+        hosts = hosts.filter(h => 
+          h.name.toLowerCase().includes(keyword) ||
+          (h.description && h.description.toLowerCase().includes(keyword)) ||
+          (h.portainer_url && h.portainer_url.toLowerCase().includes(keyword)) ||
+          (h.host && h.host.toLowerCase().includes(keyword))
+        )
+      }
+      
+      return hosts
+    },
+    // 编辑表单按类型分组的主机
+    editFilteredHostsByType() {
+      const result = {
+        agent: [],
+        portainer: [],
+        ssh: []
+      }
+      
+      this.editFilteredHosts.forEach(host => {
         if (host.host_type === 'agent') {
           result.agent.push(host)
         } else if (host.host_type === 'portainer') {
@@ -975,7 +1269,16 @@ export default {
           registry: taskData.status?.registry || '',
           tag: taskData.status?.tag || ''
         }
+        
+        // 先加载主机列表（解析表单时需要主机列表）
+        await this.loadAgentHosts()
+        await this.loadSSHHosts()
+        
+        // 解析YAML配置到表单
+        this.parseYamlToForm(taskData.config_content, taskData.config)
+        
         this.showEditModal = true
+        this.editMode = 'form' // 默认使用表单编辑
         // 如果详情模态框打开，先关闭它
         if (this.showDetailModal) {
           this.showDetailModal = false
@@ -985,10 +1288,113 @@ export default {
         alert('获取任务详情失败: ' + (error.response?.data?.detail || error.message))
       }
     },
+    parseYamlToForm(configContent, config) {
+      // 重置表单
+      this.editForm = {
+        appName: '',
+        selectedHosts: [],
+        deployMode: 'docker_run',
+        runCommand: '',
+        composeCommand: '',
+        composeContent: '',
+        redeploy: false
+      }
+      
+      if (!config) {
+        try {
+          config = yaml.load(configContent)
+        } catch (e) {
+          console.error('解析YAML失败:', e)
+          return
+        }
+      }
+      
+      // 解析应用名称
+      if (config.app && config.app.name) {
+        this.editForm.appName = config.app.name
+      }
+      
+      // 解析目标主机
+      const targets = config.targets || []
+      if (targets.length > 0) {
+        // 获取第一个目标的部署配置（假设所有目标使用相同的部署配置）
+        const firstTarget = targets[0]
+        const dockerConfig = firstTarget.docker || {}
+        
+        // 解析部署模式
+        this.editForm.deployMode = dockerConfig.deploy_mode || 'docker_run'
+        this.editForm.redeploy = dockerConfig.redeploy || false
+        
+        // 解析部署命令和内容
+        if (this.editForm.deployMode === 'docker_run') {
+          this.editForm.runCommand = dockerConfig.command || ''
+        } else {
+          this.editForm.composeCommand = dockerConfig.command || 'up -d'
+          this.editForm.composeContent = dockerConfig.compose_content || ''
+        }
+        
+        // 解析选中的主机
+        const selectedHostIds = []
+        for (const target of targets) {
+          let hostName = null
+          
+          if (target.mode === 'agent' && target.agent && target.agent.name) {
+            hostName = target.agent.name
+          } else if (target.mode === 'ssh' && target.host) {
+            hostName = target.host
+          }
+          
+          if (hostName) {
+            // 在所有主机列表中查找匹配的主机
+            const allHosts = [...this.agentHosts, ...this.sshHosts]
+            const host = allHosts.find(h => h.name === hostName)
+            if (host && host.host_id) {
+              selectedHostIds.push(host.host_id)
+            }
+          }
+        }
+        this.editForm.selectedHosts = selectedHostIds
+      }
+    },
     async saveEditTask() {
-      if (!this.editingTask.config_content.trim()) {
-        alert('配置内容不能为空')
-        return
+      let yamlContent = ''
+      let registry = this.editingTask.registry || null
+      let tag = this.editingTask.tag || null
+      
+      if (this.editMode === 'form') {
+        // 表单模式：验证并转换为YAML
+        if (!this.editForm.appName.trim()) {
+          alert('请输入应用名称')
+          return
+        }
+        if (this.editForm.selectedHosts.length === 0) {
+          alert('请至少选择一个目标主机')
+          return
+        }
+        if (this.editForm.deployMode === 'docker_run' && !this.editForm.runCommand.trim()) {
+          alert('请输入 Docker Run 命令')
+          return
+        }
+        if (this.editForm.deployMode === 'docker_compose') {
+          if (!this.editForm.composeCommand.trim()) {
+            alert('请输入 Docker Compose 命令')
+            return
+          }
+          if (!this.editForm.composeContent.trim()) {
+            alert('请输入 docker-compose.yml 内容')
+            return
+          }
+        }
+        
+        // 将表单数据转换为YAML
+        yamlContent = this.formToYaml(this.editForm)
+      } else {
+        // YAML模式：直接使用YAML内容
+        if (!this.editingTask.config_content.trim()) {
+          alert('配置内容不能为空')
+          return
+        }
+        yamlContent = this.editingTask.config_content
       }
       
       if (!confirm('确定要保存修改吗？这将删除原任务并创建新任务。')) {
@@ -1002,9 +1408,9 @@ export default {
         
         // 创建新任务
         await axios.post('/api/deploy-tasks', {
-          config_content: this.editingTask.config_content,
-          registry: this.editingTask.registry || null,
-          tag: this.editingTask.tag || null
+          config_content: yamlContent,
+          registry: registry,
+          tag: tag
         })
         
         alert('保存成功')
@@ -1017,6 +1423,76 @@ export default {
       } finally {
         this.creating = false
       }
+    },
+    formToYaml(form) {
+      // 将表单数据转换为YAML配置（与createSimpleTask中的逻辑一致）
+      const targets = []
+      for (const hostId of form.selectedHosts) {
+        const host = [...this.agentHosts, ...this.sshHosts].find(h => h.host_id === hostId)
+        if (!host) continue
+        
+        let mode = 'agent'
+        let targetConfig = {}
+        
+        if (host.host_type === 'portainer') {
+          mode = 'agent'
+          targetConfig = {
+            agent: {
+              name: host.name
+            }
+          }
+        } else if (host.host_type === 'agent') {
+          mode = 'agent'
+          targetConfig = {
+            agent: {
+              name: host.name
+            }
+          }
+        } else {
+          mode = 'ssh'
+          targetConfig = {
+            host: host.name
+          }
+        }
+
+        const dockerConfig = {
+          deploy_mode: form.deployMode,
+          redeploy: form.redeploy
+        }
+
+        if (form.deployMode === 'docker_run') {
+          dockerConfig.command = form.runCommand.trim()
+          const imageMatch = form.runCommand.match(/([\w\.\-:\/]+(?::[\w\.\-]+)?)$/)
+          if (imageMatch) {
+            dockerConfig.image_template = imageMatch[1]
+          } else {
+            dockerConfig.image_template = 'unknown'
+          }
+        } else {
+          dockerConfig.command = form.composeCommand.trim()
+          dockerConfig.compose_content = form.composeContent.trim()
+        }
+
+        targets.push({
+          name: `${host.name}-deploy`,
+          mode: mode,
+          ...targetConfig,
+          docker: dockerConfig
+        })
+      }
+
+      const yamlConfig = {
+        version: '1.0',
+        app: {
+          name: form.appName
+        },
+        targets: targets
+      }
+
+      return yaml.dump(yamlConfig, {
+        defaultFlowStyle: false,
+        allowUnicode: true
+      })
     },
     async copyTask(task) {
       try {
