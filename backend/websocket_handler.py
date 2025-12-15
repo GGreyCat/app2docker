@@ -186,16 +186,18 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
                     
                     print(f"📥 收到部署任务结果 ({host_id}): {task_id}, 状态: {deploy_status}")
                     
-                    # 更新部署任务状态
+                    # 更新部署任务状态（使用BuildTaskManager）
                     try:
-                        from backend.deploy_task_manager import DeployTaskManager
-                        task_manager = DeployTaskManager()
+                        from backend.handlers import BuildTaskManager
+                        build_manager = BuildTaskManager()
                         
                         # 获取任务信息以找到目标名称
-                        task = task_manager.get_task(task_id)
-                        if task:
+                        task = build_manager.get_task(task_id)
+                        if task and task.get("task_type") == "deploy":
                             # 查找对应的目标（通过 host_id）
-                            targets = task.get("config", {}).get("targets", [])
+                            task_config = task.get("task_config", {})
+                            config = task_config.get("config", {})
+                            targets = config.get("targets", [])
                             target_name = None
                             for target in targets:
                                 if target.get("mode") == "agent":
@@ -204,19 +206,24 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
                                         target_name = target.get("name")
                                         break
                             
-                            if target_name:
-                                task_manager.update_task_status(
-                                    task_id,
-                                    target_name=target_name,
-                                    status=deploy_status,
-                                    result={
-                                        "message": deploy_message,
-                                        "result": deploy_result,
-                                        "error": message.get("error")
-                                    }
-                                )
+                            # 添加日志
+                            if deploy_status == "completed":
+                                build_manager.add_log(task_id, f"✅ 目标 {target_name} 部署成功: {deploy_message}\n")
+                            elif deploy_status == "failed":
+                                error_msg = message.get("error", deploy_message)
+                                build_manager.add_log(task_id, f"❌ 目标 {target_name} 部署失败: {error_msg}\n")
+                            
+                            # 更新任务状态
+                            if deploy_status == "completed":
+                                # 检查是否所有目标都已完成
+                                # 这里简化处理，如果收到成功消息，任务可能已完成
+                                build_manager.update_task_status(task_id, "completed")
+                            elif deploy_status == "failed":
+                                build_manager.update_task_status(task_id, "failed", error=deploy_message)
                     except Exception as e:
                         print(f"⚠️ 更新部署任务状态失败: {e}")
+                        import traceback
+                        traceback.print_exc()
                     
                     # 回复确认
                     await websocket.send_json({

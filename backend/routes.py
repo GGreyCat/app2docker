@@ -1377,26 +1377,48 @@ async def get_build_tasks(
 async def get_all_tasks(
     status: Optional[str] = Query(None, description="任务状态过滤"),
     task_type: Optional[str] = Query(
-        None, description="任务类型过滤: build, build_from_source, export"
+        None, description="任务类型过滤: build, build_from_source, export, deploy"
     ),
 ):
-    """获取所有任务（构建任务 + 导出任务）"""
+    """获取所有任务（构建任务 + 导出任务 + 部署任务）"""
     try:
         all_tasks = []
 
-        # 获取构建任务
+        # 获取构建任务（排除部署任务）
         build_manager = BuildTaskManager()
-        build_tasks = build_manager.list_tasks(status=status, task_type=task_type)
-        for task in build_tasks:
-            task["task_category"] = "build"  # 标记为构建任务
-            all_tasks.append(task)
+        if task_type and task_type == "deploy":
+            # 如果只查询部署任务，跳过构建任务
+            build_tasks = []
+        else:
+            # 获取构建任务（排除部署任务）
+            build_task_type = task_type if task_type and task_type != "deploy" else None
+            build_tasks = build_manager.list_tasks(status=status, task_type=build_task_type)
+            # 过滤掉部署任务（task_type="deploy"）
+            build_tasks = [t for t in build_tasks if t.get("task_type") != "deploy"]
+            for task in build_tasks:
+                task["task_category"] = "build"  # 标记为构建任务
+                all_tasks.append(task)
+
+        # 获取部署任务
+        if not task_type or task_type == "deploy":
+            deploy_tasks = build_manager.list_tasks(status=status, task_type="deploy")
+            for task in deploy_tasks:
+                task["task_category"] = "deploy"  # 标记为部署任务
+                # 为部署任务添加显示名称
+                task_config = task.get("task_config", {})
+                config = task_config.get("config", {})
+                app_name = config.get("app", {}).get("name") if config.get("app") else None
+                if app_name:
+                    task["image"] = app_name  # 使用应用名称作为显示名称
+                all_tasks.append(task)
 
         # 获取导出任务
-        export_manager = ExportTaskManager()
-        export_tasks = export_manager.list_tasks(status=status)
-        for task in export_tasks:
-            task["task_category"] = "export"  # 标记为导出任务
-            all_tasks.append(task)
+        if not task_type or task_type == "export":
+            export_manager = ExportTaskManager()
+            export_tasks = export_manager.list_tasks(status=status)
+            for task in export_tasks:
+                task["task_category"] = "export"  # 标记为导出任务
+                all_tasks.append(task)
 
         # 按创建时间倒序排列
         all_tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -6384,24 +6406,32 @@ async def create_deploy_task(request: Request, task_req: DeployTaskCreateRequest
     """创建部署任务"""
     try:
         username = get_current_username(request)
-        task_manager = DeployTaskManager()
+        build_manager = BuildTaskManager()
         
-        task = task_manager.create_task(
+        task_id = build_manager.create_deploy_task(
             config_content=task_req.config_content,
             registry=task_req.registry,
             tag=task_req.tag
         )
         
+        # 获取任务信息
+        task = build_manager.get_task(task_id)
+        
         # 记录操作日志
         OperationLogger.log(
             username,
             "deploy_task_create",
-            {"task_id": task["task_id"]}
+            {"task_id": task_id}
         )
         
         return JSONResponse({
             "success": True,
-            "task": task
+            "task": {
+                "task_id": task_id,
+                "status": task.get("status"),
+                "config": task.get("task_config", {}).get("config"),
+                "config_content": task.get("task_config", {}).get("config_content")
+            }
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -6416,13 +6446,31 @@ async def list_deploy_tasks(request: Request):
     """列出所有部署任务"""
     try:
         username = get_current_username(request)
-        task_manager = DeployTaskManager()
+        build_manager = BuildTaskManager()
         
-        tasks = task_manager.list_tasks()
+        tasks = build_manager.list_tasks(task_type="deploy")
+        
+        # 转换为前端期望的格式
+        formatted_tasks = []
+        for task in tasks:
+            task_config = task.get("task_config", {})
+            formatted_tasks.append({
+                "task_id": task.get("task_id"),
+                "status": {
+                    "task_id": task.get("task_id"),
+                    "status": task.get("status"),
+                    "created_at": task.get("created_at"),
+                    "registry": task_config.get("registry"),
+                    "tag": task_config.get("tag"),
+                    "targets": []
+                },
+                "config": task_config.get("config", {}),
+                "config_content": task_config.get("config_content", "")
+            })
         
         return JSONResponse({
             "success": True,
-            "tasks": tasks
+            "tasks": formatted_tasks
         })
     except Exception as e:
         import traceback
@@ -6435,15 +6483,29 @@ async def get_deploy_task(request: Request, task_id: str):
     """获取部署任务详情"""
     try:
         username = get_current_username(request)
-        task_manager = DeployTaskManager()
+        build_manager = BuildTaskManager()
         
-        task = task_manager.get_task(task_id)
-        if not task:
+        task = build_manager.get_task(task_id)
+        if not task or task.get("task_type") != "deploy":
             raise HTTPException(status_code=404, detail="部署任务不存在")
+        
+        task_config = task.get("task_config", {})
         
         return JSONResponse({
             "success": True,
-            "task": task
+            "task": {
+                "task_id": task.get("task_id"),
+                "status": {
+                    "task_id": task.get("task_id"),
+                    "status": task.get("status"),
+                    "created_at": task.get("created_at"),
+                    "registry": task_config.get("registry"),
+                    "tag": task_config.get("tag"),
+                    "targets": []
+                },
+                "config": task_config.get("config", {}),
+                "config_content": task_config.get("config_content", "")
+            }
         })
     except HTTPException:
         raise
@@ -6462,13 +6524,14 @@ async def execute_deploy_task(
     """执行部署任务"""
     try:
         username = get_current_username(request)
-        task_manager = DeployTaskManager()
+        build_manager = BuildTaskManager()
         
         target_names = None
         if execute_req and execute_req.target_names:
             target_names = execute_req.target_names
         
-        result = await task_manager.execute_task(task_id, target_names=target_names)
+        # 执行部署任务（后台执行）
+        result_task_id = build_manager.execute_deploy_task(task_id, target_names=target_names)
         
         # 记录操作日志
         OperationLogger.log(
@@ -6477,7 +6540,11 @@ async def execute_deploy_task(
             {"task_id": task_id, "target_names": target_names}
         )
         
-        return JSONResponse(result)
+        return JSONResponse({
+            "success": True,
+            "task_id": result_task_id,
+            "message": "部署任务已启动，正在后台执行"
+        })
     except HTTPException:
         raise
     except Exception as e:
@@ -6496,19 +6563,35 @@ async def import_deploy_task(request: Request, file: UploadFile = File(...)):
         content = await file.read()
         config_content = content.decode("utf-8")
         
-        task_manager = DeployTaskManager()
-        task = task_manager.create_task(config_content=config_content)
+        build_manager = BuildTaskManager()
+        task_id = build_manager.create_deploy_task(config_content=config_content)
+        
+        # 获取任务信息
+        task = build_manager.get_task(task_id)
+        task_config = task.get("task_config", {})
         
         # 记录操作日志
         OperationLogger.log(
             username,
             "deploy_task_import",
-            {"task_id": task["task_id"], "filename": file.filename}
+            {"task_id": task_id, "filename": file.filename}
         )
         
         return JSONResponse({
             "success": True,
-            "task": task
+            "task": {
+                "task_id": task_id,
+                "status": {
+                    "task_id": task_id,
+                    "status": task.get("status"),
+                    "created_at": task.get("created_at"),
+                    "registry": task_config.get("registry"),
+                    "tag": task_config.get("tag"),
+                    "targets": []
+                },
+                "config": task_config.get("config", {}),
+                "config_content": task_config.get("config_content", "")
+            }
         })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -6523,13 +6606,14 @@ async def export_deploy_task(request: Request, task_id: str):
     """导出部署任务（YAML格式）"""
     try:
         username = get_current_username(request)
-        task_manager = DeployTaskManager()
+        build_manager = BuildTaskManager()
         
-        task = task_manager.get_task(task_id)
-        if not task:
+        task = build_manager.get_task(task_id)
+        if not task or task.get("task_type") != "deploy":
             raise HTTPException(status_code=404, detail="部署任务不存在")
         
-        config_content = task.get("config_content", "")
+        task_config = task.get("task_config", {})
+        config_content = task_config.get("config_content", "")
         
         return PlainTextResponse(
             content=config_content,
@@ -6551,9 +6635,9 @@ async def delete_deploy_task(request: Request, task_id: str):
     """删除部署任务"""
     try:
         username = get_current_username(request)
-        task_manager = DeployTaskManager()
+        build_manager = BuildTaskManager()
         
-        success = task_manager.delete_task(task_id)
+        success = build_manager.delete_task(task_id)
         if not success:
             raise HTTPException(status_code=404, detail="部署任务不存在")
         

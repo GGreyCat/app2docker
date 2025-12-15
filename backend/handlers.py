@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler
 from urllib import parse
+from typing import Optional, List
 import yaml
 
 from backend.config import (
@@ -4788,6 +4789,218 @@ class BuildTaskManager:
             print(f"⚠️ 清理过期任务失败: {e}")
         finally:
             db.close()
+
+    def create_deploy_task(
+        self,
+        config_content: str,
+        registry: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> str:
+        """
+        创建部署任务并保存到数据库
+
+        Args:
+            config_content: YAML 配置内容
+            registry: 镜像仓库地址（可选）
+            tag: 镜像标签（可选）
+
+        Returns:
+            任务ID
+        """
+        from backend.deploy_config_parser import DeployConfigParser
+
+        try:
+            # 解析YAML配置
+            parser = DeployConfigParser()
+            config = parser.parse_yaml_content(config_content)
+
+            # 生成任务ID
+            task_id = str(uuid.uuid4())
+            created_at = datetime.now()
+
+            # 构建任务配置
+            task_config = {
+                "config_content": config_content,
+                "config": config,
+                "registry": registry,
+                "tag": tag,
+                "targets": config.get("targets", []),
+            }
+
+            # 保存任务到数据库
+            from backend.database import get_db_session
+            from backend.models import Task
+
+            db = get_db_session()
+            try:
+                task_obj = Task(
+                    task_id=task_id,
+                    task_type="deploy",
+                    image=None,  # 部署任务可能没有镜像名称
+                    tag=tag,
+                    status="pending",
+                    created_at=created_at,
+                    task_config=task_config,
+                    source="手动部署",
+                    pipeline_id=None,
+                    git_url=None,
+                    branch=None,
+                    project_type=None,
+                    template=None,
+                    should_push=False,
+                    sub_path=None,
+                    use_project_dockerfile=False,
+                    dockerfile_name=None,
+                    trigger_source="manual",
+                )
+
+                db.add(task_obj)
+                db.commit()
+                print(f"✅ 部署任务创建成功: task_id={task_id}")
+                return task_id
+            except Exception as save_error:
+                db.rollback()
+                print(f"⚠️ 保存部署任务失败: {save_error}")
+                raise
+            finally:
+                db.close()
+        except Exception as e:
+            import traceback
+
+            error_trace = traceback.format_exc()
+            print(f"❌ 创建部署任务异常: {e}")
+            print(f"错误堆栈:\n{error_trace}")
+            raise
+
+    def execute_deploy_task(
+        self, task_id: str, target_names: Optional[List[str]] = None
+    ) -> str:
+        """
+        在后台线程中执行部署任务
+
+        Args:
+            task_id: 任务ID
+            target_names: 要执行的目标名称列表（如果为 None，则执行所有目标）
+
+        Returns:
+            任务ID
+        """
+        # 检查任务是否存在
+        task = self.get_task(task_id)
+        if not task:
+            raise ValueError(f"部署任务不存在: {task_id}")
+
+        if task.get("task_type") != "deploy":
+            raise ValueError(f"任务类型不是部署任务: {task_id}")
+
+        # 更新任务状态为运行中
+        self.update_task_status(task_id, "running")
+
+        # 在后台线程中执行部署任务
+        thread = threading.Thread(
+            target=self._execute_deploy_task_in_thread,
+            args=(task_id, target_names),
+            daemon=True,
+        )
+        thread.start()
+
+        return task_id
+
+    def _execute_deploy_task_in_thread(
+        self, task_id: str, target_names: Optional[List[str]] = None
+    ):
+        """
+        在后台线程中执行部署任务的实际逻辑
+
+        Args:
+            task_id: 任务ID
+            target_names: 要执行的目标名称列表
+        """
+        import asyncio
+
+        try:
+            # 创建新的事件循环（因为在线程中）
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            # 执行部署任务
+            loop.run_until_complete(
+                self._execute_deploy_task_async(task_id, target_names)
+            )
+        except Exception as e:
+            import traceback
+
+            error_trace = traceback.format_exc()
+            print(f"❌ 执行部署任务异常: {e}")
+            print(f"错误堆栈:\n{error_trace}")
+
+            # 更新任务状态为失败
+            self.update_task_status(task_id, "failed", error=str(e))
+            self.add_log(task_id, f"❌ 部署任务执行失败: {str(e)}\n")
+
+    async def _execute_deploy_task_async(
+        self, task_id: str, target_names: Optional[List[str]] = None
+    ):
+        """
+        异步执行部署任务
+
+        Args:
+            task_id: 任务ID
+            target_names: 要执行的目标名称列表
+        """
+        from backend.deploy_task_manager import DeployTaskManager
+
+        try:
+            # 获取任务信息
+            task = self.get_task(task_id)
+            if not task:
+                raise ValueError(f"部署任务不存在: {task_id}")
+
+            task_config = task.get("task_config", {})
+            config_content = task_config.get("config_content", "")
+            config = task_config.get("config", {})
+            registry = task_config.get("registry")
+            tag = task_config.get("tag")
+
+            if not config_content:
+                raise ValueError("部署任务配置内容为空")
+
+            # 创建DeployTaskManager实例（简化版，只用于执行）
+            deploy_manager = DeployTaskManager()
+
+            # 执行部署任务（传入task_manager用于状态更新）
+            result = await deploy_manager.execute_task_with_manager(
+                task_id=task_id,
+                config_content=config_content,
+                config=config,
+                registry=registry,
+                tag=tag,
+                target_names=target_names,
+                task_manager=self,
+            )
+
+            # 检查执行结果
+            if result.get("success"):
+                # 检查是否有失败的目标
+                results = result.get("results", {})
+                has_failed = any(not r.get("success", False) for r in results.values())
+                if has_failed:
+                    self.update_task_status(task_id, "failed", error="部分目标部署失败")
+                else:
+                    self.update_task_status(task_id, "completed")
+            else:
+                self.update_task_status(
+                    task_id, "failed", error=result.get("message", "部署失败")
+                )
+
+        except Exception as e:
+            import traceback
+
+            error_trace = traceback.format_exc()
+            print(f"❌ 执行部署任务异常: {e}")
+            print(f"错误堆栈:\n{error_trace}")
+            self.update_task_status(task_id, "failed", error=str(e))
+            self.add_log(task_id, f"❌ 部署任务执行失败: {str(e)}\n")
 
 
 # ============ 导出任务管理器 ============

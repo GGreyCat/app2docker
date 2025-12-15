@@ -26,18 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 class DeployTaskManager:
-    """部署任务管理器"""
+    """部署任务管理器（简化版，只负责执行逻辑）"""
     
-    def __init__(self, tasks_dir: str = "data/deploy_tasks"):
-        """
-        初始化部署任务管理器
-        
-        Args:
-            tasks_dir: 任务存储目录
-        """
-        self.tasks_dir = tasks_dir
-        os.makedirs(tasks_dir, exist_ok=True)
-        
+    def __init__(self):
+        """初始化部署任务管理器"""
         self.parser = DeployConfigParser()
         self.agent_manager = AgentHostManager()
         self.host_manager = HostManager()
@@ -45,253 +37,42 @@ class DeployTaskManager:
         self.executor_factory = ExecutorFactory()
         self.command_adapter = CommandAdapter()
     
-    def _get_task_file(self, task_id: str) -> str:
-        """获取任务文件路径"""
-        return os.path.join(self.tasks_dir, f"{task_id}.yaml")
-    
-    def _get_task_status_file(self, task_id: str) -> str:
-        """获取任务状态文件路径"""
-        return os.path.join(self.tasks_dir, f"{task_id}.status.json")
-    
-    def create_task(
+    async def execute_task_with_manager(
         self,
+        task_id: str,
         config_content: str,
+        config: Dict[str, Any],
         registry: Optional[str] = None,
-        tag: Optional[str] = None
+        tag: Optional[str] = None,
+        target_names: Optional[List[str]] = None,
+        task_manager = None
     ) -> Dict[str, Any]:
         """
-        创建部署任务
+        执行部署任务（使用task_manager进行状态管理）
         
         Args:
-            config_content: YAML 配置内容
+            task_id: 任务ID
+            config_content: YAML配置内容
+            config: 解析后的配置字典
             registry: 镜像仓库地址（可选）
             tag: 镜像标签（可选）
-        
-        Returns:
-            任务信息字典
-        """
-        # 解析配置
-        config = self.parser.parse_yaml_content(config_content)
-        
-        # 生成任务ID
-        task_id = str(uuid.uuid4())
-        
-        # 保存任务配置
-        task_file = self._get_task_file(task_id)
-        with open(task_file, "w", encoding="utf-8") as f:
-            f.write(config_content)
-        
-        # 创建任务状态
-        status = {
-            "task_id": task_id,
-            "status": "pending",  # pending, running, completed, failed
-            "created_at": datetime.now().isoformat(),
-            "registry": registry,
-            "tag": tag,
-            "targets": [],
-            "results": {}
-        }
-        
-        # 初始化每个目标的状态
-        targets = config.get("targets", [])
-        for target in targets:
-            target_name = target.get("name")
-            status["targets"].append({
-                "name": target_name,
-                "mode": target.get("mode"),
-                "status": "pending",
-                "agent_name": target.get("agent", {}).get("name") if target.get("mode") == "agent" else None,
-                "host": target.get("host") if target.get("mode") == "ssh" else None,
-            })
-        
-        # 保存状态
-        status_file = self._get_task_status_file(task_id)
-        with open(status_file, "w", encoding="utf-8") as f:
-            json.dump(status, f, ensure_ascii=False, indent=2)
-        
-        return {
-            "task_id": task_id,
-            "status": status,
-            "config": config
-        }
-    
-    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取任务信息
-        
-        Args:
-            task_id: 任务ID
-        
-        Returns:
-            任务信息字典，如果不存在则返回 None
-        """
-        task_file = self._get_task_file(task_id)
-        status_file = self._get_task_status_file(task_id)
-        
-        if not os.path.exists(task_file):
-            return None
-        
-        # 读取配置
-        with open(task_file, "r", encoding="utf-8") as f:
-            config_content = f.read()
-        config = self.parser.parse_yaml_content(config_content)
-        
-        # 读取状态
-        status = {}
-        if os.path.exists(status_file):
-            with open(status_file, "r", encoding="utf-8") as f:
-                status = json.load(f)
-        
-        return {
-            "task_id": task_id,
-            "config": config,
-            "status": status,
-            "config_content": config_content
-        }
-    
-    def list_tasks(self) -> List[Dict[str, Any]]:
-        """
-        列出所有任务
-        
-        Returns:
-            任务列表
-        """
-        tasks = []
-        
-        for file_path in Path(self.tasks_dir).glob("*.yaml"):
-            task_id = file_path.stem
-            task = self.get_task(task_id)
-            if task:
-                tasks.append(task)
-        
-        # 按创建时间倒序排序
-        tasks.sort(key=lambda x: x.get("status", {}).get("created_at", ""), reverse=True)
-        
-        return tasks
-    
-    def delete_task(self, task_id: str) -> bool:
-        """
-        删除任务
-        
-        Args:
-            task_id: 任务ID
-        
-        Returns:
-            是否删除成功
-        """
-        task_file = self._get_task_file(task_id)
-        status_file = self._get_task_status_file(task_id)
-        
-        try:
-            if os.path.exists(task_file):
-                os.remove(task_file)
-            if os.path.exists(status_file):
-                os.remove(status_file)
-            return True
-        except Exception as e:
-            print(f"删除任务失败: {e}")
-            return False
-    
-    def update_task_status(
-        self,
-        task_id: str,
-        target_name: Optional[str] = None,
-        status: Optional[str] = None,
-        result: Optional[Dict[str, Any]] = None,
-        message: Optional[str] = None
-    ):
-        """
-        更新任务状态
-        
-        Args:
-            task_id: 任务ID
-            target_name: 目标名称（如果更新特定目标的状态）
-            status: 状态（pending, running, completed, failed）
-            result: 执行结果
-        """
-        status_file = self._get_task_status_file(task_id)
-        
-        if not os.path.exists(status_file):
-            return
-        
-        # 读取当前状态
-        with open(status_file, "r", encoding="utf-8") as f:
-            task_status = json.load(f)
-        
-        # 更新状态
-        if target_name:
-            # 更新特定目标的状态
-            for target in task_status.get("targets", []):
-                if target.get("name") == target_name:
-                    if status:
-                        target["status"] = status
-                    if result:
-                        target["result"] = result
-                    if message:
-                        if "messages" not in target:
-                            target["messages"] = []
-                        target["messages"].append({
-                            "time": datetime.now().isoformat(),
-                            "message": message
-                        })
-                    target["updated_at"] = datetime.now().isoformat()
-                    break
-            
-            # 检查是否所有目标都已完成
-            all_completed = all(
-                t.get("status") in ["completed", "failed"]
-                for t in task_status.get("targets", [])
-            )
-            if all_completed:
-                # 检查是否有失败的
-                has_failed = any(
-                    t.get("status") == "failed"
-                    for t in task_status.get("targets", [])
-                )
-                task_status["status"] = "failed" if has_failed else "completed"
-                task_status["completed_at"] = datetime.now().isoformat()
-        else:
-            # 更新整体状态
-            if status:
-                task_status["status"] = status
-            if result:
-                task_status["result"] = result
-        
-        # 保存状态
-        with open(status_file, "w", encoding="utf-8") as f:
-            json.dump(task_status, f, ensure_ascii=False, indent=2)
-    
-    async def execute_task(
-        self,
-        task_id: str,
-        target_names: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
-        """
-        执行部署任务
-        
-        Args:
-            task_id: 任务ID
             target_names: 要执行的目标名称列表（如果为 None，则执行所有目标）
+            task_manager: 任务管理器实例，用于更新状态和日志
         
         Returns:
             执行结果字典
         """
-        # 获取任务信息
-        task = self.get_task(task_id)
-        if not task:
+        if not task_manager:
             return {
                 "success": False,
-                "message": f"任务不存在: {task_id}"
+                "message": "task_manager参数是必需的"
             }
-        
-        config = task["config"]
-        status = task["status"]
         
         # 构建部署上下文
         context = self.parser.build_deploy_context(
             config,
-            registry=status.get("registry"),
-            tag=status.get("tag"),
+            registry=registry,
+            tag=tag,
             task_id=task_id
         )
         
@@ -303,30 +84,16 @@ class DeployTaskManager:
         if target_names:
             targets = [t for t in targets if t.get("name") in target_names]
         
-        # 如果任务已完成或失败，重置要执行的目标状态为 pending
-        current_status = status.get("status")
-        if current_status in ["completed", "failed"]:
-            for target in targets:
-                target_name = target.get("name")
-                # 重置目标状态为 pending
-                self.update_task_status(
-                    task_id,
-                    target_name=target_name,
-                    status="pending",
-                    result=None,
-                    message="任务已重置，准备重新执行"
-                )
-        
-        # 更新任务状态为运行中
-        self.update_task_status(task_id, status="running")
+        # 添加日志
+        task_manager.add_log(task_id, f"🚀 开始执行部署任务，共 {len(targets)} 个目标\n")
         
         # 执行每个目标
         results = {}
         for target in targets:
             target_name = target.get("name")
             
-            # 更新目标状态为运行中
-            self.update_task_status(task_id, target_name=target_name, status="running")
+            # 添加日志
+            task_manager.add_log(task_id, f"📦 开始部署目标: {target_name}\n")
             
             try:
                 # 使用新的执行器架构
@@ -334,19 +101,17 @@ class DeployTaskManager:
                     task_id,
                     target,
                     deploy_config,
-                    context
+                    context,
+                    task_manager=task_manager
                 )
                 
                 results[target_name] = result
                 
-                # 更新目标状态
-                self.update_task_status(
-                    task_id,
-                    target_name=target_name,
-                    status="completed" if result.get("success") else "failed",
-                    result=result,
-                    message=result.get("message", "")
-                )
+                # 添加日志
+                if result.get("success"):
+                    task_manager.add_log(task_id, f"✅ 目标 {target_name} 部署成功: {result.get('message', '')}\n")
+                else:
+                    task_manager.add_log(task_id, f"❌ 目标 {target_name} 部署失败: {result.get('message', '')}\n")
             
             except Exception as e:
                 import traceback
@@ -357,13 +122,7 @@ class DeployTaskManager:
                     "error": str(e)
                 }
                 results[target_name] = error_result
-                self.update_task_status(
-                    task_id,
-                    target_name=target_name,
-                    status="failed",
-                    result=error_result,
-                    message=f"执行异常: {str(e)}"
-                )
+                task_manager.add_log(task_id, f"❌ 目标 {target_name} 执行异常: {str(e)}\n")
         
         # 检查整体状态
         all_completed = all(
@@ -376,10 +135,10 @@ class DeployTaskManager:
                 not r.get("success", False)
                 for r in results.values()
             )
-            self.update_task_status(
-                task_id,
-                status="failed" if has_failed else "completed"
-            )
+            if has_failed:
+                task_manager.add_log(task_id, f"⚠️ 部署任务完成，部分目标失败\n")
+            else:
+                task_manager.add_log(task_id, f"✅ 部署任务完成，所有目标成功\n")
         
         return {
             "success": True,
@@ -392,7 +151,8 @@ class DeployTaskManager:
         task_id: str,
         target: Dict[str, Any],
         deploy_config: Dict[str, Any],
-        context: Dict[str, Any]
+        context: Dict[str, Any],
+        task_manager = None
     ) -> Dict[str, Any]:
         """
         使用执行器执行目标（新架构）
@@ -509,12 +269,8 @@ class DeployTaskManager:
         
         # 创建状态更新回调
         def update_status_callback(message: str):
-            self.update_task_status(
-                task_id,
-                target_name=target_name,
-                status="running",
-                message=message
-            )
+            if task_manager:
+                task_manager.add_log(task_id, f"{message}\n")
         
         # 执行部署
         try:
@@ -529,6 +285,8 @@ class DeployTaskManager:
         except Exception as e:
             import traceback
             logger.exception(f"执行器执行失败: {e}")
+            if task_manager:
+                task_manager.add_log(task_id, f"❌ 执行器执行失败: {str(e)}\n")
             return {
                 "success": False,
                 "message": f"执行失败: {str(e)}",
@@ -685,13 +443,7 @@ class DeployTaskManager:
         logger.info(f"[SSH] 开始执行 SSH 部署任务: task_id={task_id}, target={target.get('name')}")
         
         try:
-            # 更新任务状态为运行中（明确标识主机类型）
-            self.update_task_status(
-                task_id, 
-                target_name=target.get("name"), 
-                status="running", 
-                message="[SSH] 正在连接 SSH 主机..."
-            )
+            # 注意：此方法已不再使用，保留仅用于向后兼容
             
             # 获取 SSH 主机配置
             host_name = target.get("host")
@@ -728,12 +480,6 @@ class DeployTaskManager:
             docker_config = rendered_target.get("docker", {})
             
             logger.info(f"[SSH] 主机配置: {host_name} ({host_config['host']}:{host_config['port']})")
-            self.update_task_status(
-                task_id, 
-                target_name=target.get("name"), 
-                status="running", 
-                message=f"[SSH] 正在执行部署到 {host_name}..."
-            )
             
             # 获取部署模式
             deploy_mode = docker_config.get("deploy_mode", "docker_run")
@@ -766,13 +512,6 @@ class DeployTaskManager:
             
             if result.get("success"):
                 logger.info(f"[SSH] 部署成功: task_id={task_id}, target={target.get('name')}, host={host_name}")
-                self.update_task_status(
-                    task_id, 
-                    target_name=target.get("name"), 
-                    status="completed", 
-                    result=result,
-                    message=f"[SSH] {status_msg}"
-                )
             else:
                 # 记录完整的错误信息
                 error_info = {
@@ -783,13 +522,6 @@ class DeployTaskManager:
                     "command": result.get("command", "")
                 }
                 logger.error(f"[SSH] 部署失败: task_id={task_id}, target={target.get('name')}, host={host_name}, details={error_info}")
-                self.update_task_status(
-                    task_id, 
-                    target_name=target.get("name"), 
-                    status="failed", 
-                    result=result,
-                    message=f"[SSH] {status_msg}"
-                )
             
             return result
             
@@ -799,7 +531,7 @@ class DeployTaskManager:
             logger.exception(f"[SSH] 部署异常: task_id={task_id}, target={target.get('name')}")
             traceback.print_exc()
             
-            # 更新任务状态为失败（统一格式）
+            # 返回错误结果
             error_result = {
                 "success": False,
                 "message": error_msg,
@@ -807,13 +539,6 @@ class DeployTaskManager:
                 "deploy_method": "ssh_direct",
                 "error": str(e)
             }
-            self.update_task_status(
-                task_id, 
-                target_name=target.get("name"), 
-                status="failed", 
-                result=error_result,
-                message=f"[SSH] {error_msg}"
-            )
             
             return error_result
     
@@ -843,8 +568,7 @@ class DeployTaskManager:
         logger.info(f"[Portainer] 开始执行 Portainer 部署任务: task_id={task_id}, target={target_name}, host={agent_host.get('name')}")
         
         try:
-            # 更新任务状态为运行中（明确标识主机类型）
-            self.update_task_status(task_id, target_name=target_name, status="running", message="[Portainer] 正在连接 Portainer...")
+            # 注意：此方法已不再使用，保留仅用于向后兼容
             # 从数据库获取完整的 Portainer 信息（包括 API Key）
             db = get_db_session()
             try:
@@ -863,7 +587,6 @@ class DeployTaskManager:
             
             # 创建 Portainer 客户端
             logger.info(f"[Portainer] 创建 Portainer 客户端: URL={agent_host.get('portainer_url')}, EndpointID={agent_host.get('portainer_endpoint_id')}")
-            self.update_task_status(task_id, target_name=target_name, status="running", message="[Portainer] 正在创建 Portainer 客户端...")
             
             client = PortainerClient(
                 agent_host.get("portainer_url"),
@@ -879,7 +602,6 @@ class DeployTaskManager:
             # 如果需要重新发布，先清理
             if redeploy:
                 logger.info(f"开始清理已有部署...")
-                self.update_task_status(task_id, target_name=target_name, status="running", message="正在清理已有部署...")
                 if deploy_mode == "docker_compose":
                     # 尝试删除 Stack
                     stack_name = f"{context.get('app', {}).get('name', 'app')}-{target_name}"
@@ -908,7 +630,6 @@ class DeployTaskManager:
             
             # 执行部署
             logger.info(f"开始执行部署: mode={deploy_mode}")
-            self.update_task_status(task_id, target_name=target_name, status="running", message=f"正在执行 {deploy_mode} 部署...")
             
             if deploy_mode == "docker_compose":
                 # Docker Compose 部署
@@ -933,12 +654,6 @@ class DeployTaskManager:
                         if attempt > 0:
                             wait_time = attempt * 2  # 2秒, 4秒
                             logger.info(f"第 {attempt + 1} 次尝试部署 Stack（等待 {wait_time} 秒后重试）...")
-                            self.update_task_status(
-                                task_id, 
-                                target_name=target_name, 
-                                status="running", 
-                                message=f"Stack 部署失败，{wait_time}秒后重试（{attempt + 1}/{max_retries}）..."
-                            )
                             import asyncio
                             await asyncio.sleep(wait_time)
                         
@@ -989,27 +704,11 @@ class DeployTaskManager:
                     result.setdefault("deploy_method", "portainer_api")
                     result.setdefault("host_name", target_name)
                 
-                # 更新任务状态（统一格式）
+                # 记录日志
                 if result.get("success"):
                     logger.info(f"[Portainer] Stack 部署成功: task_id={task_id}, target={target_name}")
-                    status_msg = result.get("message", "Stack 部署成功")
-                    self.update_task_status(
-                        task_id, 
-                        target_name=target_name, 
-                        status="completed", 
-                        result=result,
-                        message=f"[Portainer] {status_msg}"
-                    )
                 else:
                     logger.error(f"[Portainer] Stack 部署失败: task_id={task_id}, target={target_name}, error={result.get('message')}")
-                    status_msg = result.get("message", "Stack 部署失败")
-                    self.update_task_status(
-                        task_id, 
-                        target_name=target_name, 
-                        status="failed", 
-                        result=result,
-                        message=f"[Portainer] {status_msg}"
-                    )
                 
                 return result
             else:
@@ -1043,13 +742,6 @@ class DeployTaskManager:
                 if not image:
                     error_msg = "无法确定镜像名称"
                     logger.error(error_msg)
-                    self.update_task_status(
-                        task_id, 
-                        target_name=target_name, 
-                        status="failed", 
-                        result={"success": False, "message": error_msg},
-                        message=error_msg
-                    )
                     error_result = {
                         "success": False,
                         "message": error_msg,
@@ -1057,13 +749,6 @@ class DeployTaskManager:
                         "deploy_method": "portainer_api",
                         "host_name": target_name
                     }
-                    self.update_task_status(
-                        task_id, 
-                        target_name=target_name, 
-                        status="failed", 
-                        result=error_result,
-                        message=f"[Portainer] {error_msg}"
-                    )
                     return error_result
                 
                 logger.info(f"[Portainer] 部署 Docker 容器: name={container_name}, image={image}")
@@ -1095,12 +780,6 @@ class DeployTaskManager:
                         if attempt > 0:
                             wait_time = attempt * 2  # 2秒, 4秒
                             logger.info(f"第 {attempt + 1} 次尝试部署（等待 {wait_time} 秒后重试）...")
-                            self.update_task_status(
-                                task_id, 
-                                target_name=target_name, 
-                                status="running", 
-                                message=f"部署失败，{wait_time}秒后重试（{attempt + 1}/{max_retries}）..."
-                            )
                             import asyncio
                             await asyncio.sleep(wait_time)
                         
@@ -1163,27 +842,11 @@ class DeployTaskManager:
                 result.setdefault("deploy_method", "portainer_api")
                 result.setdefault("host_name", target_name)
             
-            # 更新任务状态（统一格式）
+            # 记录日志
             if result.get("success"):
                 logger.info(f"[Portainer] 部署成功: task_id={task_id}, target={target_name}")
-                status_msg = result.get("message", "部署成功")
-                self.update_task_status(
-                    task_id, 
-                    target_name=target_name, 
-                    status="completed", 
-                    result=result,
-                    message=f"[Portainer] {status_msg}"
-                )
             else:
                 logger.error(f"[Portainer] 部署失败: task_id={task_id}, target={target_name}, error={result.get('message')}")
-                status_msg = result.get("message", "部署失败")
-                self.update_task_status(
-                    task_id, 
-                    target_name=target_name, 
-                    status="failed", 
-                    result=result,
-                    message=f"[Portainer] {status_msg}"
-                )
             
             return result
         
@@ -1192,15 +855,6 @@ class DeployTaskManager:
             error_msg = f"Portainer 部署失败: {str(e)}"
             logger.exception(f"Portainer 部署失败: task_id={task_id}, target={target_name}")
             traceback.print_exc()
-            
-            # 更新任务状态为失败
-            self.update_task_status(
-                task_id, 
-                target_name=target_name, 
-                status="failed", 
-                result={"success": False, "message": error_msg},
-                message=error_msg
-            )
             
             return {
                 "success": False,

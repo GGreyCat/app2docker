@@ -48,6 +48,7 @@
           <option value="">全部类型</option>
           <option value="build">构建任务</option>
           <option value="export">导出任务</option>
+          <option value="deploy">部署任务</option>
         </select>
         <button class="btn btn-sm btn-outline-primary" @click="loadTasks">
           <i class="fas fa-sync-alt"></i> 刷新
@@ -150,6 +151,9 @@
               <span v-if="task.task_category === 'build'" class="badge bg-info">
                 <i class="fas fa-hammer"></i> 构建
               </span>
+              <span v-else-if="task.task_category === 'deploy'" class="badge bg-success">
+                <i class="fas fa-rocket"></i> 部署
+              </span>
               <span v-else class="badge bg-secondary">
                 <i class="fas fa-download"></i> 导出
               </span>
@@ -157,7 +161,14 @@
             <td>
               <div>
                 <code class="small">{{ task.image || (task.task_type ? task.task_type : '未知') }}</code>
-                <div v-if="task.selected_services && task.selected_services.length > 0" class="mt-1">
+                <!-- 部署任务显示目标主机 -->
+                <div v-if="task.task_category === 'deploy' && task.task_config?.targets" class="mt-1">
+                  <span class="badge bg-success me-1" style="font-size: 0.7rem;">
+                    <i class="fas fa-server"></i> {{ task.task_config.targets.length }} 个目标
+                  </span>
+                </div>
+                <!-- 构建任务显示服务信息 -->
+                <div v-else-if="task.selected_services && task.selected_services.length > 0" class="mt-1">
                   <span class="badge bg-info me-1" style="font-size: 0.7rem;">
                     <i class="fas fa-layer-group"></i> 多服务 ({{ task.selected_services.length }})
                   </span>
@@ -179,7 +190,7 @@
                     </span>
                   </div>
                 </div>
-                <span v-else-if="task.push_mode === 'multi' && !task.selected_services" class="badge bg-secondary me-1" style="font-size: 0.7rem;">
+                <span v-else-if="task.push_mode === 'multi' && !task.selected_services && task.task_category !== 'deploy'" class="badge bg-secondary me-1" style="font-size: 0.7rem;">
                   <i class="fas fa-cube"></i> 单应用
                 </span>
               </div>
@@ -214,6 +225,9 @@
               </span>
               <span v-else-if="task.source === '镜像构建' || task.source === '分步构建'" class="badge bg-warning">
                 <i class="fas fa-list-ol"></i> 镜像构建
+              </span>
+              <span v-else-if="task.source === '手动部署'" class="badge bg-success">
+                <i class="fas fa-rocket"></i> 手动部署
               </span>
               <span v-else class="badge bg-secondary">
                 <i class="fas fa-hammer"></i> {{ task.source || '手动构建' }}
@@ -287,6 +301,35 @@
                     class="btn btn-sm btn-outline-secondary"
                     @click="viewTaskConfig(task)"
                     :title="'查看配置JSON'"
+                  >
+                    <i class="fas fa-code"></i>
+                  </button>
+                </template>
+                
+                <!-- 部署任务操作 -->
+                <template v-if="task.task_category === 'deploy'">
+                  <button 
+                    class="btn btn-sm btn-outline-info"
+                    @click="viewLogs(task)"
+                    :disabled="viewingLogs === task.task_id"
+                    :title="'查看部署日志'"
+                  >
+                    <i class="fas fa-terminal"></i>
+                  </button>
+                  <button 
+                    v-if="task.status === 'completed' || task.status === 'failed' || task.status === 'stopped'"
+                    class="btn btn-sm btn-outline-success"
+                    @click="executeDeployTask(task)"
+                    :disabled="executingDeploy === task.task_id"
+                    :title="'重新执行部署'"
+                  >
+                    <i class="fas fa-play"></i>
+                    <span v-if="executingDeploy === task.task_id" class="spinner-border spinner-border-sm ms-1"></span>
+                  </button>
+                  <button 
+                    class="btn btn-sm btn-outline-secondary"
+                    @click="viewDeployConfig(task)"
+                    :title="'查看部署配置'"
                   >
                     <i class="fas fa-code"></i>
                   </button>
@@ -726,6 +769,10 @@ async function refreshRunningTasks() {
         if (category === 'build') {
           const res = await axios.get(`/api/build-tasks/${id}`)
           updatedTask = res.data
+        } else if (category === 'deploy') {
+          // 部署任务使用部署任务API
+          const res = await axios.get(`/api/deploy-tasks/${id}`)
+          updatedTask = res.data.task || res.data
         } else if (category === 'export') {
           const res = await axios.get(`/api/export-tasks/${id}`)
           updatedTask = res.data.task
@@ -968,6 +1015,9 @@ async function stopTask(task) {
   try {
     if (task.task_category === 'build') {
       await axios.post(`/api/build-tasks/${task.task_id}/stop`)
+    } else if (task.task_category === 'deploy') {
+      // 部署任务使用构建任务管理器的stop接口（因为部署任务现在也在BuildTaskManager中）
+      await axios.post(`/api/build-tasks/${task.task_id}/stop`)
     } else {
       await axios.post(`/api/export-tasks/${task.task_id}/stop`)
     }
@@ -1008,6 +1058,8 @@ async function deleteTask(task) {
   try {
     if (task.task_category === 'build') {
       await axios.delete(`/api/build-tasks/${task.task_id}`)
+    } else if (task.task_category === 'deploy') {
+      await axios.delete(`/api/deploy-tasks/${task.task_id}`)
     } else {
       await axios.delete(`/api/export-tasks/${task.task_id}`)
     }
@@ -1502,6 +1554,48 @@ async function retryExportTask(task) {
     }, 5000)
   } finally {
     retrying.value = null
+  }
+}
+
+// 执行部署任务
+async function executeDeployTask(task) {
+  if (executingDeploy.value) return
+  
+  if (!confirm(`确定要执行部署任务 "${task.image || task.task_id.substring(0, 8)}" 吗？`)) {
+    return
+  }
+  
+  executingDeploy.value = task.task_id
+  error.value = null
+  
+  try {
+    await axios.post(`/api/deploy-tasks/${task.task_id}/execute`)
+    alert('部署任务已开始执行')
+    await loadTasks()
+  } catch (err) {
+    console.error('执行部署任务失败:', err)
+    const errorMsg = err.response?.data?.detail || err.message || '执行失败'
+    error.value = `执行部署任务失败: ${errorMsg}`
+    alert(`执行部署任务失败: ${errorMsg}`)
+  } finally {
+    executingDeploy.value = null
+  }
+}
+
+// 查看部署配置
+async function viewDeployConfig(task) {
+  try {
+    const res = await axios.get(`/api/deploy-tasks/${task.task_id}`)
+    const taskData = res.data.task
+    const configContent = taskData.config_content || (taskData.task_config && taskData.task_config.config_content) || ''
+    
+    taskConfigJson.value = configContent
+    taskConfigJsonText.value = configContent
+    showConfigModal.value = true
+  } catch (err) {
+    console.error('获取部署配置失败:', err)
+    const errorMsg = err.response?.data?.detail || err.message || '获取配置失败'
+    alert(`获取部署配置失败: ${errorMsg}`)
   }
 }
 
