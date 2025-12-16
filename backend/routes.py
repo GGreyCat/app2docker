@@ -6487,7 +6487,7 @@ async def websocket_agent_endpoint(websocket: WebSocket, token: str = Query(...)
 
 @router.post("/deploy-tasks")
 async def create_deploy_task(request: Request, task_req: DeployTaskCreateRequest):
-    """创建部署任务"""
+    """创建部署配置（配置触发后会在任务管理中生成任务）"""
     try:
         username = get_current_username(request)
         build_manager = BuildTaskManager()
@@ -6526,7 +6526,7 @@ async def create_deploy_task(request: Request, task_req: DeployTaskCreateRequest
 
 @router.get("/deploy-tasks")
 async def list_deploy_tasks(request: Request):
-    """列出所有部署任务"""
+    """列出所有部署配置（只返回配置，不返回执行产生的任务）"""
     try:
         username = get_current_username(request)
         build_manager = BuildTaskManager()
@@ -6617,7 +6617,7 @@ async def execute_deploy_task(
     task_id: str,
     execute_req: Optional[DeployTaskExecuteRequest] = None,
 ):
-    """执行部署任务"""
+    """触发部署配置（会在任务管理中创建新任务）"""
     try:
         username = get_current_username(request)
         build_manager = BuildTaskManager()

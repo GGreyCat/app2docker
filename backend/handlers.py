@@ -4801,6 +4801,7 @@ class BuildTaskManager:
         config_content: str,
         registry: Optional[str] = None,
         tag: Optional[str] = None,
+        source_config_id: Optional[str] = None,
     ) -> str:
         """
         创建部署任务并保存到数据库
@@ -4809,6 +4810,7 @@ class BuildTaskManager:
             config_content: YAML 配置内容
             registry: 镜像仓库地址（可选）
             tag: 镜像标签（可选）
+            source_config_id: 原始配置ID（如果提供，表示这是从配置触发的任务）
 
         Returns:
             任务ID
@@ -4832,6 +4834,10 @@ class BuildTaskManager:
                 "tag": tag,
                 "targets": config.get("targets", []),
             }
+
+            # 如果提供了 source_config_id，说明这是从配置触发的任务
+            if source_config_id:
+                task_config["source_config_id"] = source_config_id
 
             # 保存任务到数据库
             from backend.database import get_db_session
@@ -4909,26 +4915,20 @@ class BuildTaskManager:
         if not config_content:
             raise ValueError(f"部署任务配置内容为空，无法执行: {task_id}")
 
-        # 创建新任务（每次执行都创建新任务）
+        # 创建新任务（每次执行都创建新任务，并标记为从配置触发）
         new_task_id = self.create_deploy_task(
             config_content=config_content,
             registry=registry,
             tag=tag,
+            source_config_id=task_id,  # 标记这是从配置触发的任务
         )
 
-        # 在新任务的配置中保存原始配置ID，并更新原始配置的统计信息
+        # 更新原始配置的执行统计
         from backend.database import get_db_session
         from backend.models import Task
 
         db = get_db_session()
         try:
-            # 更新新任务的配置，保存原始配置ID
-            new_task_obj = db.query(Task).filter(Task.task_id == new_task_id).first()
-            if new_task_obj:
-                new_task_config = new_task_obj.task_config or {}
-                new_task_config["source_config_id"] = task_id  # 保存原始配置ID
-                new_task_obj.task_config = new_task_config
-
             # 更新原始配置的执行统计
             original_task_obj = db.query(Task).filter(Task.task_id == task_id).first()
             if original_task_obj:
@@ -4938,11 +4938,10 @@ class BuildTaskManager:
                 original_task_config["execution_count"] = execution_count
                 original_task_config["last_executed_at"] = datetime.now().isoformat()
                 original_task_obj.task_config = original_task_config
-
-            db.commit()
+                db.commit()
         except Exception as e:
             db.rollback()
-            print(f"⚠️ 更新任务关联信息失败: {e}")
+            print(f"⚠️ 更新配置统计信息失败: {e}")
             import traceback
 
             traceback.print_exc()

@@ -142,6 +142,9 @@ class WebSocketClient:
         except Exception as e:
             logger.error(f"发送消息失败: {e}")
             self.connected = False
+            # 确保重连任务正在运行
+            if self.running and (not self._reconnect_task or self._reconnect_task.done()):
+                self._reconnect_task = asyncio.create_task(self._reconnect_loop())
             return False
 
     async def _receive_loop(self):
@@ -163,10 +166,16 @@ class WebSocketClient:
             except ConnectionClosed:
                 logger.warning("WebSocket 连接已关闭")
                 self.connected = False
+                # 确保重连任务正在运行
+                if not self._reconnect_task or self._reconnect_task.done():
+                    self._reconnect_task = asyncio.create_task(self._reconnect_loop())
                 break
             except Exception as e:
                 logger.error(f"接收消息时出错: {e}")
                 self.connected = False
+                # 确保重连任务正在运行
+                if not self._reconnect_task or self._reconnect_task.done():
+                    self._reconnect_task = asyncio.create_task(self._reconnect_loop())
                 break
 
     async def _heartbeat_loop(self):
@@ -185,6 +194,9 @@ class WebSocketClient:
             except Exception as e:
                 logger.error(f"心跳发送失败: {e}")
                 self.connected = False
+                # 确保重连任务正在运行
+                if not self._reconnect_task or self._reconnect_task.done():
+                    self._reconnect_task = asyncio.create_task(self._reconnect_loop())
 
     async def _reconnect_loop(self):
         """自动重连循环"""
@@ -192,11 +204,25 @@ class WebSocketClient:
             if not self.connected:
                 logger.info(f"尝试重连... ({self.reconnect_interval}秒后)")
                 await asyncio.sleep(self.reconnect_interval)
-                await self.connect()
-                if self.connected:
+                
+                # 如果已经停止，退出循环
+                if not self.running:
+                    break
+                    
+                if await self.connect():
                     # 重新启动接收和心跳任务
+                    # 先取消旧的心跳任务（如果存在）
+                    if self._heartbeat_task and not self._heartbeat_task.done():
+                        self._heartbeat_task.cancel()
+                        try:
+                            await self._heartbeat_task
+                        except asyncio.CancelledError:
+                            pass
+                    
+                    # 启动新的接收和心跳任务
                     asyncio.create_task(self._receive_loop())
                     self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+                    logger.info("✅ 重连成功，已恢复接收和心跳")
             else:
                 await asyncio.sleep(1)
 
@@ -204,14 +230,14 @@ class WebSocketClient:
         """启动客户端"""
         self.running = True
 
+        # 启动重连任务（无论初始连接是否成功，都需要重连机制）
+        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
         # 初始连接
         if await self.connect():
             # 启动接收和心跳任务
             asyncio.create_task(self._receive_loop())
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-        else:
-            # 连接失败，启动重连任务
-            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
 
     async def stop(self):
         """停止客户端"""
