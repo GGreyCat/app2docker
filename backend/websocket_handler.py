@@ -223,25 +223,36 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
 
         # 处理消息
         import logging
+
         logger = logging.getLogger(__name__)
-        logger.info(f"[WebSocket] 开始接收消息循环: host_id={host_id}, name={host.get('name')}")
+        logger.info(
+            f"[WebSocket] 开始接收消息循环: host_id={host_id}, name={host.get('name')}"
+        )
         print(f"📡 开始接收消息循环: host_id={host_id}, name={host.get('name')}")
-        
+
         while True:
             try:
                 # 接收消息
                 logger.info(f"[WebSocket] 等待接收消息: host_id={host_id}")
                 data = await websocket.receive_text()
-                logger.info(f"[WebSocket] 📥 收到原始消息: host_id={host_id}, size={len(data)} bytes")
-                print(f"📥 收到原始消息 ({host_id}): size={len(data)} bytes, preview={data[:100]}")
+                logger.info(
+                    f"[WebSocket] 📥 收到原始消息: host_id={host_id}, size={len(data)} bytes"
+                )
+                print(
+                    f"📥 收到原始消息 ({host_id}): size={len(data)} bytes, preview={data[:100]}"
+                )
 
                 try:
                     message = json.loads(data)
                     message_type = message.get("type")
-                    logger.info(f"[WebSocket] 消息解析成功: host_id={host_id}, type={message_type}")
+                    logger.info(
+                        f"[WebSocket] 消息解析成功: host_id={host_id}, type={message_type}"
+                    )
                     print(f"✅ 消息解析成功 ({host_id}): type={message_type}")
                 except json.JSONDecodeError as e:
-                    logger.error(f"[WebSocket] JSON解析失败: host_id={host_id}, error={e}, data={data[:200]}")
+                    logger.error(
+                        f"[WebSocket] JSON解析失败: host_id={host_id}, error={e}, data={data[:200]}"
+                    )
                     print(f"❌ JSON解析失败 ({host_id}): {e}, data={data[:200]}")
                     await websocket.send_json(
                         {"type": "error", "message": "无效的JSON格式"}
@@ -249,7 +260,9 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
                     continue
 
                 message_type = message.get("type")
-                logger.info(f"[WebSocket] 开始处理消息: host_id={host_id}, type={message_type}")
+                logger.info(
+                    f"[WebSocket] 开始处理消息: host_id={host_id}, type={message_type}"
+                )
                 print(f"🔄 开始处理消息 ({host_id}): type={message_type}")
 
                 if message_type == "heartbeat":
@@ -447,12 +460,14 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
 
             except WebSocketDisconnect:
                 import logging
+
                 logger = logging.getLogger(__name__)
                 logger.warning(f"[WebSocket] WebSocket断开连接: host_id={host_id}")
                 break
             except Exception as e:
                 import logging
                 import traceback
+
                 logger = logging.getLogger(__name__)
                 logger.exception(
                     f"[WebSocket] 处理消息时出错: host_id={host_id}, error={e}"
@@ -469,11 +484,13 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
 
     except WebSocketDisconnect:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info(f"[WebSocket] WebSocket断开连接: host_id={host_id}")
     except Exception as e:
         import logging
         import traceback
+
         logger = logging.getLogger(__name__)
         logger.exception(f"[WebSocket] WebSocket连接错误: host_id={host_id}, error={e}")
         print(f"⚠️ WebSocket连接错误 ({host_id}): {e}")
@@ -481,6 +498,7 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
     finally:
         # 断开连接
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info(f"[WebSocket] 清理连接: host_id={host_id}")
         connection_manager.disconnect(host_id)
