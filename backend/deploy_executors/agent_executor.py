@@ -145,10 +145,12 @@ class AgentExecutor(DeployExecutor):
         wait_interval = 0.5  # 每0.5秒检查一次
         waited_time = 0.0
 
+        # 直接导入active_connections字典进行检查（与send_message方法保持一致）
+        from backend.websocket_handler import active_connections
+
         while waited_time < max_wait_time:
-            # 检查active_connections（WebSocket实际连接）
-            connected_hosts = connection_manager.get_connected_hosts()
-            is_connected = self.host_id in connected_hosts
+            # 直接检查active_connections字典（与send_message方法保持一致）
+            is_connected = self.host_id in active_connections
 
             # 检查数据库状态
             host_info = agent_manager.get_agent_host(self.host_id)
@@ -157,28 +159,28 @@ class AgentExecutor(DeployExecutor):
             if is_connected:
                 logger.info(
                     f"[Agent] 主机已连接: host_id={self.host_id}, host_name={self.host_name}, "
-                    f"等待时间: {waited_time:.1f}秒, 数据库状态: {db_status}"
+                    f"等待时间: {waited_time:.1f}秒, 数据库状态: {db_status}, "
+                    f"active_connections keys: {list(active_connections.keys())}"
                 )
                 break
 
             if waited_time == 0:
                 logger.warning(
                     f"[Agent] 主机未连接，等待连接建立: host_id={self.host_id}, host_name={self.host_name}, "
-                    f"数据库状态: {db_status}, 当前连接的主机: {connected_hosts}"
+                    f"数据库状态: {db_status}, active_connections keys: {list(active_connections.keys())}"
                 )
 
             await asyncio.sleep(wait_interval)
             waited_time += wait_interval
 
-        # 再次检查连接状态
-        connected_hosts = connection_manager.get_connected_hosts()
+        # 再次检查连接状态（直接检查active_connections，与send_message方法保持一致）
         host_info = agent_manager.get_agent_host(self.host_id)
         db_status = host_info.get("status") if host_info else "unknown"
 
-        if self.host_id not in connected_hosts:
+        if self.host_id not in active_connections:
             logger.error(
                 f"[Agent] 主机未连接（等待{waited_time:.1f}秒后）: host_id={self.host_id}, host_name={self.host_name}, "
-                f"数据库状态: {db_status}, 当前连接的主机: {connected_hosts}"
+                f"数据库状态: {db_status}, active_connections keys: {list(active_connections.keys())}"
             )
 
             # 如果数据库状态是online但active_connections中没有，说明连接可能刚断开
@@ -208,7 +210,7 @@ class AgentExecutor(DeployExecutor):
         if not success:
             logger.error(
                 f"[Agent] 发送消息失败: host_id={self.host_id}, host_name={self.host_name}, "
-                f"当前连接的主机: {connected_hosts}"
+                f"active_connections keys: {list(active_connections.keys())}"
             )
             return {
                 "success": False,

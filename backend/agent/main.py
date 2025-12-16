@@ -202,15 +202,23 @@ async def handle_deploy_task(message: Dict[str, Any]):
         return
 
     # 发送任务开始消息（使用 task_id 匹配）
-    await websocket_client.send_message(
-        {
-            "type": "deploy_result",
-            "task_id": task_id,  # 任务ID（用于匹配）
-            "target_name": target_name,  # 目标名称（用于区分同一任务的多个目标）
-            "status": "running",
-            "message": "部署任务已开始",
-        }
+    running_message = {
+        "type": "deploy_result",
+        "task_id": task_id,  # 任务ID（用于匹配）
+        "target_name": target_name,  # 目标名称（用于区分同一任务的多个目标）
+        "status": "running",
+        "message": "部署任务已开始",
+    }
+    logger.info(
+        f"准备发送任务开始消息: task_id={task_id}, target={target_name}, message={running_message}"
     )
+    send_success = await websocket_client.send_message(running_message)
+    if send_success:
+        logger.info(f"✅ 任务开始消息已发送: task_id={task_id}, target={target_name}")
+    else:
+        logger.error(
+            f"❌ 任务开始消息发送失败: task_id={task_id}, target={target_name}"
+        )
 
     try:
         # 获取部署模式（如果有）
@@ -220,11 +228,49 @@ async def handle_deploy_task(message: Dict[str, Any]):
 
         # 执行部署
         logger.info(f"开始执行部署操作...")
+
+        # 推送开始执行日志
+        await websocket_client.send_message(
+            {
+                "type": "deploy_result",
+                "task_id": task_id,
+                "target_name": target_name,
+                "status": "running",
+                "message": "开始执行部署操作...",
+            }
+        )
+
         result = deploy_executor.execute_deploy(
             deploy_config, context, deploy_mode=deploy_mode
         )
 
         logger.info(f"部署执行完成，结果: {result}")
+
+        # 推送执行完成日志（包含命令输出）
+        if result.get("success"):
+            output = result.get("output", "").strip()
+            if output:
+                await websocket_client.send_message(
+                    {
+                        "type": "deploy_result",
+                        "task_id": task_id,
+                        "target_name": target_name,
+                        "status": "running",
+                        "message": f"命令执行成功，输出: {output[:200]}",  # 限制长度
+                    }
+                )
+        else:
+            error = result.get("error", "").strip()
+            if error:
+                await websocket_client.send_message(
+                    {
+                        "type": "deploy_result",
+                        "task_id": task_id,
+                        "target_name": target_name,
+                        "status": "running",
+                        "message": f"命令执行失败: {error[:200]}",  # 限制长度
+                    }
+                )
 
         # 发送执行结果（使用 task_id 匹配）
         deploy_status = "completed" if result.get("success") else "failed"

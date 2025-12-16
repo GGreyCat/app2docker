@@ -412,12 +412,15 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
                         )
                     elif deploy_status == "running":
                         # running状态：只记录日志，不触发Future完成
+                        logger.info(
+                            f"[WebSocket] 📥 部署任务进行中: task_id={task_id}, target={target_name}, message={deploy_message}"
+                        )
                         print(
-                            f"📥 部署任务进行中: task_id={task_id}, target={target_name}"
+                            f"📥 部署任务进行中: task_id={task_id}, target={target_name}, message={deploy_message}"
                         )
                         # 不处理running状态，继续等待最终结果
 
-                        # 更新部署任务状态（使用BuildTaskManager）
+                        # 更新部署任务日志（使用BuildTaskManager）
                         # 注意：这里只更新日志，不更新任务状态（任务状态由DeployTaskManager统一管理）
                         try:
                             from backend.handlers import BuildTaskManager
@@ -450,23 +453,15 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
                                                 target_name = target.get("name")
                                                 break
 
-                            # 添加日志
-                            if deploy_status == "completed":
+                            # 添加running状态的日志
+                            if deploy_message:
                                 build_manager.add_log(
                                     task_id,
-                                    f"✅ 目标 {target_name} 部署成功: {deploy_message}\n",
-                                )
-                            elif deploy_status == "failed":
-                                error_msg = message.get("error", deploy_message)
-                                build_manager.add_log(
-                                    task_id,
-                                    f"❌ 目标 {target_name} 部署失败: {error_msg}\n",
+                                    f"[Agent] {deploy_message}\n",
                                 )
 
-                            # 更新任务状态（注意：这里不应该立即设置为completed，因为可能有多个目标）
-                            # 任务状态的更新应该由DeployTaskManager统一管理
                         except Exception as e:
-                            print(f"⚠️ 更新部署任务状态失败: {e}")
+                            logger.error(f"[WebSocket] ⚠️ 更新部署任务日志失败: {e}")
                             import traceback
 
                             traceback.print_exc()
