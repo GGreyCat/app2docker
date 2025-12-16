@@ -5011,11 +5011,15 @@ async def deploy_webhook_trigger(webhook_token: str, request: Request):
                 }
             )
 
-        # 触发部署任务
+        # 触发部署任务（标记为 webhook 来源）
         deploy_task_id = deploy_config.get("task_id")
-        result_task_id = build_manager.execute_deploy_task(deploy_task_id)
+        result_task_id = build_manager.execute_deploy_task(
+            deploy_task_id, trigger_source="webhook"
+        )
 
-        print(f"🔔 部署配置 Webhook 触发，已启动部署任务: task_id={result_task_id}")
+        print(
+            f"🔔 部署配置 Webhook 触发，已启动部署任务: task_id={result_task_id}（trigger_source=webhook）"
+        )
 
         return JSONResponse(
             {
@@ -6658,6 +6662,8 @@ async def create_deploy_task(request: Request, task_req: DeployTaskCreateRequest
             webhook_secret=task_req.webhook_secret,
             webhook_branch_strategy=task_req.webhook_branch_strategy,
             webhook_allowed_branches=task_req.webhook_allowed_branches,
+            trigger_source="manual",
+            source="手动部署",
         )
 
         # 获取任务信息
@@ -6735,6 +6741,10 @@ async def list_deploy_tasks(request: Request):
                         "registry": task_config.get("registry"),
                         "tag": task_config.get("tag"),
                         "targets": [],
+                        # 最近一次执行的触发来源（manual / webhook / cron ...）
+                        "trigger_source": latest_execution_task.get("trigger_source")
+                        if latest_execution_task
+                        else task.get("trigger_source", "manual"),
                     },
                     "config": task_config.get("config", {}),
                     "config_content": task_config.get("config_content", ""),
@@ -6880,9 +6890,9 @@ async def execute_deploy_task(
         if execute_req and execute_req.target_names:
             target_names = execute_req.target_names
 
-        # 执行部署任务（后台执行）
+        # 执行部署任务（后台执行，来源为手动）
         result_task_id = build_manager.execute_deploy_task(
-            task_id, target_names=target_names
+            task_id, target_names=target_names, trigger_source="manual"
         )
 
         # 记录操作日志

@@ -4830,6 +4830,8 @@ class BuildTaskManager:
         webhook_secret: Optional[str] = None,
         webhook_branch_strategy: Optional[str] = None,
         webhook_allowed_branches: Optional[List[str]] = None,
+        trigger_source: str = "manual",
+        source: Optional[str] = None,
     ) -> str:
         """
         创建部署任务并保存到数据库
@@ -4900,7 +4902,9 @@ class BuildTaskManager:
                     status="pending",
                     created_at=created_at,
                     task_config=task_config,
-                    source="手动部署",
+                    # 任务来源文案：允许调用方自定义，否则根据是否有 source_config_id 给一个默认
+                    source=source
+                    or ("部署配置（执行）" if source_config_id else "手动部署"),
                     pipeline_id=None,
                     git_url=None,
                     branch=None,
@@ -4910,7 +4914,8 @@ class BuildTaskManager:
                     sub_path=None,
                     use_project_dockerfile=False,
                     dockerfile_name=None,
-                    trigger_source="manual",
+                    # 触发来源：manual / webhook / cron / retry 等
+                    trigger_source=trigger_source or "manual",
                 )
 
                 db.add(task_obj)
@@ -5064,7 +5069,10 @@ class BuildTaskManager:
             raise
 
     def execute_deploy_task(
-        self, task_id: str, target_names: Optional[List[str]] = None
+        self,
+        task_id: str,
+        target_names: Optional[List[str]] = None,
+        trigger_source: str = "manual",
     ) -> str:
         """
         在后台线程中执行部署任务
@@ -5100,6 +5108,12 @@ class BuildTaskManager:
             registry=registry,
             tag=tag,
             source_config_id=task_id,  # 标记这是从配置触发的任务
+            trigger_source=trigger_source,
+            source=(
+                "部署配置执行（Webhook）"
+                if trigger_source == "webhook"
+                else "部署配置执行"
+            ),
         )
 
         # 更新原始配置的执行统计
@@ -5127,7 +5141,9 @@ class BuildTaskManager:
         finally:
             db.close()
 
-        print(f"🆕 基于任务 {task_id[:8]} 创建新部署任务: {new_task_id[:8]}")
+        print(
+            f"🆕 基于任务 {task_id[:8]} 创建新部署任务: {new_task_id[:8]}，trigger_source={trigger_source}"
+        )
 
         # 更新新任务状态为运行中
         self.update_task_status(new_task_id, "running")

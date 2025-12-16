@@ -70,7 +70,26 @@
               </button>
             </td>
             <td>{{ formatTime(task.created_at) }}</td>
-            <td>{{ formatTime(task.last_executed_at) || '-' }}</td>
+            <td>
+              <div class="d-flex flex-column">
+                <span>{{ formatTime(task.last_executed_at) || '-' }}</span>
+                <small v-if="task.status?.trigger_source" class="text-muted">
+                  <span v-if="task.status.trigger_source === 'webhook'">
+                    <i class="fas fa-link text-success me-1"></i> Webhook 触发
+                  </span>
+                  <span v-else-if="task.status.trigger_source === 'manual'">
+                    <i class="fas fa-user text-primary me-1"></i> 手动触发
+                  </span>
+                  <span v-else-if="task.status.trigger_source === 'cron'">
+                    <i class="fas fa-clock text-warning me-1"></i> 定时触发
+                  </span>
+                  <span v-else>
+                    <i class="fas fa-question-circle text-secondary me-1"></i>
+                    {{ task.status.trigger_source }}
+                  </span>
+                </small>
+              </div>
+            </td>
             <td>
               <div v-if="task.webhook_token" class="d-flex align-items-center gap-1">
                 <code 
