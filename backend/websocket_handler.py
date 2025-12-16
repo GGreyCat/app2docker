@@ -49,15 +49,30 @@ class ConnectionManager:
         # 更新主机状态
         self.manager.update_host_status(host_id, "online")
 
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"[WebSocket] Agent主机连接成功: host_id={host_id}, name={host['name']}, "
+            f"当前连接的主机: {list(active_connections.keys())}"
+        )
         print(f"✅ Agent主机连接成功: {host_id} ({host['name']})")
         return True
 
     def disconnect(self, host_id: str):
         """断开连接"""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         if host_id in active_connections:
             del active_connections[host_id]
             # 更新主机状态
             self.manager.update_host_status(host_id, "offline")
+            logger.info(
+                f"[WebSocket] Agent主机断开连接: host_id={host_id}, "
+                f"当前连接的主机: {list(active_connections.keys())}"
+            )
             print(f"✅ Agent主机断开连接: {host_id}")
 
         # 清理该主机相关的所有等待结果（通过查找所有相关的task_id）
@@ -66,16 +81,36 @@ class ConnectionManager:
 
     async def send_message(self, host_id: str, message: dict):
         """向指定主机发送消息"""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # 记录当前连接状态
+        connected_hosts = list(active_connections.keys())
+        logger.info(
+            f"[WebSocket] 尝试发送消息: host_id={host_id}, "
+            f"当前连接的主机: {connected_hosts}, "
+            f"消息类型: {message.get('type')}"
+        )
+
         if host_id in active_connections:
             websocket = active_connections[host_id]
             try:
                 await websocket.send_json(message)
+                logger.info(
+                    f"[WebSocket] 消息发送成功: host_id={host_id}, type={message.get('type')}"
+                )
                 return True
             except Exception as e:
-                print(f"⚠️ 发送消息失败: {e}")
+                logger.error(f"[WebSocket] 发送消息失败: host_id={host_id}, error={e}")
                 self.disconnect(host_id)
                 return False
-        return False
+        else:
+            logger.warning(
+                f"[WebSocket] 主机未连接: host_id={host_id}, "
+                f"当前连接的主机: {connected_hosts}"
+            )
+            return False
 
     def create_deploy_result_future(self, task_id: str) -> asyncio.Future:
         """

@@ -131,18 +131,67 @@ class AgentExecutor(DeployExecutor):
 
         # 发送部署任务到 Agent
         logger.info(
-            f"[Agent] 发送部署消息: host_id={self.host_id}, deploy_task_id={deploy_task_id}"
+            f"[Agent] 发送部署消息: host_id={self.host_id}, host_name={self.host_name}, "
+            f"deploy_task_id={deploy_task_id}, task_id={task_id}, target_name={target_name}"
         )
-        success = await connection_manager.send_message(self.host_id, deploy_message)
 
-        if not success:
+        # 检查连接状态，如果未连接则等待一段时间（最多等待5秒）
+        max_wait_time = 5.0  # 最多等待5秒
+        wait_interval = 0.5  # 每0.5秒检查一次
+        waited_time = 0.0
+
+        while waited_time < max_wait_time:
+            connected_hosts = connection_manager.get_connected_hosts()
+            if self.host_id in connected_hosts:
+                logger.info(
+                    f"[Agent] 主机已连接: host_id={self.host_id}, host_name={self.host_name}, "
+                    f"等待时间: {waited_time:.1f}秒"
+                )
+                break
+
+            if waited_time == 0:
+                logger.warning(
+                    f"[Agent] 主机未连接，等待连接建立: host_id={self.host_id}, host_name={self.host_name}, "
+                    f"当前连接的主机: {connected_hosts}"
+                )
+
+            await asyncio.sleep(wait_interval)
+            waited_time += wait_interval
+
+        # 再次检查连接状态
+        connected_hosts = connection_manager.get_connected_hosts()
+        if self.host_id not in connected_hosts:
+            logger.error(
+                f"[Agent] 主机未连接（等待{waited_time:.1f}秒后）: host_id={self.host_id}, host_name={self.host_name}, "
+                f"当前连接的主机: {connected_hosts}"
+            )
             return {
                 "success": False,
-                "message": f"无法发送任务到 Agent: {self.host_name}",
+                "message": f"无法发送任务到 Agent: {self.host_name} (host_id: {self.host_id})，主机未连接",
                 "host_type": "agent",
                 "deploy_method": "websocket",
                 "host_id": self.host_id,
             }
+
+        # 发送消息
+        success = await connection_manager.send_message(self.host_id, deploy_message)
+
+        if not success:
+            logger.error(
+                f"[Agent] 发送消息失败: host_id={self.host_id}, host_name={self.host_name}, "
+                f"当前连接的主机: {connected_hosts}"
+            )
+            return {
+                "success": False,
+                "message": f"无法发送任务到 Agent: {self.host_name} (host_id: {self.host_id})，消息发送失败",
+                "host_type": "agent",
+                "deploy_method": "websocket",
+                "host_id": self.host_id,
+            }
+
+        logger.info(
+            f"[Agent] 消息发送成功: host_id={self.host_id}, host_name={self.host_name}"
+        )
 
         # 创建等待结果的Future（使用 task_id + target_name 作为唯一标识）
         # 因为同一个任务可能有多个目标，需要区分不同目标的结果
