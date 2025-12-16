@@ -4583,6 +4583,43 @@ class BuildTaskManager:
                             f"✅ 任务 {task_id[:8]} 已结束，解绑流水线 {pipeline_id[:8]}"
                         )
 
+                        # 如果任务成功完成，触发构建后webhook
+                        if status == "completed":
+                            try:
+                                # 在后台线程中异步触发webhook
+                                import threading
+
+                                def trigger_webhooks():
+                                    import asyncio
+
+                                    try:
+                                        loop = asyncio.new_event_loop()
+                                        asyncio.set_event_loop(loop)
+                                        loop.run_until_complete(
+                                            _trigger_post_build_webhooks(
+                                                pipeline_id,
+                                                task_id,
+                                                task,
+                                                pipeline_manager,
+                                            )
+                                        )
+                                        loop.close()
+                                    except Exception as e:
+                                        print(f"⚠️ 触发构建后webhook异常: {e}")
+                                        import traceback
+
+                                        traceback.print_exc()
+
+                                thread = threading.Thread(
+                                    target=trigger_webhooks, daemon=True
+                                )
+                                thread.start()
+                            except Exception as webhook_error:
+                                print(f"⚠️ 触发构建后webhook失败: {webhook_error}")
+                                import traceback
+
+                                traceback.print_exc()
+
                         # 处理队列中的下一个任务（相同流水线）
                         _process_next_queued_task(pipeline_manager, pipeline_id)
                 except Exception as e:
@@ -4828,6 +4865,10 @@ class BuildTaskManager:
         registry: Optional[str] = None,
         tag: Optional[str] = None,
         source_config_id: Optional[str] = None,
+        webhook_token: Optional[str] = None,
+        webhook_secret: Optional[str] = None,
+        webhook_branch_strategy: Optional[str] = None,
+        webhook_allowed_branches: Optional[List[str]] = None,
     ) -> str:
         """
         创建部署任务并保存到数据库
@@ -4837,6 +4878,10 @@ class BuildTaskManager:
             registry: 镜像仓库地址（可选）
             tag: 镜像标签（可选）
             source_config_id: 原始配置ID（如果提供，表示这是从配置触发的任务）
+            webhook_token: Webhook token（可选，如果为空则自动生成）
+            webhook_secret: Webhook 密钥（可选）
+            webhook_branch_strategy: 分支策略（可选）
+            webhook_allowed_branches: 允许触发的分支列表（可选）
 
         Returns:
             任务ID
@@ -4852,6 +4897,10 @@ class BuildTaskManager:
             task_id = str(uuid.uuid4())
             created_at = datetime.now()
 
+            # 生成 Webhook Token（如果没有提供）
+            if not webhook_token and not source_config_id:  # 只有配置任务才生成token
+                webhook_token = str(uuid.uuid4())
+
             # 构建任务配置
             task_config = {
                 "config_content": config_content,
@@ -4860,6 +4909,17 @@ class BuildTaskManager:
                 "tag": tag,
                 "targets": config.get("targets", []),
             }
+
+            # 添加webhook配置（只有配置任务才保存webhook信息）
+            if not source_config_id:
+                if webhook_token:
+                    task_config["webhook_token"] = webhook_token
+                if webhook_secret:
+                    task_config["webhook_secret"] = webhook_secret
+                if webhook_branch_strategy:
+                    task_config["webhook_branch_strategy"] = webhook_branch_strategy
+                if webhook_allowed_branches:
+                    task_config["webhook_allowed_branches"] = webhook_allowed_branches
 
             # 如果提供了 source_config_id，说明这是从配置触发的任务
             if source_config_id:
@@ -4907,6 +4967,138 @@ class BuildTaskManager:
 
             error_trace = traceback.format_exc()
             print(f"❌ 创建部署任务异常: {e}")
+            print(f"错误堆栈:\n{error_trace}")
+            raise
+
+    def update_deploy_task(
+        self,
+        task_id: str,
+        config_content: str,
+        registry: Optional[str] = None,
+        tag: Optional[str] = None,
+        webhook_token: Optional[str] = None,
+        webhook_secret: Optional[str] = None,
+        webhook_branch_strategy: Optional[str] = None,
+        webhook_allowed_branches: Optional[List[str]] = None,
+    ) -> bool:
+        """
+        更新部署任务配置
+
+        Args:
+            task_id: 任务ID
+            config_content: YAML 配置内容
+            registry: 镜像仓库地址（可选）
+            tag: 镜像标签（可选）
+            webhook_token: Webhook token（可选）
+            webhook_secret: Webhook 密钥（可选）
+            webhook_branch_strategy: 分支策略（可选）
+            webhook_allowed_branches: 允许触发的分支列表（可选）
+
+        Returns:
+            是否更新成功
+        """
+        from backend.deploy_config_parser import DeployConfigParser
+        from backend.database import get_db_session
+        from backend.models import Task
+
+        try:
+            # 解析YAML配置
+            parser = DeployConfigParser()
+            config = parser.parse_yaml_content(config_content)
+
+            db = get_db_session()
+            try:
+                # 获取任务
+                task = db.query(Task).filter(Task.task_id == task_id).first()
+                if not task or task.task_type != "deploy":
+                    return False
+
+                # 检查是否是配置任务（没有source_config_id的任务）
+                task_config = task.task_config or {}
+                if task_config.get("source_config_id"):
+                    # 这是执行产生的任务，不能更新
+                    return False
+
+                # 更新任务配置
+                task_config["config_content"] = config_content
+                task_config["config"] = config
+                if registry is not None:
+                    task_config["registry"] = registry
+                if tag is not None:
+                    task_config["tag"] = tag
+                task_config["targets"] = config.get("targets", [])
+
+                # 更新webhook配置
+                print(f"🔍 接收到的webhook配置参数:")
+                print(
+                    f"  - webhook_token: {webhook_token if webhook_token is None else (webhook_token[:8] + '...' if webhook_token else '(空字符串)')}"
+                )
+                print(
+                    f"  - webhook_secret: {webhook_secret if webhook_secret is None else ('***' if webhook_secret else '(空字符串)')}"
+                )
+                print(f"  - webhook_branch_strategy: {webhook_branch_strategy}")
+                print(f"  - webhook_allowed_branches: {webhook_allowed_branches}")
+
+                # 如果提供了webhook_token（包括空字符串），则更新
+                if webhook_token is not None:
+                    # 如果token为空字符串，生成新的token
+                    if webhook_token == "":
+                        webhook_token = str(uuid.uuid4())
+                        print(f"🔄 生成新的webhook_token: {webhook_token[:8]}...")
+                    task_config["webhook_token"] = webhook_token
+                    print(f"✅ 更新webhook_token: {webhook_token[:8]}...")
+                else:
+                    print(f"⚠️ webhook_token为None，不更新")
+
+                # 如果提供了webhook_secret（包括空字符串），则更新
+                if webhook_secret is not None:
+                    task_config["webhook_secret"] = webhook_secret
+                    print(
+                        f"✅ 更新webhook_secret: {'已设置' if webhook_secret else '已清空'}"
+                    )
+                else:
+                    print(f"⚠️ webhook_secret为None，不更新")
+
+                # 如果提供了webhook_branch_strategy，则更新
+                if webhook_branch_strategy is not None:
+                    task_config["webhook_branch_strategy"] = webhook_branch_strategy
+                    print(f"✅ 更新webhook_branch_strategy: {webhook_branch_strategy}")
+                else:
+                    print(f"⚠️ webhook_branch_strategy为None，不更新")
+
+                # 如果提供了webhook_allowed_branches，则更新（包括空列表）
+                if webhook_allowed_branches is not None:
+                    task_config["webhook_allowed_branches"] = webhook_allowed_branches
+                    print(
+                        f"✅ 更新webhook_allowed_branches: {webhook_allowed_branches}"
+                    )
+                else:
+                    print(f"⚠️ webhook_allowed_branches为None，不更新")
+
+                # 更新任务的tag字段（向后兼容）
+                if tag is not None:
+                    task.tag = tag
+
+                # 保存更新
+                task.task_config = task_config
+                # 标记JSON字段已修改（SQLAlchemy需要这个来检测JSON字段的变化）
+                from sqlalchemy.orm.attributes import flag_modified
+
+                flag_modified(task, "task_config")
+                db.commit()
+                print(f"✅ 部署任务更新成功: task_id={task_id}")
+                return True
+            except Exception as save_error:
+                db.rollback()
+                print(f"⚠️ 更新部署任务失败: {save_error}")
+                raise
+            finally:
+                db.close()
+        except Exception as e:
+            import traceback
+
+            error_trace = traceback.format_exc()
+            print(f"❌ 更新部署任务异常: {e}")
             print(f"错误堆栈:\n{error_trace}")
             raise
 
@@ -5902,3 +6094,87 @@ class OperationLogger:
             return 0
         finally:
             db.close()
+
+
+async def _trigger_post_build_webhooks(
+    pipeline_id: str, task_id: str, task_obj, pipeline_manager
+):
+    """
+    触发构建后的webhook
+
+    Args:
+        pipeline_id: 流水线ID
+        task_id: 任务ID
+        task_obj: 任务对象
+        pipeline_manager: 流水线管理器实例
+    """
+    try:
+        # 获取流水线配置
+        pipeline = pipeline_manager.get_pipeline(pipeline_id)
+        if not pipeline:
+            print(f"⚠️ 流水线不存在: {pipeline_id}")
+            return
+
+        # 获取构建后webhook列表
+        post_build_webhooks = pipeline.get("post_build_webhooks", [])
+        if not post_build_webhooks:
+            return
+
+        # 构建模板变量上下文
+        task_config = task_obj.task_config or {}
+        context = {
+            "task_id": task_id,
+            "image": task_obj.image or "",
+            "tag": task_obj.tag or "",
+            "status": task_obj.status,
+            "branch": task_obj.branch or "",
+            "pipeline_id": pipeline_id,
+            "pipeline_name": pipeline.get("name", ""),
+            "created_at": (
+                task_obj.created_at.isoformat() if task_obj.created_at else ""
+            ),
+            "completed_at": (
+                task_obj.completed_at.isoformat() if task_obj.completed_at else ""
+            ),
+        }
+
+        # 触发每个启用的webhook
+        from backend.webhook_trigger import trigger_webhook, render_template
+
+        for webhook_config in post_build_webhooks:
+            if not webhook_config.get("enabled", True):
+                continue
+
+            url = webhook_config.get("url")
+            if not url:
+                print(f"⚠️ Webhook配置缺少URL，跳过")
+                continue
+
+            method = webhook_config.get("method", "POST")
+            headers = webhook_config.get("headers", {})
+            body_template = webhook_config.get("body_template", "{}")
+
+            # 渲染请求体模板
+            try:
+                body = render_template(body_template, context)
+            except Exception as e:
+                print(f"⚠️ 渲染webhook模板失败: {e}")
+                body = body_template
+
+            # 发送webhook请求
+            print(f"🔔 触发构建后webhook: pipeline={pipeline.get('name')}, url={url}")
+            result = await trigger_webhook(url, method, headers, body)
+
+            if result.get("success"):
+                print(
+                    f"✅ Webhook触发成功: url={url}, status_code={result.get('status_code')}"
+                )
+            else:
+                print(
+                    f"❌ Webhook触发失败: url={url}, error={result.get('error')}, status_code={result.get('status_code')}"
+                )
+    except Exception as e:
+        print(f"⚠️ 触发构建后webhook异常: {e}")
+        import traceback
+
+        traceback.print_exc()
