@@ -131,7 +131,7 @@ class WebSocketClient:
         logger.info("WebSocket 已断开连接")
 
     async def send_message(self, message: Dict[str, Any]) -> bool:
-        """发送消息"""
+        """发送消息（带重试机制）"""
         if not self.connected or not self.websocket:
             logger.warning(
                 f"WebSocket 未连接，无法发送消息: type={message.get('type')}, "
@@ -139,23 +139,47 @@ class WebSocketClient:
             )
             return False
 
-        try:
-            message_str = json.dumps(message)
-            await self.websocket.send(message_str)
-            logger.info(
-                f"✅ 消息已发送: type={message.get('type')}, size={len(message_str)} bytes, "
-                f"preview={message_str[:100]}"
-            )
-            return True
-        except Exception as e:
-            logger.error(f"❌ 发送消息失败: type={message.get('type')}, error={e}")
-            self.connected = False
-            # 确保重连任务正在运行
-            if self.running and (
-                not self._reconnect_task or self._reconnect_task.done()
-            ):
-                self._reconnect_task = asyncio.create_task(self._reconnect_loop())
-            return False
+        # 重试机制：最多重试2次
+        max_retries = 2
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                message_str = json.dumps(message)
+                await self.websocket.send(message_str)
+                if attempt > 0:
+                    logger.info(
+                        f"✅ 消息已发送（重试 {attempt} 次后成功）: type={message.get('type')}"
+                    )
+                # 正常发送成功时不记录日志（减少日志量）
+                return True
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    # 短暂等待后重试
+                    await asyncio.sleep(0.1)
+                    # 检查连接状态
+                    if not self.connected or not self.websocket:
+                        logger.warning(
+                            f"连接已断开，停止重试: type={message.get('type')}"
+                        )
+                        break
+                else:
+                    logger.error(
+                        f"❌ 发送消息失败（{max_retries}次尝试后）: type={message.get('type')}, error={e}"
+                    )
+        
+        # 所有重试都失败
+        logger.error(
+            f"❌ 发送消息最终失败: type={message.get('type')}, error={last_error}"
+        )
+        self.connected = False
+        # 确保重连任务正在运行
+        if self.running and (
+            not self._reconnect_task or self._reconnect_task.done()
+        ):
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+        return False
 
     async def _receive_loop(self):
         """接收消息循环"""

@@ -230,15 +230,26 @@ async def handle_deploy_task(message: Dict[str, Any]):
         logger.info(f"开始执行部署操作...")
 
         # 推送开始执行日志
-        await websocket_client.send_message(
-            {
+        async def send_running_log(message: str):
+            """发送running状态的日志消息（带重试）"""
+            log_message = {
                 "type": "deploy_result",
                 "task_id": task_id,
                 "target_name": target_name,
                 "status": "running",
-                "message": "开始执行部署操作...",
+                "message": message,
             }
-        )
+            max_retries = 2
+            for attempt in range(max_retries):
+                success = await websocket_client.send_message(log_message)
+                if success:
+                    return True
+                elif attempt < max_retries - 1:
+                    await asyncio.sleep(0.1)  # 短暂等待后重试
+            logger.warning(f"发送running日志失败: {message[:50]}")
+            return False
+
+        await send_running_log("开始执行部署操作...")
 
         result = deploy_executor.execute_deploy(
             deploy_config, context, deploy_mode=deploy_mode
@@ -250,27 +261,11 @@ async def handle_deploy_task(message: Dict[str, Any]):
         if result.get("success"):
             output = result.get("output", "").strip()
             if output:
-                await websocket_client.send_message(
-                    {
-                        "type": "deploy_result",
-                        "task_id": task_id,
-                        "target_name": target_name,
-                        "status": "running",
-                        "message": f"命令执行成功，输出: {output[:200]}",  # 限制长度
-                    }
-                )
+                await send_running_log(f"命令执行成功，输出: {output[:200]}")
         else:
             error = result.get("error", "").strip()
             if error:
-                await websocket_client.send_message(
-                    {
-                        "type": "deploy_result",
-                        "task_id": task_id,
-                        "target_name": target_name,
-                        "status": "running",
-                        "message": f"命令执行失败: {error[:200]}",  # 限制长度
-                    }
-                )
+                await send_running_log(f"命令执行失败: {error[:200]}")
 
         # 发送执行结果（使用 task_id 匹配）
         deploy_status = "completed" if result.get("success") else "failed"
@@ -313,7 +308,7 @@ async def handle_deploy_task(message: Dict[str, Any]):
                 break
             else:
                 if attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 1  # 1秒, 2秒
+                    wait_time = (attempt + 1) * 0.5  # 0.5秒, 1秒
                     logger.warning(
                         f"⚠️ 部署结果消息发送失败（尝试 {attempt + 1}/{max_retries}），"
                         f"{wait_time}秒后重试: task_id={task_id}, target={target_name}"
@@ -324,6 +319,8 @@ async def handle_deploy_task(message: Dict[str, Any]):
                         f"❌ 部署结果消息发送失败（{max_retries}次尝试后）: "
                         f"task_id={task_id}, target={target_name}, status={deploy_status}"
                     )
+                    # 即使发送失败，也记录到本地日志，确保不会丢失
+                    logger.error(f"最终部署结果（未发送）: {deploy_message}")
 
         logger.info(
             f"部署任务完成: task_id={task_id}, target={target_name}, 成功: {result.get('success')}, 消息: {result.get('message')}"

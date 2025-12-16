@@ -80,14 +80,14 @@ class ConnectionManager:
         # 所以保留Future，让它们超时或由执行器清理
 
     async def send_message(self, host_id: str, message: dict):
-        """向指定主机发送消息"""
+        """向指定主机发送消息（带重试机制）"""
         import logging
 
         logger = logging.getLogger(__name__)
 
         # 记录当前连接状态
         connected_hosts = list(active_connections.keys())
-        logger.info(
+        logger.debug(
             f"[WebSocket] 尝试发送消息: host_id={host_id}, "
             f"当前连接的主机: {connected_hosts}, "
             f"消息类型: {message.get('type')}"
@@ -95,16 +95,46 @@ class ConnectionManager:
 
         if host_id in active_connections:
             websocket = active_connections[host_id]
-            try:
-                await websocket.send_json(message)
-                logger.info(
-                    f"[WebSocket] 消息发送成功: host_id={host_id}, type={message.get('type')}"
-                )
-                return True
-            except Exception as e:
-                logger.error(f"[WebSocket] 发送消息失败: host_id={host_id}, error={e}")
-                self.disconnect(host_id)
-                return False
+            # 重试机制：最多重试2次
+            max_retries = 2
+            last_error = None
+
+            for attempt in range(max_retries):
+                try:
+                    await websocket.send_json(message)
+                    if attempt > 0:
+                        logger.info(
+                            f"[WebSocket] 消息发送成功（重试 {attempt} 次后）: host_id={host_id}, type={message.get('type')}"
+                        )
+                    else:
+                        logger.debug(
+                            f"[WebSocket] 消息发送成功: host_id={host_id}, type={message.get('type')}"
+                        )
+                    return True
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        # 短暂等待后重试
+                        import asyncio
+
+                        await asyncio.sleep(0.1)
+                        # 检查连接是否还存在
+                        if host_id not in active_connections:
+                            logger.warning(
+                                f"[WebSocket] 连接已断开，停止重试: host_id={host_id}"
+                            )
+                            break
+                    else:
+                        logger.error(
+                            f"[WebSocket] 发送消息失败（{max_retries}次尝试后）: host_id={host_id}, error={e}"
+                        )
+
+            # 所有重试都失败，断开连接
+            logger.error(
+                f"[WebSocket] 发送消息最终失败: host_id={host_id}, error={last_error}"
+            )
+            self.disconnect(host_id)
+            return False
         else:
             logger.warning(
                 f"[WebSocket] 主机未连接: host_id={host_id}, "
@@ -244,22 +274,18 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
         while True:
             try:
                 # 接收消息
-                logger.info(f"[WebSocket] 等待接收消息: host_id={host_id}")
+                logger.debug(f"[WebSocket] 等待接收消息: host_id={host_id}")
                 data = await websocket.receive_text()
-                logger.info(
+                logger.debug(
                     f"[WebSocket] 📥 收到原始消息: host_id={host_id}, size={len(data)} bytes"
-                )
-                print(
-                    f"📥 收到原始消息 ({host_id}): size={len(data)} bytes, preview={data[:100]}"
                 )
 
                 try:
                     message = json.loads(data)
                     message_type = message.get("type")
-                    logger.info(
+                    logger.debug(
                         f"[WebSocket] 消息解析成功: host_id={host_id}, type={message_type}"
                     )
-                    print(f"✅ 消息解析成功 ({host_id}): type={message_type}")
                 except json.JSONDecodeError as e:
                     logger.error(
                         f"[WebSocket] JSON解析失败: host_id={host_id}, error={e}, data={data[:200]}"
@@ -271,10 +297,9 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
                     continue
 
                 message_type = message.get("type")
-                logger.info(
+                logger.debug(
                     f"[WebSocket] 开始处理消息: host_id={host_id}, type={message_type}"
                 )
-                print(f"🔄 开始处理消息 ({host_id}): type={message_type}")
 
                 if message_type == "heartbeat":
                     # 心跳消息

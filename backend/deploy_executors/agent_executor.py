@@ -204,28 +204,8 @@ class AgentExecutor(DeployExecutor):
                 "host_id": self.host_id,
             }
 
-        # 发送消息
-        success = await connection_manager.send_message(self.host_id, deploy_message)
-
-        if not success:
-            logger.error(
-                f"[Agent] 发送消息失败: host_id={self.host_id}, host_name={self.host_name}, "
-                f"active_connections keys: {list(active_connections.keys())}"
-            )
-            return {
-                "success": False,
-                "message": f"无法发送任务到 Agent: {self.host_name} (host_id: {self.host_id})，消息发送失败",
-                "host_type": "agent",
-                "deploy_method": "websocket",
-                "host_id": self.host_id,
-            }
-
-        logger.info(
-            f"[Agent] 消息发送成功: host_id={self.host_id}, host_name={self.host_name}"
-        )
-
-        # 创建等待结果的Future（使用 task_id + target_name 作为唯一标识）
-        # 因为同一个任务可能有多个目标，需要区分不同目标的结果
+        # 先创建等待结果的Future（使用 task_id + target_name 作为唯一标识）
+        # 必须在发送消息之前创建，避免Agent在Future创建之前就发送了结果
         future_key = f"{task_id}:{target_name}"
 
         logger.info(
@@ -248,6 +228,28 @@ class AgentExecutor(DeployExecutor):
                 f"[Agent] ❌ Future创建失败: future_key={future_key}, "
                 f"当前等待的Future数量: {len(deploy_result_futures)}"
             )
+
+        # 发送消息（在Future创建之后）
+        success = await connection_manager.send_message(self.host_id, deploy_message)
+
+        if not success:
+            logger.error(
+                f"[Agent] 发送消息失败: host_id={self.host_id}, host_name={self.host_name}, "
+                f"active_connections keys: {list(active_connections.keys())}"
+            )
+            # 发送失败时，取消Future
+            connection_manager.cancel_deploy_result_future(future_key)
+            return {
+                "success": False,
+                "message": f"无法发送任务到 Agent: {self.host_name} (host_id: {self.host_id})，消息发送失败",
+                "host_type": "agent",
+                "deploy_method": "websocket",
+                "host_id": self.host_id,
+            }
+
+        logger.info(
+            f"[Agent] 消息发送成功: host_id={self.host_id}, host_name={self.host_name}"
+        )
 
         # 记录等待状态
         if update_status_callback:
