@@ -2933,59 +2933,20 @@ logs/
                             services, _ = parse_dockerfile_services(dockerfile_content)
                             if services and len(services) > 0:
                                 # 构建服务名称到阶段的映射
-                                # 首先尝试精确匹配服务名称和阶段名称
+                                # ✅ 配置的服务：只做「精确匹配」，不再做模糊/索引匹配
+                                # 这样可以避免 app2docker 误匹配到 app2docker-agent 等情况
                                 for service_name in selected_services:
-                                    # 尝试精确匹配
-                                    matched = False
                                     for service in services:
                                         stage_name = service.get("name")
-                                        # 精确匹配：服务名称等于阶段名称（忽略大小写）
-                                        if service_name.lower() == stage_name.lower():
-                                            service_to_stage_map[service_name] = (
-                                                stage_name
-                                            )
-                                            matched = True
-                                            break
-                                        # 部分匹配：阶段名称包含服务名称（如 app2docker-agent 包含 agent）
-                                        elif (
-                                            service_name.lower() in stage_name.lower()
-                                            or stage_name.lower()
-                                            in service_name.lower()
+                                        if (
+                                            stage_name
+                                            and service_name.lower()
+                                            == stage_name.lower()
                                         ):
                                             service_to_stage_map[service_name] = (
                                                 stage_name
                                             )
-                                            matched = True
                                             break
-
-                                    # 如果没有匹配，使用索引映射（向后兼容）
-                                    if not matched:
-                                        service_index = selected_services.index(
-                                            service_name
-                                        )
-                                        if service_index < len(services):
-                                            stage_name = services[service_index].get(
-                                                "name"
-                                            )
-                                            service_to_stage_map[service_name] = (
-                                                stage_name
-                                            )
-                                        else:
-                                            # 如果索引超出范围，尝试使用阶段名称本身
-                                            log(
-                                                f"⚠️ 服务 '{service_name}' 无法映射到阶段，尝试使用阶段名称本身\n"
-                                            )
-                                            # 使用阶段名称作为服务名称的映射
-                                            for service in services:
-                                                stage_name = service.get("name")
-                                                if (
-                                                    service_name.lower()
-                                                    in stage_name.lower()
-                                                ):
-                                                    service_to_stage_map[
-                                                        service_name
-                                                    ] = stage_name
-                                                    break
 
                                 log(
                                     f"🔍 从 Dockerfile 解析到阶段映射: {service_to_stage_map}\n"
