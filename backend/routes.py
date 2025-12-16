@@ -4916,16 +4916,34 @@ async def deploy_webhook_trigger(webhook_token: str, request: Request):
 
         # 查找所有部署配置，找到匹配的webhook_token
         tasks = build_manager.list_tasks(task_type="deploy")
+        print(f"🔍 查找部署配置: webhook_token={webhook_token}, 共找到 {len(tasks)} 个部署任务")
+        
         for task in tasks:
-            task_config = task.get("task_config", {})
+            task_config = task.get("task_config") or {}
+            task_id = task.get("task_id", "unknown")
+            
+            # 检查是否是配置任务（没有source_config_id的任务）
+            source_config_id = task_config.get("source_config_id")
+            config_webhook_token = task_config.get("webhook_token")
+            
+            print(f"🔍 检查任务 {task_id[:8]}: source_config_id={source_config_id}, webhook_token={config_webhook_token[:8] + '...' if config_webhook_token else '(None)'}")
+            
             # 只检查配置任务（没有source_config_id的任务）
-            if not task_config.get("source_config_id"):
-                if task_config.get("webhook_token") == webhook_token:
+            if source_config_id is None:
+                if config_webhook_token == webhook_token:
                     deploy_config = task
+                    print(f"✅ 找到匹配的部署配置: task_id={task_id[:8]}")
                     break
 
         if not deploy_config:
             print(f"❌ 未找到部署配置: webhook_token={webhook_token}")
+            print(f"🔍 调试信息: 共检查了 {len(tasks)} 个任务")
+            # 打印所有配置任务的webhook_token（用于调试）
+            config_tasks = [t for t in tasks if not (t.get("task_config") or {}).get("source_config_id")]
+            print(f"🔍 配置任务数量: {len(config_tasks)}")
+            for t in config_tasks[:5]:  # 只打印前5个
+                token = (t.get("task_config") or {}).get("webhook_token")
+                print(f"  - task_id={t.get('task_id', 'unknown')[:8]}, webhook_token={token[:8] + '...' if token else '(None)'}")
             raise HTTPException(status_code=404, detail="部署配置不存在")
 
         task_config = deploy_config.get("task_config", {})

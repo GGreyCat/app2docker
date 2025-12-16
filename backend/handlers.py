@@ -6095,7 +6095,10 @@ async def _trigger_post_build_webhooks(
         # 获取构建后webhook列表
         post_build_webhooks = pipeline.get("post_build_webhooks", [])
         if not post_build_webhooks:
+            print(f"ℹ️ 流水线 {pipeline.get('name')} 没有配置构建后Webhook")
             return
+
+        print(f"🔔 开始触发构建后Webhook: pipeline={pipeline.get('name')}, task_id={task_id[:8]}, webhook数量={len(post_build_webhooks)}")
 
         # 构建模板变量上下文
         task_config = task_obj.task_config or {}
@@ -6118,13 +6121,14 @@ async def _trigger_post_build_webhooks(
         # 触发每个启用的webhook
         from backend.webhook_trigger import trigger_webhook, render_template
 
-        for webhook_config in post_build_webhooks:
+        for idx, webhook_config in enumerate(post_build_webhooks):
             if not webhook_config.get("enabled", True):
+                print(f"⏭️ Webhook {idx + 1} 已禁用，跳过")
                 continue
 
             url = webhook_config.get("url")
             if not url:
-                print(f"⚠️ Webhook配置缺少URL，跳过")
+                print(f"⚠️ Webhook {idx + 1} 配置缺少URL，跳过")
                 continue
 
             method = webhook_config.get("method", "POST")
@@ -6134,22 +6138,33 @@ async def _trigger_post_build_webhooks(
             # 渲染请求体模板
             try:
                 body = render_template(body_template, context)
+                print(f"🔍 Webhook {idx + 1} 模板渲染成功: url={url}")
             except Exception as e:
-                print(f"⚠️ 渲染webhook模板失败: {e}")
+                print(f"⚠️ Webhook {idx + 1} 渲染模板失败: {e}")
+                import traceback
+                traceback.print_exc()
                 body = body_template
 
             # 发送webhook请求
-            print(f"🔔 触发构建后webhook: pipeline={pipeline.get('name')}, url={url}")
-            result = await trigger_webhook(url, method, headers, body)
+            print(f"🔔 触发构建后webhook {idx + 1}: pipeline={pipeline.get('name')}, url={url}, method={method}")
+            try:
+                result = await trigger_webhook(url, method, headers, body)
 
-            if result.get("success"):
-                print(
-                    f"✅ Webhook触发成功: url={url}, status_code={result.get('status_code')}"
-                )
-            else:
-                print(
-                    f"❌ Webhook触发失败: url={url}, error={result.get('error')}, status_code={result.get('status_code')}"
-                )
+                if result.get("success"):
+                    print(
+                        f"✅ Webhook {idx + 1} 触发成功: url={url}, status_code={result.get('status_code')}"
+                    )
+                else:
+                    error_msg = result.get("error", "unknown")
+                    status_code = result.get("status_code")
+                    response_text = result.get("response_text", "")[:200]
+                    print(
+                        f"❌ Webhook {idx + 1} 触发失败: url={url}, error={error_msg}, status_code={status_code}, response={response_text}"
+                    )
+            except Exception as e:
+                print(f"❌ Webhook {idx + 1} 触发异常: url={url}, error={str(e)}")
+                import traceback
+                traceback.print_exc()
     except Exception as e:
         print(f"⚠️ 触发构建后webhook异常: {e}")
         import traceback
