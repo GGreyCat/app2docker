@@ -117,13 +117,24 @@ class ConnectionManager:
         创建等待部署结果的Future
 
         Args:
-            task_id: 任务ID
+            task_id: 任务ID（可能是task_id或future_key）
 
         Returns:
             Future对象，用于等待部署结果
         """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         future = asyncio.Future()
         deploy_result_futures[task_id] = future
+
+        logger.info(
+            f"[WebSocket] 创建Future: task_id={task_id}, "
+            f"当前等待的Future数量: {len(deploy_result_futures)}, "
+            f"所有Future keys: {list(deploy_result_futures.keys())}"
+        )
+
         return future
 
     def set_deploy_result(self, task_id: str, result: Dict[str, Any]):
@@ -316,6 +327,12 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
                         f"[WebSocket] 📥 收到部署任务结果: host_id={host_id}, "
                         f"task_id={task_id}, target={target_name}, status={deploy_status}"
                     )
+                    logger.info(f"[WebSocket] 收到的完整消息: {message}")
+                    # 计算future_key，用于调试
+                    future_key_for_debug = f"{task_id}:{target_name}"
+                    logger.info(
+                        f"[WebSocket] 计算得到的future_key: {future_key_for_debug}"
+                    )
                     print(
                         f"📥 收到部署任务结果 ({host_id}): task_id={task_id}, target={target_name}, 状态: {deploy_status}"
                     )
@@ -357,20 +374,31 @@ async def handle_agent_websocket(websocket: WebSocket, token: str):
                         )
 
                         # 检查 Future 是否存在
+                        logger.info(
+                            f"[WebSocket] 检查Future: future_key={future_key}, "
+                            f"当前等待的Future数量: {len(deploy_result_futures)}, "
+                            f"所有Future keys: {list(deploy_result_futures.keys())}"
+                        )
+
                         if future_key not in deploy_result_futures:
                             logger.warning(
                                 f"[WebSocket] ⚠️ Future不存在: future_key={future_key}, "
                                 f"当前等待的Future数量: {len(deploy_result_futures)}, "
-                                f"前10个: {list(deploy_result_futures.keys())[:10]}"
+                                f"所有Future keys: {list(deploy_result_futures.keys())}"
                             )
                             print(
                                 f"⚠️ 警告: future_key={future_key} 的Future不存在，可能已超时或已处理"
+                            )
+                            print(
+                                f"   期望的key: {future_key}, "
+                                f"实际存在的keys: {list(deploy_result_futures.keys())}"
                             )
                         else:
                             logger.info(
                                 f"[WebSocket] ✅ 找到Future: future_key={future_key}, "
                                 f"准备设置结果"
                             )
+                            print(f"✅ 找到Future: future_key={future_key}")
 
                         # 通知等待的执行器（使用 future_key）
                         connection_manager.set_deploy_result(future_key, result_dict)

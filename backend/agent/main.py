@@ -250,6 +250,10 @@ async def handle_deploy_task(message: Dict[str, Any]):
             f"部署结果消息内容: type={deploy_message.get('type')}, task_id={deploy_message.get('task_id')}, "
             f"target_name={deploy_message.get('target_name')}, status={deploy_message.get('status')}"
         )
+        logger.info(f"部署结果消息完整内容: {deploy_message}")
+        # 计算future_key，用于调试
+        future_key_for_debug = f"{task_id}:{target_name}"
+        logger.info(f"预期的future_key应该是: {future_key_for_debug}")
 
         # 尝试发送消息，最多重试3次
         max_retries = 3

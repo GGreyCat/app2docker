@@ -135,24 +135,36 @@ class AgentExecutor(DeployExecutor):
             f"deploy_task_id={deploy_task_id}, task_id={task_id}, target_name={target_name}"
         )
 
-        # 检查连接状态，如果未连接则等待一段时间（最多等待5秒）
-        max_wait_time = 5.0  # 最多等待5秒
+        # 检查连接状态，如果未连接则等待一段时间（最多等待15秒）
+        # 同时检查数据库状态和active_connections
+        from backend.agent_host_manager import AgentHostManager
+
+        agent_manager = AgentHostManager()
+
+        max_wait_time = 15.0  # 最多等待15秒
         wait_interval = 0.5  # 每0.5秒检查一次
         waited_time = 0.0
 
         while waited_time < max_wait_time:
+            # 检查active_connections（WebSocket实际连接）
             connected_hosts = connection_manager.get_connected_hosts()
-            if self.host_id in connected_hosts:
+            is_connected = self.host_id in connected_hosts
+
+            # 检查数据库状态
+            host_info = agent_manager.get_agent_host(self.host_id)
+            db_status = host_info.get("status") if host_info else "unknown"
+
+            if is_connected:
                 logger.info(
                     f"[Agent] 主机已连接: host_id={self.host_id}, host_name={self.host_name}, "
-                    f"等待时间: {waited_time:.1f}秒"
+                    f"等待时间: {waited_time:.1f}秒, 数据库状态: {db_status}"
                 )
                 break
 
             if waited_time == 0:
                 logger.warning(
                     f"[Agent] 主机未连接，等待连接建立: host_id={self.host_id}, host_name={self.host_name}, "
-                    f"当前连接的主机: {connected_hosts}"
+                    f"数据库状态: {db_status}, 当前连接的主机: {connected_hosts}"
                 )
 
             await asyncio.sleep(wait_interval)
@@ -160,14 +172,31 @@ class AgentExecutor(DeployExecutor):
 
         # 再次检查连接状态
         connected_hosts = connection_manager.get_connected_hosts()
+        host_info = agent_manager.get_agent_host(self.host_id)
+        db_status = host_info.get("status") if host_info else "unknown"
+
         if self.host_id not in connected_hosts:
             logger.error(
                 f"[Agent] 主机未连接（等待{waited_time:.1f}秒后）: host_id={self.host_id}, host_name={self.host_name}, "
-                f"当前连接的主机: {connected_hosts}"
+                f"数据库状态: {db_status}, 当前连接的主机: {connected_hosts}"
             )
+
+            # 如果数据库状态是online但active_connections中没有，说明连接可能刚断开
+            if db_status == "online":
+                error_msg = (
+                    f"无法发送任务到 Agent: {self.host_name} (host_id: {self.host_id})。"
+                    f"数据库显示主机在线，但WebSocket连接不存在。"
+                    f"可能是连接刚断开，请检查Agent是否正常运行。"
+                )
+            else:
+                error_msg = (
+                    f"无法发送任务到 Agent: {self.host_name} (host_id: {self.host_id})，"
+                    f"主机未连接（数据库状态: {db_status}）"
+                )
+
             return {
                 "success": False,
-                "message": f"无法发送任务到 Agent: {self.host_name} (host_id: {self.host_id})，主机未连接",
+                "message": error_msg,
                 "host_type": "agent",
                 "deploy_method": "websocket",
                 "host_id": self.host_id,
@@ -196,11 +225,27 @@ class AgentExecutor(DeployExecutor):
         # 创建等待结果的Future（使用 task_id + target_name 作为唯一标识）
         # 因为同一个任务可能有多个目标，需要区分不同目标的结果
         future_key = f"{task_id}:{target_name}"
-        result_future = connection_manager.create_deploy_result_future(future_key)
 
         logger.info(
-            f"[Agent] 创建等待Future: task_id={task_id}, target_name={target_name}, future_key={future_key}"
+            f"[Agent] 准备创建等待Future: task_id={task_id}, target_name={target_name}, future_key={future_key}"
         )
+
+        result_future = connection_manager.create_deploy_result_future(future_key)
+
+        # 验证Future是否创建成功
+        from backend.websocket_handler import deploy_result_futures
+
+        if future_key in deploy_result_futures:
+            logger.info(
+                f"[Agent] ✅ Future创建成功: future_key={future_key}, "
+                f"当前等待的Future数量: {len(deploy_result_futures)}, "
+                f"所有Future keys: {list(deploy_result_futures.keys())}"
+            )
+        else:
+            logger.error(
+                f"[Agent] ❌ Future创建失败: future_key={future_key}, "
+                f"当前等待的Future数量: {len(deploy_result_futures)}"
+            )
 
         # 记录等待状态
         if update_status_callback:
@@ -212,9 +257,14 @@ class AgentExecutor(DeployExecutor):
             logger.info(
                 f"[Agent] 开始等待结果: task_id={task_id}, target_name={target_name}, future_key={future_key}"
             )
+            logger.info(
+                f"[Agent] 等待Future完成: task_id={task_id}, target_name={target_name}, future_key={future_key}, "
+                f"Future状态: done={result_future.done()}, cancelled={result_future.cancelled()}"
+            )
             result = await asyncio.wait_for(result_future, timeout=300.0)
             logger.info(
-                f"[Agent] 收到结果: task_id={task_id}, target_name={target_name}, success={result.get('success')}"
+                f"[Agent] ✅ Future已完成，收到结果: task_id={task_id}, target_name={target_name}, "
+                f"success={result.get('success')}, result_type={type(result)}, result_keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}"
             )
 
             # 确保result是字典类型
