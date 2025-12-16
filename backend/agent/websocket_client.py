@@ -74,7 +74,7 @@ class WebSocketClient:
             # 使用 asyncio.wait_for 设置连接超时
             self.websocket = await asyncio.wait_for(
                 connect(self.ws_url, ping_interval=None, ping_timeout=None),
-                timeout=10.0  # 10秒连接超时
+                timeout=10.0,  # 10秒连接超时
             )
             self.connected = True
 
@@ -143,7 +143,9 @@ class WebSocketClient:
             logger.error(f"发送消息失败: {e}")
             self.connected = False
             # 确保重连任务正在运行
-            if self.running and (not self._reconnect_task or self._reconnect_task.done()):
+            if self.running and (
+                not self._reconnect_task or self._reconnect_task.done()
+            ):
                 self._reconnect_task = asyncio.create_task(self._reconnect_loop())
             return False
 
@@ -204,11 +206,11 @@ class WebSocketClient:
             if not self.connected:
                 logger.info(f"尝试重连... ({self.reconnect_interval}秒后)")
                 await asyncio.sleep(self.reconnect_interval)
-                
+
                 # 如果已经停止，退出循环
                 if not self.running:
                     break
-                    
+
                 if await self.connect():
                     # 重新启动接收和心跳任务
                     # 先取消旧的心跳任务（如果存在）
@@ -218,7 +220,7 @@ class WebSocketClient:
                             await self._heartbeat_task
                         except asyncio.CancelledError:
                             pass
-                    
+
                     # 启动新的接收和心跳任务
                     asyncio.create_task(self._receive_loop())
                     self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
