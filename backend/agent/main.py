@@ -249,30 +249,38 @@ def on_connect():
     """连接成功回调"""
     logger.info("✅ 已连接到主程序")
 
-    # 发送主机信息
+    # 发送主机信息（延迟一小段时间，确保连接完全稳定）
+    async def send_host_info_delayed():
+        # 等待一小段时间，确保连接完全稳定
+        await asyncio.sleep(0.5)
+        if websocket_client and websocket_client.connected:
+            host_info_message = {
+                "type": "host_info",
+                "host_info": get_host_info(),
+                "docker_info": get_docker_info(),
+            }
+            # 如果使用新方式且有agent_token，添加到消息中
+            if websocket_client.agent_token:
+                host_info_message["agent_token"] = websocket_client.agent_token
+
+            # 启动后统一打印一次 Agent 将上报的平台信息，方便与平台端对照审核
+            try:
+                pretty_info = json.dumps(
+                    host_info_message,
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str,
+                )
+                logger.info("Agent 启动信息（将上报到平台）:\n%s", pretty_info)
+            except Exception as e:
+                logger.debug(f"序列化 Agent 启动信息失败: {e}")
+
+            await websocket_client.send_message(host_info_message)
+        else:
+            logger.debug("连接已断开，取消发送 host_info")
+
     if websocket_client:
-        host_info_message = {
-            "type": "host_info",
-            "host_info": get_host_info(),
-            "docker_info": get_docker_info(),
-        }
-        # 如果使用新方式且有agent_token，添加到消息中
-        if websocket_client.agent_token:
-            host_info_message["agent_token"] = websocket_client.agent_token
-
-        # 启动后统一打印一次 Agent 将上报的平台信息，方便与平台端对照审核
-        try:
-            pretty_info = json.dumps(
-                host_info_message,
-                ensure_ascii=False,
-                indent=2,
-                default=str,
-            )
-            logger.info("Agent 启动信息（将上报到平台）:\n%s", pretty_info)
-        except Exception as e:
-            logger.debug(f"序列化 Agent 启动信息失败: {e}")
-
-        asyncio.create_task(websocket_client.send_message(host_info_message))
+        asyncio.create_task(send_host_info_delayed())
 
 
 def on_disconnect():

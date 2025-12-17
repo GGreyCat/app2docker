@@ -65,6 +65,15 @@ class PendingHostManager:
                 if docker_info:
                     existing["docker_info"].update(docker_info or {})
                 if websocket:
+                    # 如果已有旧连接，标记需要关闭（由调用方异步关闭）
+                    old_websocket = self._pending_connections.get(agent_token)
+                    if old_websocket and old_websocket != websocket:
+                        # 从反向映射中删除旧连接
+                        if old_websocket in self._websocket_to_token:
+                            del self._websocket_to_token[old_websocket]
+                        # 将旧连接保存到 existing 中，供调用方关闭
+                        existing["_old_websocket"] = old_websocket
+                    # 更新为新连接
                     self._pending_connections[agent_token] = websocket
                     self._websocket_to_token[websocket] = agent_token
                 existing["last_heartbeat"] = datetime.now()

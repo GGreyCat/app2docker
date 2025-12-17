@@ -290,12 +290,26 @@ async def handle_agent_websocket(
             await websocket.accept()
 
             # 记录到待加入列表
-            pending_host_manager.add_pending_host(
+            pending_host = pending_host_manager.add_pending_host(
                 agent_token=token,
                 websocket=websocket,
                 host_info={},
                 docker_info={},
             )
+
+            # 如果存在旧连接，先关闭旧连接（避免重复连接导致的问题）
+            old_websocket = pending_host.get("_old_websocket")
+            if old_websocket:
+                try:
+                    await old_websocket.close(code=1000, reason="New connection")
+                    logger.debug(
+                        f"[WebSocket] 已关闭待加入主机的旧连接: token={token[:16]}..."
+                    )
+                except Exception as e:
+                    logger.debug(f"[WebSocket] 关闭旧连接时出错（可忽略）: {e}")
+                # 清理标记
+                if "_old_websocket" in pending_host:
+                    del pending_host["_old_websocket"]
 
             # 发送待加入状态消息
             try:
@@ -421,12 +435,26 @@ async def handle_agent_websocket(
             else:
                 # 主机不存在，加入待加入列表
                 is_pending = True
-                pending_host_manager.add_pending_host(
+                pending_host = pending_host_manager.add_pending_host(
                     agent_token=agent_token,
                     websocket=websocket,
                     host_info={},
                     docker_info={},
                 )
+
+                # 如果存在旧连接，先关闭旧连接（避免重复连接导致的问题）
+                old_websocket = pending_host.get("_old_websocket")
+                if old_websocket:
+                    try:
+                        await old_websocket.close(code=1000, reason="New connection")
+                        logger.debug(
+                            f"[WebSocket] 已关闭待加入主机的旧连接: agent_token={agent_token[:16] if agent_token else 'None'}..."
+                        )
+                    except Exception as e:
+                        logger.debug(f"[WebSocket] 关闭旧连接时出错（可忽略）: {e}")
+                    # 清理标记
+                    if "_old_websocket" in pending_host:
+                        del pending_host["_old_websocket"]
 
                 # 发送待加入状态消息
                 try:
@@ -574,12 +602,29 @@ async def handle_agent_websocket(
                             pending_host_manager.remove_pending_host_by_websocket(
                                 websocket
                             )
-                            pending_host_manager.add_pending_host(
+                            pending_host = pending_host_manager.add_pending_host(
                                 agent_token=agent_unique_id,
                                 websocket=websocket,
                                 host_info=host_info,
                                 docker_info=docker_info,
                             )
+                            # 如果存在旧连接，先关闭旧连接
+                            old_websocket = pending_host.get("_old_websocket")
+                            if old_websocket:
+                                try:
+                                    await old_websocket.close(
+                                        code=1000, reason="New connection"
+                                    )
+                                    logger.debug(
+                                        f"[WebSocket] 已关闭待加入主机的旧连接: agent_token={agent_unique_id[:16]}..."
+                                    )
+                                except Exception as e:
+                                    logger.debug(
+                                        f"[WebSocket] 关闭旧连接时出错（可忽略）: {e}"
+                                    )
+                                # 清理标记
+                                if "_old_websocket" in pending_host:
+                                    del pending_host["_old_websocket"]
                             logger.info(
                                 f"[WebSocket] 获取到唯一标识: {agent_unique_id[:16]}..."
                             )
