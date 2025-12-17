@@ -4,7 +4,7 @@
     <LoginPage v-if="!authenticated" @login-success="handleLoginSuccess" />
 
     <!-- 主应用 -->
-    <div v-else class="min-vh-100 bg-light">
+    <div v-else class="bg-light" style="min-height: 100vh;">
       <div class="container-fluid px-3 py-3" style="max-width: 1400px;">
         <!-- 标题 -->
         <div class="text-center mb-4">
@@ -173,7 +173,7 @@
           </div>
 
           <!-- 标签页内容 -->
-          <div class="card-body p-3">
+          <div class="card-body p-3" style="min-height: 400px;">
             <DashboardPanel v-if="activeTab === 'dashboard' && hasPermission('menu.dashboard')" @navigate="handleNavigate" />
             <StepBuildPanel v-if="activeTab === 'step-build' && hasPermission('menu.build')" />
             <ExportPanel v-if="activeTab === 'export' && hasPermission('menu.export')" />

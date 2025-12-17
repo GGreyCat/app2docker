@@ -1,5 +1,5 @@
 <template>
-  <div class="agent-host-manager-panel" v-show="shouldShow">
+  <div class="agent-host-manager-panel">
     <!-- 标签页切换 -->
     <div class="card mb-3">
       <div class="card-body p-2">
@@ -41,198 +41,397 @@
 
     <!-- 主机列表标签页 -->
     <div v-show="activeTab === 'hosts'">
-      <!-- 添加主机按钮 -->
-      <div class="d-flex justify-content-end mb-3" v-if="filterType === 'all' || filterType === 'agent'">
-        <div class="btn-group">
-          <button 
-            type="button" 
-            class="btn btn-primary btn-sm dropdown-toggle" 
-            data-bs-toggle="dropdown" 
-            aria-expanded="false"
-          >
-            <i class="fas fa-plus me-1"></i> 添加主机
-          </button>
-          <ul class="dropdown-menu dropdown-menu-end">
-            <li>
-              <a class="dropdown-item" href="#" @click.prevent="openAddModal('agent')">
-                <i class="fas fa-network-wired me-2"></i> Agent主机
-              </a>
-            </li>
-            <li>
-              <a class="dropdown-item" href="#" @click.prevent="openAddModal('portainer')">
-                <i class="fab fa-docker me-2"></i> Portainer主机
-              </a>
-            </li>
-          </ul>
-        </div>
-      </div>
+      <!-- 主机类型筛选器和添加按钮 -->
+      <div class="card mb-3">
+        <div class="card-body py-2">
+          <div class="d-flex justify-content-between align-items-center">
+            <div class="btn-group" role="group">
+              <input
+                type="radio"
+                class="btn-check"
+                id="filter-all"
+                value="all"
+                v-model="filterType"
+              />
+              <label class="btn btn-outline-secondary btn-sm" for="filter-all">
+                <i class="fas fa-list me-1"></i> 全部
+              </label>
 
-    <!-- Agent主机列表 - 卡片式布局 -->
-    <div v-if="loading" class="text-center py-5">
-      <span class="spinner-border spinner-border-sm"></span> 加载中...
-    </div>
-    <div v-else-if="filteredHosts.length === 0" class="text-center py-5 text-muted">
-      <i class="fas fa-network-wired fa-3x mb-3"></i>
-      <p class="mb-0">暂无Agent主机</p>
-      <div class="btn-group mt-2">
-        <button 
-          type="button" 
-          class="btn btn-primary btn-sm dropdown-toggle" 
-          data-bs-toggle="dropdown" 
-          aria-expanded="false"
-        >
-          <i class="fas fa-plus me-1"></i> 添加主机
-        </button>
-        <ul class="dropdown-menu dropdown-menu-end">
-          <li>
-            <a class="dropdown-item" href="#" @click.prevent="openAddModal('agent')">
-              <i class="fas fa-network-wired me-2"></i> Agent主机
-            </a>
-          </li>
-          <li>
-            <a class="dropdown-item" href="#" @click.prevent="openAddModal('portainer')">
-              <i class="fab fa-docker me-2"></i> Portainer主机
-            </a>
-          </li>
-        </ul>
-      </div>
-    </div>
-    <div v-else class="row g-4">
-      <div
-        v-for="host in filteredHosts"
-        :key="host.host_id"
-        class="col-12 col-md-6 col-xl-4"
-      >
-        <div class="card h-100 shadow-sm">
-          <!-- 卡片头部 -->
-          <div class="card-header bg-white">
-            <div class="mb-2">
-              <h5 class="card-title mb-2">
-                <strong>{{ host.name }}</strong>
-              </h5>
-              <div class="d-flex align-items-center justify-content-between mb-1">
-                <div>
-                  <span class="badge" :class="host.host_type === 'portainer' ? 'bg-primary' : 'bg-secondary'">
-                    <i class="fas fa-network-wired"></i> {{ host.host_type === 'portainer' ? 'Portainer' : 'Agent' }}
-                  </span>
-                  <span :class="getStatusBadgeClass(host.status)" class="badge ms-1">
-                    <i :class="getStatusIcon(host.status)"></i>
-                    {{ getStatusText(host.status) }}
-                  </span>
-                </div>
-              </div>
-              <p
-                class="text-muted mb-0 mt-1"
-                v-if="host.description"
-                style="font-size: 0.9rem"
-              >
-                {{ host.description }}
-              </p>
+              <input
+                type="radio"
+                class="btn-check"
+                id="filter-ssh"
+                value="ssh"
+                v-model="filterType"
+              />
+              <label class="btn btn-outline-secondary btn-sm" for="filter-ssh">
+                <i class="fas fa-server me-1"></i> SSH主机
+              </label>
+
+              <input
+                type="radio"
+                class="btn-check"
+                id="filter-agent"
+                value="agent"
+                v-model="filterType"
+              />
+              <label class="btn btn-outline-secondary btn-sm" for="filter-agent">
+                <i class="fas fa-network-wired me-1"></i> Agent主机
+              </label>
             </div>
-            <!-- 操作按钮行 -->
-            <div class="btn-group btn-group-sm w-100">
-              <button
-                class="btn btn-outline-info"
-                @click="viewHost(host)"
-                title="查看详情"
-              >
-                <i class="fas fa-info-circle"></i>
-              </button>
-              <button
-                class="btn btn-outline-primary"
-                @click="showDeployCommand(host)"
-                title="部署命令"
-              >
-                <i class="fas fa-code"></i>
-              </button>
-              <button
-                class="btn btn-outline-success"
-                @click="refreshHostStatus(host)"
-                title="刷新状态"
-              >
-                <i class="fas fa-sync-alt"></i>
-              </button>
-              <button
-                class="btn btn-outline-primary"
-                @click="editHost(host)"
-                title="编辑"
-              >
-                <i class="fas fa-edit"></i>
-              </button>
-              <button
-                class="btn btn-outline-danger"
-                @click="deleteHost(host)"
-                title="删除"
-              >
-                <i class="fas fa-trash"></i>
+            
+            <!-- 添加主机按钮 -->
+            <div class="d-flex gap-2" v-if="filterType === 'all' || filterType === 'agent'">
+              <div class="btn-group" v-if="filterType === 'all'">
+                <button class="btn btn-primary btn-sm" @click="showSshAddModal">
+                  <i class="fas fa-plus me-1"></i> 添加SSH主机
+                </button>
+              </div>
+              <div class="btn-group">
+                <button 
+                  type="button" 
+                  class="btn btn-primary btn-sm dropdown-toggle" 
+                  data-bs-toggle="dropdown" 
+                  aria-expanded="false"
+                >
+                  <i class="fas fa-plus me-1"></i> 添加主机
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li v-if="filterType === 'all'">
+                    <a class="dropdown-item" href="#" @click.prevent="showSshAddModal">
+                      <i class="fas fa-server me-2"></i> SSH主机
+                    </a>
+                  </li>
+                  <li>
+                    <a class="dropdown-item" href="#" @click.prevent="openAddModal('agent')">
+                      <i class="fas fa-network-wired me-2"></i> Agent主机
+                    </a>
+                  </li>
+                  <li>
+                    <a class="dropdown-item" href="#" @click.prevent="openAddModal('portainer')">
+                      <i class="fab fa-docker me-2"></i> Portainer主机
+                    </a>
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <div class="d-flex gap-2" v-else-if="filterType === 'ssh'">
+              <button class="btn btn-primary btn-sm" @click="showSshAddModal">
+                <i class="fas fa-plus me-1"></i> 添加SSH主机
               </button>
             </div>
           </div>
+        </div>
+      </div>
 
-          <!-- 卡片内容 -->
-          <div class="card-body">
-            <!-- 主机信息 -->
-            <div class="mb-3">
-              <div v-if="host.host_info && Object.keys(host.host_info).length > 0">
-                <div class="d-flex align-items-center mb-2">
-                  <i class="fas fa-network-wired text-muted me-2" style="width: 18px;"></i>
-                  <div class="flex-grow-1">
-                    <div class="small" v-if="host.host_info.ip">
-                      <strong>{{ host.host_info.ip }}</strong>
-                    </div>
-                    <div class="small text-muted mt-1" v-if="host.host_info.os">
-                      <i class="fas fa-desktop me-1"></i>{{ host.host_info.os }}
+      <!-- 统一显示所有主机（当filterType为all时） -->
+      <template v-if="filterType === 'all'">
+        <div v-if="allHostsLoading" class="text-center py-5">
+          <span class="spinner-border spinner-border-sm"></span> 加载中...
+        </div>
+        <div v-else-if="allHosts.length === 0" class="text-center py-5 text-muted">
+          <i class="fas fa-server fa-3x mb-3"></i>
+          <p class="mb-0">暂无主机</p>
+        </div>
+        <div v-else class="row g-4">
+          <div
+            v-for="host in allHosts"
+            :key="`${host.host_type || 'ssh'}-${host.host_id}`"
+            class="col-12 col-md-6 col-xl-4"
+          >
+            <!-- SSH主机卡片 -->
+            <div v-if="!host.host_type || host.host_type === 'ssh'" class="card h-100 shadow-sm">
+              <div class="card-header bg-white">
+                <div class="mb-2">
+                  <h5 class="card-title mb-1">
+                    <strong>{{ host.name }}</strong>
+                  </h5>
+                  <div class="small text-muted mb-1">
+                    <i class="fas fa-network-wired me-1"></i>{{ host.host }}<span class="ms-1">:{{ host.port }}</span>
+                  </div>
+                  <div class="d-flex align-items-center justify-content-between mb-1">
+                    <div>
+                      <span class="badge bg-secondary">
+                        <i class="fas fa-server"></i> SSH主机
+                      </span>
+                      <span v-if="host.has_private_key" class="badge bg-info ms-1">
+                        <i class="fas fa-key"></i> 密钥
+                      </span>
+                      <span v-else-if="host.has_password" class="badge bg-secondary ms-1">
+                        <i class="fas fa-lock"></i> 密码
+                      </span>
                     </div>
                   </div>
+                  <p class="text-muted mb-0 mt-1" v-if="host.description" style="font-size: 0.9rem">
+                    {{ host.description }}
+                  </p>
                 </div>
-                <div v-if="host.host_info.cpu_usage !== undefined" class="small text-muted mt-2">
-                  <div class="d-flex justify-content-between mb-1">
-                    <span>CPU: {{ host.host_info.cpu_usage }}%</span>
-                    <span>内存: {{ host.host_info.memory_usage }}%</span>
-                  </div>
-                  <div>磁盘: {{ host.host_info.disk_usage }}%</div>
+                <div class="btn-group btn-group-sm w-100">
+                  <button class="btn btn-outline-info" @click="handleSshHostAction('test', host)" title="测试连接">
+                    <i class="fas fa-plug"></i>
+                  </button>
+                  <button class="btn btn-outline-primary" @click="handleSshHostAction('edit', host)" title="编辑">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="btn btn-outline-danger" @click="handleSshHostAction('delete', host)" title="删除">
+                    <i class="fas fa-trash"></i>
+                  </button>
                 </div>
               </div>
-              <div v-else class="text-muted small">
-                <i class="fas fa-exclamation-circle me-1"></i>未连接
+              <div class="card-body">
+                <div class="mb-3">
+                  <div class="d-flex align-items-center mb-2">
+                    <i class="fas fa-user text-muted me-2" style="width: 18px;"></i>
+                    <div class="flex-grow-1 small text-muted">
+                      {{ host.username }}
+                    </div>
+                  </div>
+                </div>
+                <div v-if="host.docker_version" class="mb-3">
+                  <span class="badge bg-success">
+                    <i class="fab fa-docker me-1"></i>Docker可用
+                  </span>
+                  <div class="small text-muted mt-1">
+                    Docker {{ host.docker_version }}
+                  </div>
+                </div>
               </div>
             </div>
 
-            <!-- Docker信息 -->
-            <div class="mb-3">
-              <div v-if="host.docker_info && Object.keys(host.docker_info).length > 0">
+            <!-- Agent主机卡片 -->
+            <div v-else class="card h-100 shadow-sm">
+              <div class="card-header bg-white">
                 <div class="mb-2">
+                  <h5 class="card-title mb-1">
+                    <strong>{{ host.name }}</strong>
+                  </h5>
+                  <div v-if="host.host_info && host.host_info.ip" class="small text-muted mb-1">
+                    <i class="fas fa-network-wired me-1"></i>{{ host.host_info.ip }}
+                  </div>
+                  <div class="d-flex align-items-center justify-content-between mb-1">
+                    <div>
+                      <span class="badge" :class="host.host_type === 'portainer' ? 'bg-primary' : 'bg-secondary'">
+                        <i class="fas fa-network-wired"></i> {{ host.host_type === 'portainer' ? 'Portainer' : 'Agent' }}
+                      </span>
+                      <span :class="getStatusBadgeClass(host.status)" class="badge ms-1">
+                        <i :class="getStatusIcon(host.status)"></i>
+                        {{ getStatusText(host.status) }}
+                      </span>
+                    </div>
+                  </div>
+                  <p class="text-muted mb-0 mt-1" v-if="host.description" style="font-size: 0.9rem">
+                    {{ host.description }}
+                  </p>
+                </div>
+                <div class="btn-group btn-group-sm w-100">
+                  <button class="btn btn-outline-info" @click="viewHost(host)" title="查看详情">
+                    <i class="fas fa-info-circle"></i>
+                  </button>
+                  <button class="btn btn-outline-primary" @click="editHost(host)" title="编辑">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="btn btn-outline-danger" @click="deleteHost(host)" title="删除">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="card-body">
+                <div v-if="host.host_info && Object.keys(host.host_info).length > 0" class="mb-3">
+                  <div class="d-flex align-items-center mb-2">
+                    <i class="fas fa-desktop text-muted me-2" style="width: 18px;"></i>
+                    <div class="flex-grow-1">
+                      <div class="small text-muted" v-if="host.host_info.os">
+                        <i class="fas fa-desktop me-1"></i>{{ host.host_info.os }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="host.docker_info && Object.keys(host.docker_info).length > 0" class="mb-3">
                   <span v-if="host.docker_info.version" class="badge bg-info">
                     <i class="fab fa-docker me-1"></i>{{ host.docker_info.version }}
                   </span>
                 </div>
-                <div class="small text-muted">
-                  <span v-if="host.docker_info.containers !== undefined">
-                    容器: {{ host.docker_info.containers }}
-                  </span>
-                  <span v-if="host.docker_info.images !== undefined" class="ms-2">
-                    镜像: {{ host.docker_info.images }}
-                  </span>
-                </div>
-              </div>
-              <div v-else class="text-muted small">
-                <i class="fas fa-exclamation-circle me-1"></i>未检测
-              </div>
-            </div>
-
-            <!-- 最后心跳和创建时间 -->
-            <div class="small text-muted border-top pt-2">
-              <div v-if="host.last_heartbeat" class="mb-1">
-                <i class="fas fa-heartbeat me-1"></i>最后心跳: {{ formatTime(host.last_heartbeat) }}
-              </div>
-              <div>
-                <i class="fas fa-clock me-1"></i>{{ formatTime(host.created_at) }}
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </template>
+
+      <!-- 单独显示SSH或Agent主机 -->
+      <template v-else>
+        <!-- SSH主机管理 -->
+        <HostManager v-if="filterType === 'ssh'" ref="hostManager" :filterType="filterType" />
+        
+        <!-- Agent主机列表 -->
+        <div v-if="filterType === 'agent'">
+          <!-- Agent主机列表 - 卡片式布局 -->
+          <div v-if="loading" class="text-center py-5">
+            <span class="spinner-border spinner-border-sm"></span> 加载中...
+          </div>
+          <div v-else-if="filteredHosts.length === 0" class="text-center py-5 text-muted">
+            <i class="fas fa-network-wired fa-3x mb-3"></i>
+            <p class="mb-0">暂无Agent主机</p>
+            <div class="btn-group mt-2">
+              <button 
+                type="button" 
+                class="btn btn-primary btn-sm dropdown-toggle" 
+                data-bs-toggle="dropdown" 
+                aria-expanded="false"
+              >
+                <i class="fas fa-plus me-1"></i> 添加主机
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li>
+                  <a class="dropdown-item" href="#" @click.prevent="openAddModal('agent')">
+                    <i class="fas fa-network-wired me-2"></i> Agent主机
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" href="#" @click.prevent="openAddModal('portainer')">
+                    <i class="fab fa-docker me-2"></i> Portainer主机
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div v-else class="row g-4">
+            <div
+              v-for="host in filteredHosts"
+              :key="host.host_id"
+              class="col-12 col-md-6 col-xl-4"
+            >
+              <div class="card h-100 shadow-sm">
+                <!-- 卡片头部 -->
+                <div class="card-header bg-white">
+                  <div class="mb-2">
+                    <h5 class="card-title mb-2">
+                      <strong>{{ host.name }}</strong>
+                    </h5>
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                      <div>
+                        <span class="badge" :class="host.host_type === 'portainer' ? 'bg-primary' : 'bg-secondary'">
+                          <i class="fas fa-network-wired"></i> {{ host.host_type === 'portainer' ? 'Portainer' : 'Agent' }}
+                        </span>
+                        <span :class="getStatusBadgeClass(host.status)" class="badge ms-1">
+                          <i :class="getStatusIcon(host.status)"></i>
+                          {{ getStatusText(host.status) }}
+                        </span>
+                      </div>
+                    </div>
+                    <p
+                      class="text-muted mb-0 mt-1"
+                      v-if="host.description"
+                      style="font-size: 0.9rem"
+                    >
+                      {{ host.description }}
+                    </p>
+                  </div>
+                  <!-- 操作按钮行 -->
+                  <div class="btn-group btn-group-sm w-100">
+                    <button
+                      class="btn btn-outline-info"
+                      @click="viewHost(host)"
+                      title="查看详情"
+                    >
+                      <i class="fas fa-info-circle"></i>
+                    </button>
+                    <button
+                      class="btn btn-outline-primary"
+                      @click="showDeployCommand(host)"
+                      title="部署命令"
+                    >
+                      <i class="fas fa-code"></i>
+                    </button>
+                    <button
+                      class="btn btn-outline-success"
+                      @click="refreshHostStatus(host)"
+                      title="刷新状态"
+                    >
+                      <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button
+                      class="btn btn-outline-primary"
+                      @click="editHost(host)"
+                      title="编辑"
+                    >
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button
+                      class="btn btn-outline-danger"
+                      @click="deleteHost(host)"
+                      title="删除"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 卡片内容 -->
+                <div class="card-body">
+                  <!-- 主机信息 -->
+                  <div class="mb-3">
+                    <div v-if="host.host_info && Object.keys(host.host_info).length > 0">
+                      <div class="d-flex align-items-center mb-2">
+                        <i class="fas fa-network-wired text-muted me-2" style="width: 18px;"></i>
+                        <div class="flex-grow-1">
+                          <div class="small" v-if="host.host_info.ip">
+                            <strong>{{ host.host_info.ip }}</strong>
+                          </div>
+                          <div class="small text-muted mt-1" v-if="host.host_info.os">
+                            <i class="fas fa-desktop me-1"></i>{{ host.host_info.os }}
+                          </div>
+                        </div>
+                      </div>
+                      <div v-if="host.host_info.cpu_usage !== undefined" class="small text-muted mt-2">
+                        <div class="d-flex justify-content-between mb-1">
+                          <span>CPU: {{ host.host_info.cpu_usage }}%</span>
+                          <span>内存: {{ host.host_info.memory_usage }}%</span>
+                        </div>
+                        <div>磁盘: {{ host.host_info.disk_usage }}%</div>
+                      </div>
+                    </div>
+                    <div v-else class="text-muted small">
+                      <i class="fas fa-exclamation-circle me-1"></i>未连接
+                    </div>
+                  </div>
+
+                  <!-- Docker信息 -->
+                  <div class="mb-3">
+                    <div v-if="host.docker_info && Object.keys(host.docker_info).length > 0">
+                      <div class="mb-2">
+                        <span v-if="host.docker_info.version" class="badge bg-info">
+                          <i class="fab fa-docker me-1"></i>{{ host.docker_info.version }}
+                        </span>
+                      </div>
+                      <div class="small text-muted">
+                        <span v-if="host.docker_info.containers !== undefined">
+                          容器: {{ host.docker_info.containers }}
+                        </span>
+                        <span v-if="host.docker_info.images !== undefined" class="ms-2">
+                          镜像: {{ host.docker_info.images }}
+                        </span>
+                      </div>
+                    </div>
+                    <div v-else class="text-muted small">
+                      <i class="fas fa-exclamation-circle me-1"></i>未检测
+                    </div>
+                  </div>
+
+                  <!-- 最后心跳和创建时间 -->
+                  <div class="small text-muted border-top pt-2">
+                    <div v-if="host.last_heartbeat" class="mb-1">
+                      <i class="fas fa-heartbeat me-1"></i>最后心跳: {{ formatTime(host.last_heartbeat) }}
+                    </div>
+                    <div>
+                      <i class="fas fa-clock me-1"></i>{{ formatTime(host.created_at) }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- 密钥管理标签页 -->
@@ -374,6 +573,13 @@
               <span class="badge bg-warning text-dark">待批准</span>
             </div>
             <div class="card-body">
+              <!-- IP 概览 -->
+              <div v-if="host.host_info && host.host_info.ip" class="mb-2">
+                <span class="badge bg-light text-muted">
+                  <i class="fas fa-network-wired me-1 text-primary"></i>{{ host.host_info.ip }}
+                </span>
+              </div>
+
               <div class="mb-3">
                 <label class="small text-muted d-block mb-1">唯一标识</label>
                 <div class="d-flex align-items-center">
@@ -386,10 +592,6 @@
               
               <div v-if="host.host_info && Object.keys(host.host_info).length > 0" class="mb-3 border-top pt-3">
                 <h6 class="small text-muted mb-2">主机信息</h6>
-                <div v-if="host.host_info.ip" class="small mb-1">
-                  <i class="fas fa-network-wired me-1 text-primary"></i>
-                  <strong>IP:</strong> {{ host.host_info.ip }}
-                </div>
                 <div v-if="host.host_info.os" class="small text-muted mb-1">
                   <i class="fas fa-desktop me-1"></i>{{ host.host_info.os }}
                 </div>
@@ -1052,19 +1254,20 @@
 
 <script>
 import axios from 'axios';
+import HostManager from './HostManager.vue';
 
 export default {
   name: 'AgentHostManager',
-  props: {
-    filterType: {
-      type: String,
-      default: 'all'
-    }
+  components: {
+    HostManager
   },
   data() {
     return {
       activeTab: 'hosts', // 当前标签页: hosts, secrets, pending
-      hosts: [],
+      filterType: 'all', // 主机类型筛选: all, ssh, agent
+      hosts: [], // Agent主机列表
+      sshHosts: [], // SSH主机列表
+      allHostsLoading: false, // 加载所有主机时的loading状态
       loading: false,
       showAddModal: false,
       showEditModal: false,
@@ -1119,12 +1322,20 @@ export default {
     }
   },
   computed: {
-    shouldShow() {
-      return this.filterType === 'all' || this.filterType === 'agent'
+    allHosts() {
+      if (this.filterType !== 'all') return [];
+      // 合并SSH和Agent主机
+      const ssh = (this.sshHosts || []).map(h => ({ ...h, host_type: 'ssh' }));
+      const agent = (this.hosts || []).map(h => ({ ...h, host_type: h.host_type || 'agent' }));
+      return [...ssh, ...agent];
     },
     filteredHosts() {
-      if (!this.shouldShow) return []
-      return this.hosts
+      if (this.filterType === 'ssh') {
+        return this.sshHosts || [];
+      } else if (this.filterType === 'agent') {
+        return this.hosts || [];
+      }
+      return [];
     },
     pendingHostsCount() {
       return this.pendingHosts.length
@@ -1134,15 +1345,29 @@ export default {
     this.loadHosts()
     this.loadSecrets()
     this.loadPendingHosts()
+    // 如果筛选器是all，加载SSH主机
+    if (this.filterType === 'all') {
+      this.loadSshHosts()
+    }
     // 启动WebSocket连接以实时更新状态
     this.initWebSocketConnections()
     // 定期刷新主机列表（每30秒）
     this.refreshInterval = setInterval(() => {
       this.loadHosts()
+      if (this.filterType === 'all') {
+        this.loadSshHosts()
+      }
       if (this.activeTab === 'pending') {
         this.loadPendingHosts()
       }
     }, 30000)
+  },
+  watch: {
+    filterType(newVal) {
+      if (newVal === 'all' && this.activeTab === 'hosts') {
+        this.loadSshHosts()
+      }
+    }
   },
   beforeUnmount() {
     // 清理定时器
@@ -1157,19 +1382,69 @@ export default {
     })
   },
   methods: {
+    async loadSshHosts() {
+      try {
+        const res = await axios.get('/api/hosts')
+        if (res.data.hosts) {
+          this.sshHosts = res.data.hosts || []
+        }
+      } catch (error) {
+        console.error('加载SSH主机列表失败:', error)
+      }
+    },
     async loadHosts() {
       this.loading = true
+      if (this.filterType === 'all') {
+        this.allHostsLoading = true
+      }
       try {
         const res = await axios.get('/api/agent-hosts')
         if (res.data.hosts) {
           this.hosts = res.data.hosts || []
+        }
+        // 如果筛选器是all，同时加载SSH主机
+        if (this.filterType === 'all') {
+          await this.loadSshHosts()
         }
       } catch (error) {
         console.error('加载Agent主机列表失败:', error)
         alert('加载Agent主机列表失败: ' + (error.response?.data?.detail || error.message))
       } finally {
         this.loading = false
+        this.allHostsLoading = false
       }
+    },
+    showSshAddModal() {
+      // 如果当前在SSH筛选模式，直接调用HostManager的方法
+      if (this.filterType === 'ssh' && this.$refs.hostManager) {
+        this.$refs.hostManager.showAddModal = true
+      } else {
+        // 如果不在SSH模式，切换到SSH模式并打开添加模态框
+        this.filterType = 'ssh'
+        this.$nextTick(() => {
+          if (this.$refs.hostManager) {
+            this.$refs.hostManager.showAddModal = true
+          }
+        })
+      }
+    },
+    handleSshHostAction(action, host) {
+      // 切换到SSH模式并执行操作
+      if (this.filterType !== 'ssh') {
+        this.filterType = 'ssh'
+      }
+      this.$nextTick(() => {
+        const hostManager = this.$refs.hostManager
+        if (hostManager) {
+          if (action === 'test') {
+            hostManager.testConnection(host)
+          } else if (action === 'edit') {
+            hostManager.editHost(host)
+          } else if (action === 'delete') {
+            hostManager.deleteHost(host)
+          }
+        }
+      })
     },
     initWebSocketConnections() {
       // 为每个在线的主机建立WebSocket连接（如果需要实时更新）
@@ -1794,6 +2069,8 @@ docker stack deploy -c docker-compose.yml app2docker-agent`
 <style scoped>
 .agent-host-manager-panel {
   padding: 0;
+  min-height: 100%;
+  overflow: visible;
 }
 
 /* 标签页样式优化 */

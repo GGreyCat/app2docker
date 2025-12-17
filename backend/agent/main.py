@@ -239,6 +239,16 @@ def on_message(message: Dict[str, Any]):
     if message_type == "welcome":
         logger.info(f"收到欢迎消息: {message.get('message')}")
 
+    elif message_type == "pending":
+        # 待加入状态消息
+        status = message.get("status", "pending")
+        msg = message.get("message", "")
+        if status == "pending":
+            logger.info(f"⏳ Agent处于待加入状态: {msg}")
+            logger.info("   请在主程序的'待加入主机'标签页中批准加入")
+        else:
+            logger.info(f"收到状态消息: {msg}")
+
     elif message_type == "deploy":
         # 部署任务
         logger.info("收到部署任务")
