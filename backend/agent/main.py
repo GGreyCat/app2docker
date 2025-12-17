@@ -160,6 +160,11 @@ def get_host_info() -> Dict[str, Any]:
 
         if ip_address:
             info["ip"] = ip_address
+            # 记录 IP，方便审核和排查（只打印一次关键信息）
+            try:
+                logger.info(f"检测到主机 IP 地址: {ip_address}")
+            except Exception:
+                pass
     except Exception as e:
         logger.debug(f"获取主机 IP 失败: {e}")
 
