@@ -565,20 +565,19 @@
           :key="host.agent_token"
           class="col-12 col-md-6 col-xl-4"
         >
-          <div class="card h-100 border-warning shadow-sm">
-            <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
-              <h6 class="mb-0">
-                <i class="fas fa-clock me-2"></i>待加入主机
-              </h6>
-              <span class="badge bg-warning text-dark">待批准</span>
+            <div class="card h-100 border-warning shadow-sm">
+            <div class="card-header bg-warning bg-opacity-10">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <h6 class="mb-0">
+                  <i class="fas fa-clock me-2"></i>待加入主机
+                </h6>
+                <span class="badge bg-warning text-dark">待批准</span>
+              </div>
+              <div v-if="host.host_info && host.host_info.ip" class="small text-muted">
+                <i class="fas fa-network-wired me-1"></i>{{ host.host_info.ip }}
+              </div>
             </div>
             <div class="card-body">
-              <!-- IP 概览 -->
-              <div v-if="host.host_info && host.host_info.ip" class="mb-2">
-                <span class="badge bg-light text-muted">
-                  <i class="fas fa-network-wired me-1 text-primary"></i>{{ host.host_info.ip }}
-                </span>
-              </div>
 
               <div class="mb-3">
                 <label class="small text-muted d-block mb-1">唯一标识</label>
