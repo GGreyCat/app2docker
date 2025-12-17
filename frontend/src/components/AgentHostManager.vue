@@ -473,12 +473,45 @@
               <tbody>
                 <tr v-for="secret in secrets" :key="secret.secret_id">
                   <td>
-                    <strong>{{ secret.name || '未命名' }}</strong>
+                    <div v-if="editingSecretId === secret.secret_id" class="input-group input-group-sm">
+                      <input
+                        type="text"
+                        class="form-control"
+                        v-model="editingSecretName"
+                        placeholder="请输入密钥名称"
+                        @keyup.enter="saveSecretName(secret)"
+                        @blur="saveSecretName(secret)"
+                      />
+                      <button
+                        class="btn btn-outline-success"
+                        type="button"
+                        @click.stop="saveSecretName(secret)"
+                        title="保存名称"
+                      >
+                        <i class="fas fa-check"></i>
+                      </button>
+                    </div>
+                    <div v-else class="d-flex align-items-center">
+                      <strong>{{ secret.name || '未命名' }}</strong>
+                      <button
+                        class="btn btn-sm btn-link text-decoration-none ms-1 p-0"
+                        type="button"
+                        @click.stop="startEditSecretName(secret)"
+                        title="编辑名称"
+                      >
+                        <i class="fas fa-edit"></i>
+                      </button>
+                    </div>
                   </td>
                   <td>
                     <div class="d-flex align-items-center">
                       <code class="small text-break me-2" style="max-width: 200px;">{{ secret.secret_key }}</code>
-                      <button class="btn btn-sm btn-outline-secondary" @click="copyToClipboard(secret.secret_key)" title="复制密钥">
+                      <button
+                        class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        @click="copyToClipboard(secret.secret_key, '密钥已复制到剪贴板')"
+                        title="复制密钥"
+                      >
                         <i class="fas fa-copy"></i>
                       </button>
                     </div>
@@ -1308,6 +1341,9 @@ export default {
       secretForm: {
         name: ''
       },
+      // 编辑密钥名称
+      editingSecretId: null,
+      editingSecretName: '',
       // 待加入主机
       pendingHosts: [],
       loadingPendingHosts: false,
@@ -1844,6 +1880,41 @@ docker stack deploy -c docker-compose.yml app2docker-agent`
         alert('生成密钥失败: ' + (error.response?.data?.detail || error.message))
       } finally {
         this.creatingSecret = false
+      }
+    },
+    startEditSecretName(secret) {
+      this.editingSecretId = secret.secret_id
+      this.editingSecretName = secret.name || ''
+    },
+    async saveSecretName(secret) {
+      if (!this.editingSecretId || this.editingSecretId !== secret.secret_id) {
+        return
+      }
+      const newName = (this.editingSecretName || '').trim()
+      // 如果名称未变化，直接退出编辑
+      if ((secret.name || '') === newName) {
+        this.editingSecretId = null
+        this.editingSecretName = ''
+        return
+      }
+      try {
+        const res = await axios.put(`/api/agent-secrets/${secret.secret_id}`, {
+          name: newName
+        })
+        if (res.data && res.data.success && res.data.secret) {
+          secret.name = res.data.secret.name || ''
+          alert('密钥名称已更新')
+        } else {
+          // 后端未返回 success 字段时，尝试直接刷新列表
+          alert('密钥名称已更新')
+          this.loadSecrets()
+        }
+      } catch (error) {
+        console.error('更新密钥名称失败:', error)
+        alert('更新密钥名称失败: ' + (error.response?.data?.detail || error.message))
+      } finally {
+        this.editingSecretId = null
+        this.editingSecretName = ''
       }
     },
     async enableSecret(secret) {
