@@ -174,6 +174,13 @@ class WebSocketClient:
                     )
                 # 正常发送成功时不记录日志（减少日志量）
                 return True
+            except ConnectionClosed as e:
+                # 远端关闭连接（包括 no close frame 等情况），视为正常断连，走统一重连逻辑
+                logger.warning(
+                    f"WebSocket 已关闭，发送失败: type={message.get('type')}, code={getattr(e, 'code', None)}, reason={getattr(e, 'reason', '')}"
+                )
+                last_error = e
+                break
             except Exception as e:
                 last_error = e
                 if attempt < max_retries - 1:
@@ -190,10 +197,11 @@ class WebSocketClient:
                         f"❌ 发送消息失败（{max_retries}次尝试后）: type={message.get('type')}, error={e}"
                     )
 
-        # 所有重试都失败
-        logger.error(
-            f"❌ 发送消息最终失败: type={message.get('type')}, error={last_error}"
-        )
+        # 所有重试都失败或连接已关闭
+        if last_error is not None:
+            logger.warning(
+                f"发送消息失败，将触发重连: type={message.get('type')}, error={last_error}"
+            )
         self.connected = False
         # 确保重连任务正在运行
         if self.running and (not self._reconnect_task or self._reconnect_task.done()):
