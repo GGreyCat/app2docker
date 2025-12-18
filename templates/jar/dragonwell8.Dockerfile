@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/root/.m2 mvn clean package -DskipTests -s setting
 # 注意：官方未提供 "jre-alpine" 版本，这里使用完整 JDK 但仅运行 jar（可接受）
 # 或者改用 eclipse-temurin:jre-alpine 以减小体积（见下方说明）
 # ------------------------------------------------------------
-FROM dragonwell-registry.cn-hangzhou.cr.aliyuncs.com/dragonwell/dragonwell:11-anolis AS base
+FROM dragonwell-registry.cn-hangzhou.cr.aliyuncs.com/dragonwell/dragonwell:8-anolis AS base
 
 WORKDIR /app
 
