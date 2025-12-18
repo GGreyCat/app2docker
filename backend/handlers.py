@@ -1403,6 +1403,8 @@ class BuildManager:
             daemon=True,
         )
         thread.start()
+        # 立即更新任务状态为运行中，避免状态显示延迟
+        self.task_manager.update_task_status(task_id, "running")
         with self.lock:
             self.tasks[task_id] = thread
         return task_id
@@ -2350,6 +2352,8 @@ class BuildManager:
                 daemon=True,
             )
             thread.start()
+            # 立即更新任务状态为运行中，避免状态显示延迟
+            self.task_manager.update_task_status(task_id, "running")
             print(f"✅ 构建线程已启动: task_id={task_id}")
             with self.lock:
                 self.tasks[task_id] = thread
