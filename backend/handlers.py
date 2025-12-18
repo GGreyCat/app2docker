@@ -4544,6 +4544,15 @@ class BuildTaskManager:
 
             # 任务完成、失败或停止时，解绑流水线并处理队列
             if status in ("completed", "failed", "stopped"):
+                # 异步更新构建目录统计缓存
+                try:
+                    from backend.stats_cache import StatsCacheManager
+                    cache_manager = StatsCacheManager(BUILD_DIR)
+                    cache_manager.update_cache_async("build")
+                    print(f"✅ 已触发构建目录统计缓存异步更新: task_id={task_id[:8]}")
+                except Exception as e:
+                    print(f"⚠️ 触发构建目录统计缓存更新失败: {e}")
+                
                 try:
                     from backend.pipeline_manager import PipelineManager
 
@@ -5612,6 +5621,14 @@ class ExportTaskManager:
                 task.file_size = file_size
             if status in ("completed", "failed", "stopped"):
                 task.completed_at = datetime.now()
+                # 异步更新导出目录统计缓存
+                try:
+                    from backend.stats_cache import StatsCacheManager
+                    cache_manager = StatsCacheManager(EXPORT_DIR)
+                    cache_manager.update_cache_async("export")
+                    print(f"✅ 已触发导出目录统计缓存异步更新: task_id={task_id[:8]}")
+                except Exception as e:
+                    print(f"⚠️ 触发导出目录统计缓存更新失败: {e}")
 
             db.commit()
             return True

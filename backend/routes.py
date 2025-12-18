@@ -3,7 +3,6 @@
 import os
 import shutil
 import tempfile
-import time
 from typing import Optional, List
 from fastapi import (
     APIRouter,
@@ -43,6 +42,7 @@ from backend.handlers import (
     parse_dockerfile_services,
     validate_and_clean_image_name,
 )
+from backend.stats_cache import StatsCacheManager
 from backend.resource_package_manager import ResourcePackageManager
 from backend.host_manager import HostManager
 from backend.agent_host_manager import AgentHostManager
@@ -2497,75 +2497,12 @@ async def cleanup_tasks(
         raise HTTPException(status_code=500, detail=f"清理任务失败: {str(e)}")
 
 
-# 目录统计缓存（30分钟）
-_stats_cache = {
-    "docker_build": {"data": None, "expires_at": 0},
-    "exports": {"data": None, "expires_at": 0},
-}
-_CACHE_TTL = 30 * 60  # 30分钟（秒）
-
-
 @router.get("/docker-build/stats")
 async def get_docker_build_stats(request: Request):
     """获取 docker_build 目录的统计信息（容量、目录数量等）"""
     try:
-        # 检查缓存
-        current_time = time.time()
-        cache_entry = _stats_cache["docker_build"]
-        if cache_entry["data"] is not None and current_time < cache_entry["expires_at"]:
-            return cache_entry["data"]
-
-        if not os.path.exists(BUILD_DIR):
-            result = {
-                "success": True,
-                "total_size_mb": 0,
-                "dir_count": 0,
-                "exists": False,
-            }
-            # 更新缓存
-            _stats_cache["docker_build"] = {
-                "data": result,
-                "expires_at": current_time + _CACHE_TTL,
-            }
-            return result
-
-        total_size = 0
-        dir_count = 0
-
-        # 遍历构建目录
-        for item in os.listdir(BUILD_DIR):
-            item_path = os.path.join(BUILD_DIR, item)
-            if not os.path.isdir(item_path):
-                continue
-
-            # 跳过 tasks 目录（任务元数据目录）
-            if item == "tasks":
-                continue
-
-            try:
-                # 计算目录大小
-                dir_size = sum(
-                    os.path.getsize(os.path.join(dirpath, filename))
-                    for dirpath, dirnames, filenames in os.walk(item_path)
-                    for filename in filenames
-                )
-                total_size += dir_size
-                dir_count += 1
-            except Exception as e:
-                print(f"⚠️ 计算目录大小失败 ({item_path}): {e}")
-
-        result = {
-            "success": True,
-            "total_size_mb": round(total_size / 1024 / 1024, 2),
-            "dir_count": dir_count,
-            "exists": True,
-        }
-        # 更新缓存
-        _stats_cache["docker_build"] = {
-            "data": result,
-            "expires_at": current_time + _CACHE_TTL,
-        }
-        return result
+        cache_manager = StatsCacheManager(BUILD_DIR)
+        return cache_manager.get_build_dir_stats()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取构建目录统计失败: {str(e)}")
 
@@ -2574,56 +2511,8 @@ async def get_docker_build_stats(request: Request):
 async def get_exports_stats(request: Request):
     """获取 exports 目录的统计信息（容量、文件数量等）"""
     try:
-        # 检查缓存
-        current_time = time.time()
-        cache_entry = _stats_cache["exports"]
-        if cache_entry["data"] is not None and current_time < cache_entry["expires_at"]:
-            return cache_entry["data"]
-
-        if not os.path.exists(EXPORT_DIR):
-            result = {
-                "success": True,
-                "total_size_mb": 0,
-                "file_count": 0,
-                "exists": False,
-            }
-            # 更新缓存
-            _stats_cache["exports"] = {
-                "data": result,
-                "expires_at": current_time + _CACHE_TTL,
-            }
-            return result
-
-        total_size = 0
-        file_count = 0
-
-        # 遍历导出目录（包括所有子目录）
-        for root, dirs, files in os.walk(EXPORT_DIR):
-            # 跳过 tasks.json 元数据文件，但统计 tasks 子目录下的实际导出文件
-            for filename in files:
-                # 跳过 tasks.json 元数据文件
-                if filename == "tasks.json":
-                    continue
-                file_path = os.path.join(root, filename)
-                try:
-                    file_size = os.path.getsize(file_path)
-                    total_size += file_size
-                    file_count += 1
-                except Exception as e:
-                    print(f"⚠️ 计算文件大小失败 ({file_path}): {e}")
-
-        result = {
-            "success": True,
-            "total_size_mb": round(total_size / 1024 / 1024, 2),
-            "file_count": file_count,
-            "exists": True,
-        }
-        # 更新缓存
-        _stats_cache["exports"] = {
-            "data": result,
-            "expires_at": current_time + _CACHE_TTL,
-        }
-        return result
+        cache_manager = StatsCacheManager(EXPORT_DIR)
+        return cache_manager.get_export_dir_stats()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取导出目录统计失败: {str(e)}")
 
