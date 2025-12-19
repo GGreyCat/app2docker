@@ -4610,36 +4610,50 @@ class BuildTaskManager:
             if not task:
                 return {}
 
-            # 如果是部署任务且有config_id，关联查询DeployConfig
+            # 如果是部署任务，关联查询DeployConfig
             if task.task_type == "deploy":
                 task_config = task.task_config or {}
+                # 可能是配置任务（有config_id）或执行任务（有source_config_id）
                 config_id = task_config.get("config_id")
-                if config_id:
+                source_config_id = task_config.get("source_config_id")
+
+                # 确定要查询的config_id
+                target_config_id = config_id or source_config_id
+
+                if target_config_id:
                     deploy_config = (
                         db.query(DeployConfig)
-                        .filter(DeployConfig.config_id == config_id)
+                        .filter(DeployConfig.config_id == target_config_id)
                         .first()
                     )
                     if deploy_config:
-                        # 用DeployConfig的数据覆盖
-                        task_config["config_content"] = deploy_config.config_content
-                        task_config["config"] = deploy_config.config_json
-                        task_config["webhook_token"] = deploy_config.webhook_token
-                        task_config["webhook_secret"] = deploy_config.webhook_secret
-                        task_config["webhook_branch_strategy"] = (
-                            deploy_config.webhook_branch_strategy
-                        )
-                        task_config["webhook_allowed_branches"] = (
-                            deploy_config.webhook_allowed_branches
-                        )
-                        task_config["execution_count"] = (
-                            deploy_config.execution_count or 0
-                        )
-                        task_config["last_executed_at"] = (
-                            deploy_config.last_executed_at.isoformat()
-                            if deploy_config.last_executed_at
-                            else None
-                        )
+                        # 用DeployConfig的数据覆盖/增强task_config
+                        if not task_config.get("config_content"):
+                            task_config["config_content"] = deploy_config.config_content
+                        if not task_config.get("config"):
+                            task_config["config"] = deploy_config.config_json
+                        # 对于执行任务，不覆盖这些字段，只添加配置信息
+                        if not config_id:  # 如果是执行任务，添加配置引用信息
+                            task_config["config_id"] = deploy_config.config_id
+                            task_config["config_content"] = deploy_config.config_content
+                            task_config["config"] = deploy_config.config_json
+                        else:  # 如果是配置任务，覆盖这些字段
+                            task_config["webhook_token"] = deploy_config.webhook_token
+                            task_config["webhook_secret"] = deploy_config.webhook_secret
+                            task_config["webhook_branch_strategy"] = (
+                                deploy_config.webhook_branch_strategy
+                            )
+                            task_config["webhook_allowed_branches"] = (
+                                deploy_config.webhook_allowed_branches
+                            )
+                            task_config["execution_count"] = (
+                                deploy_config.execution_count or 0
+                            )
+                            task_config["last_executed_at"] = (
+                                deploy_config.last_executed_at.isoformat()
+                                if deploy_config.last_executed_at
+                                else None
+                            )
 
             # 获取日志（单个任务查询时加载日志）
             logs = (
@@ -5106,16 +5120,21 @@ class BuildTaskManager:
             if not task:
                 return False
 
-            # 如果是部署执行任务，不能删除（通过delete_deploy_task删除配置）
+            # 如果是部署执行任务，必须先停止才能删除
             if task.task_type == "deploy":
                 task_config = task.task_config or {}
                 if task_config.get("source_config_id"):
-                    # 这是执行任务，不能单独删除
+                    # 这是执行任务，必须处于停止状态才能删除
+                    if task.status != "stopped":
+                        return False
+                else:
+                    # 配置任务，按普通任务规则处理（停止/完成/失败都可以删除）
+                    if task.status not in ("stopped", "completed", "failed"):
+                        return False
+            else:
+                # 其他类型的任务，停止/完成/失败都可以删除
+                if task.status not in ("stopped", "completed", "failed"):
                     return False
-
-            # 只有停止、完成或失败的任务才能删除
-            if task.status not in ("stopped", "completed", "failed"):
-                return False
 
             # 获取构建上下文路径
             build_context = None
