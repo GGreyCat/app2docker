@@ -379,7 +379,7 @@
         </div>
 
         <div
-          v-else-if="filteredContainers.length === 0"
+          v-else-if="containers.length === 0"
           class="text-center text-muted py-4"
         >
           <i class="fas fa-cube"></i>
@@ -403,7 +403,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="c in paginatedContainers" :key="c.id">
+              <tr v-for="c in containers" :key="c.id">
                 <td>
                   <code class="small">{{ c.name }}</code>
                 </td>
@@ -605,7 +605,7 @@
         </div>
 
         <div
-          v-else-if="filteredImages.length === 0"
+          v-else-if="images.length === 0"
           class="text-center text-muted py-4"
         >
           <i class="fas fa-box-open"></i>
@@ -625,7 +625,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="img in paginatedImages" :key="img.id + img.tag">
+              <tr v-for="img in images" :key="img.id + img.tag">
                 <td>
                   <code class="small text-primary">{{
                     img.repository || "&lt;none&gt;"
@@ -780,7 +780,6 @@ async function forceRefreshDockerInfo() {
 }
 
 // === 容器管理 ===
-const allContainers = ref([]);
 const containers = ref([]);
 const loadingContainers = ref(false);
 const containerLastSync = ref(null);
@@ -788,30 +787,8 @@ const containerPage = ref(1);
 const containerPageSize = ref(10);
 const containerTotal = ref(0);
 const containerTotalPages = ref(0);
-const containerCacheTimeout = 5 * 60 * 1000;
 const containerSearch = ref("");
 const containerStatusFilter = ref("");
-
-const filteredContainers = computed(() => {
-  let result = allContainers.value;
-  if (containerSearch.value) {
-    const search = containerSearch.value.toLowerCase();
-    result = result.filter(
-      (c) =>
-        c.name.toLowerCase().includes(search) ||
-        c.image.toLowerCase().includes(search)
-    );
-  }
-  if (containerStatusFilter.value) {
-    result = result.filter((c) => c.state === containerStatusFilter.value);
-  }
-  return result;
-});
-
-const paginatedContainers = computed(() => {
-  const start = (containerPage.value - 1) * containerPageSize.value;
-  return filteredContainers.value.slice(start, start + containerPageSize.value);
-});
 
 // 容器可见页码列表
 const visibleContainerPages = computed(() => {
@@ -848,51 +825,46 @@ const visibleContainerPages = computed(() => {
 
 // 切换容器页码
 function changeContainerPage(page) {
-  const totalPages = Math.ceil(
-    filteredContainers.value.length / containerPageSize.value
-  );
-  if (page < 1 || page > totalPages || page === containerPage.value) return;
+  if (
+    page < 1 ||
+    page > containerTotalPages.value ||
+    page === containerPage.value
+  )
+    return;
   containerPage.value = page;
-  updateContainerPagination();
+  loadContainers();
 }
 
 function filterContainers() {
   containerPage.value = 1;
-  updateContainerPagination();
-}
-
-function updateContainerPagination() {
-  const filtered = filteredContainers.value;
-  containerTotal.value = filtered.length;
-  containerTotalPages.value = Math.ceil(
-    filtered.length / containerPageSize.value
-  );
+  loadContainers();
 }
 
 async function loadContainers(force = false) {
-  if (
-    !force &&
-    containerLastSync.value &&
-    Date.now() - new Date(containerLastSync.value).getTime() <
-      containerCacheTimeout
-  ) {
-    updateContainerPagination();
-    return;
-  }
   loadingContainers.value = true;
   try {
-    // 获取所有容器数据（由于需要支持前端过滤，先获取所有数据）
-    // 使用较大的 page_size 获取所有数据
-    const res = await axios.get("/api/docker/containers", {
-      params: { page: 1, page_size: 10000 },
-    });
-    allContainers.value = res.data.containers || [];
+    // 使用后台分页，传递搜索和状态过滤参数
+    const params = {
+      page: containerPage.value,
+      page_size: containerPageSize.value,
+    };
+    if (containerSearch.value) {
+      params.search = containerSearch.value;
+    }
+    if (containerStatusFilter.value) {
+      params.state = containerStatusFilter.value;
+    }
+
+    const res = await axios.get("/api/docker/containers", { params });
+    containers.value = res.data.containers || [];
+    containerTotal.value = res.data.total || 0;
+    containerTotalPages.value = res.data.total_pages || 0;
     containerLastSync.value = new Date().toISOString();
-    updateContainerPagination();
   } catch (error) {
     console.error("加载容器列表失败:", error);
-    allContainers.value = [];
-    updateContainerPagination();
+    containers.value = [];
+    containerTotal.value = 0;
+    containerTotalPages.value = 0;
   } finally {
     loadingContainers.value = false;
   }
@@ -950,7 +922,6 @@ async function pruneContainers() {
 }
 
 // === 镜像管理 ===
-const allImages = ref([]);
 const images = ref([]);
 const loadingImages = ref(false);
 const imageLastSync = ref(null);
@@ -958,32 +929,8 @@ const imagePage = ref(1);
 const imagePageSize = ref(10);
 const imageTotal = ref(0);
 const imageTotalPages = ref(0);
-const imageCacheTimeout = 5 * 60 * 1000;
 const imageSearch = ref("");
 const imageTagFilter = ref("");
-
-const filteredImages = computed(() => {
-  let result = allImages.value;
-  if (imageSearch.value) {
-    const search = imageSearch.value.toLowerCase();
-    result = result.filter(
-      (img) =>
-        (img.repository || "").toLowerCase().includes(search) ||
-        (img.tag || "").toLowerCase().includes(search)
-    );
-  }
-  if (imageTagFilter.value === "latest") {
-    result = result.filter((img) => img.tag === "latest");
-  } else if (imageTagFilter.value === "none") {
-    result = result.filter((img) => img.tag === "<none>" || !img.tag);
-  }
-  return result;
-});
-
-const paginatedImages = computed(() => {
-  const start = (imagePage.value - 1) * imagePageSize.value;
-  return filteredImages.value.slice(start, start + imagePageSize.value);
-});
 
 // 镜像可见页码列表
 const visibleImagePages = computed(() => {
@@ -1020,51 +967,42 @@ const visibleImagePages = computed(() => {
 
 // 切换镜像页码
 function changeImagePage(page) {
-  const totalPages = Math.ceil(
-    filteredImages.value.length / imagePageSize.value
-  );
-  if (page < 1 || page > totalPages || page === imagePage.value) return;
+  if (page < 1 || page > imageTotalPages.value || page === imagePage.value)
+    return;
   imagePage.value = page;
-  updateImagePagination();
+  loadImages();
 }
 
 function filterImages() {
   imagePage.value = 1;
-  updateImagePagination();
-}
-
-function updateImagePagination() {
-  const filtered = filteredImages.value;
-  imageTotal.value = filtered.length;
-  imageTotalPages.value = Math.ceil(filtered.length / imagePageSize.value);
+  loadImages();
 }
 
 async function loadImages(force = false) {
-  // 首次加载或强制刷新时不使用缓存
-  if (
-    !force &&
-    imageLastSync.value &&
-    Date.now() - new Date(imageLastSync.value).getTime() < imageCacheTimeout
-  ) {
-    updateImagePagination();
-    return;
-  }
   loadingImages.value = true;
   try {
-    // 获取所有镜像数据（由于需要支持前端过滤，先获取所有数据）
-    // 使用较大的 page_size 获取所有数据
-    const res = await axios.get("/api/docker/images", {
-      params: { page: 1, page_size: 10000 },
-    });
-    console.log("🖼️ 镜像列表响应:", res.data);
-    allImages.value = res.data.images || [];
+    // 使用后台分页，传递搜索和标签过滤参数
+    const params = {
+      page: imagePage.value,
+      page_size: imagePageSize.value,
+    };
+    if (imageSearch.value) {
+      params.search = imageSearch.value;
+    }
+    if (imageTagFilter.value) {
+      params.tag_filter = imageTagFilter.value;
+    }
+
+    const res = await axios.get("/api/docker/images", { params });
+    images.value = res.data.images || [];
+    imageTotal.value = res.data.total || 0;
+    imageTotalPages.value = res.data.total_pages || 0;
     imageLastSync.value = new Date().toISOString();
-    console.log(`✅ 已加载 ${allImages.value.length} 个镜像`);
-    updateImagePagination();
   } catch (error) {
     console.error("加载镜像列表失败:", error);
-    allImages.value = [];
-    updateImagePagination();
+    images.value = [];
+    imageTotal.value = 0;
+    imageTotalPages.value = 0;
   } finally {
     loadingImages.value = false;
   }

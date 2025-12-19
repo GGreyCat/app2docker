@@ -2245,7 +2245,7 @@ async def get_running_tasks():
 
         # 获取构建任务和部署任务（running 或 pending）
         build_manager = BuildTaskManager()
-        
+
         # 查询 running 状态的构建任务
         running_build_tasks = build_manager.list_tasks(status="running")
         for task in running_build_tasks:
@@ -2253,7 +2253,7 @@ async def get_running_tasks():
             if task.get("task_type") != "deploy":
                 task["task_category"] = "build"
                 all_running_tasks.append(task)
-        
+
         # 查询 pending 状态的构建任务
         pending_build_tasks = build_manager.list_tasks(status="pending")
         for task in pending_build_tasks:
@@ -2261,11 +2261,15 @@ async def get_running_tasks():
             if task.get("task_type") != "deploy":
                 task["task_category"] = "build"
                 # 避免重复添加
-                if not any(t.get("task_id") == task.get("task_id") for t in all_running_tasks):
+                if not any(
+                    t.get("task_id") == task.get("task_id") for t in all_running_tasks
+                ):
                     all_running_tasks.append(task)
-        
+
         # 查询部署任务（running 或 pending）
-        running_deploy_tasks = build_manager.list_tasks(status="running", task_type="deploy")
+        running_deploy_tasks = build_manager.list_tasks(
+            status="running", task_type="deploy"
+        )
         for task in running_deploy_tasks:
             task["task_category"] = "deploy"
             # 为部署任务添加显示名称
@@ -2292,12 +2296,16 @@ async def get_running_tasks():
             except Exception:
                 pass
             all_running_tasks.append(task)
-        
-        pending_deploy_tasks = build_manager.list_tasks(status="pending", task_type="deploy")
+
+        pending_deploy_tasks = build_manager.list_tasks(
+            status="pending", task_type="deploy"
+        )
         for task in pending_deploy_tasks:
             task["task_category"] = "deploy"
             # 避免重复添加
-            if not any(t.get("task_id") == task.get("task_id") for t in all_running_tasks):
+            if not any(
+                t.get("task_id") == task.get("task_id") for t in all_running_tasks
+            ):
                 # 为部署任务添加显示名称
                 try:
                     task_config = task.get("task_config", {})
@@ -2329,12 +2337,14 @@ async def get_running_tasks():
         for task in running_export_tasks:
             task["task_category"] = "export"
             all_running_tasks.append(task)
-        
+
         pending_export_tasks = export_manager.list_tasks(status="pending")
         for task in pending_export_tasks:
             task["task_category"] = "export"
             # 避免重复添加
-            if not any(t.get("task_id") == task.get("task_id") for t in all_running_tasks):
+            if not any(
+                t.get("task_id") == task.get("task_id") for t in all_running_tasks
+            ):
                 all_running_tasks.append(task)
 
         # 只返回必要的字段以减少数据传输量
@@ -2360,6 +2370,7 @@ async def get_running_tasks():
         return JSONResponse({"tasks": result_tasks})
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取运行中任务列表失败: {str(e)}")
 
@@ -4012,17 +4023,20 @@ async def refresh_docker_info(request: Request):
 
 @router.get("/docker/images")
 async def get_docker_images(
-    page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=1000)
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=1000),
+    search: Optional[str] = Query(None, description="搜索镜像名称或标签"),
+    tag_filter: Optional[str] = Query(None, description="过滤标签: latest, none"),
 ):
-    """获取 Docker 镜像列表（支持分页）"""
+    """获取 Docker 镜像列表（支持后台分页和过滤）"""
     try:
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
 
         if not DOCKER_AVAILABLE or not docker_builder:
-            return JSONResponse({"images": [], "total": 0})
+            return JSONResponse({"images": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0})
 
         if not hasattr(docker_builder, "client") or not docker_builder.client:
-            return JSONResponse({"images": [], "total": 0})
+            return JSONResponse({"images": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0})
 
         # 获取镜像列表
         images_data = []
@@ -4031,11 +4045,28 @@ async def get_docker_images(
             for img in images:
                 tags = img.tags
                 if not tags:
+                    repository = "<none>"
+                    tag_name = "<none>"
+                    
+                    # 应用搜索过滤
+                    if search:
+                        search_lower = search.lower()
+                        if not (search_lower in repository.lower() or search_lower in tag_name.lower()):
+                            continue
+                    
+                    # 应用标签过滤
+                    if tag_filter == "latest":
+                        continue  # <none> 标签不匹配 latest
+                    elif tag_filter == "none":
+                        pass  # <none> 标签匹配 none
+                    elif tag_filter:
+                        continue  # 其他过滤条件不匹配
+                    
                     images_data.append(
                         {
                             "id": img.id,
-                            "repository": "<none>",
-                            "tag": "<none>",
+                            "repository": repository,
+                            "tag": tag_name,
                             "size": img.attrs.get("Size", 0),
                             "created": img.attrs.get("Created", ""),
                         }
@@ -4046,6 +4077,23 @@ async def get_docker_images(
                             repo, tag_name = tag.rsplit(":", 1)
                         else:
                             repo, tag_name = tag, "latest"
+                        
+                        # 应用搜索过滤
+                        if search:
+                            search_lower = search.lower()
+                            if not (search_lower in repo.lower() or search_lower in tag_name.lower()):
+                                continue
+                        
+                        # 应用标签过滤
+                        if tag_filter == "latest":
+                            if tag_name != "latest":
+                                continue
+                        elif tag_filter == "none":
+                            if tag_name != "<none>" and tag_name:
+                                continue
+                        elif tag_filter:
+                            continue  # 其他过滤条件不匹配
+                        
                         images_data.append(
                             {
                                 "id": img.id,
@@ -4058,10 +4106,23 @@ async def get_docker_images(
         except Exception as e:
             print(f"⚠️ 获取镜像列表失败: {e}")
 
+        # 按创建时间倒序排列
+        images_data.sort(key=lambda x: x.get("created", ""), reverse=True)
+
+        # 后台分页
         total = len(images_data)
         start = (page - 1) * page_size
         end = start + page_size
-        return JSONResponse({"images": images_data[start:end], "total": total})
+        paginated_images = images_data[start:end]
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+
+        return JSONResponse({
+            "images": paginated_images,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        })
     except Exception as e:
         import traceback
 
@@ -4123,17 +4184,38 @@ async def prune_docker_images(http_request: Request):
 # === 容器管理 ===
 @router.get("/docker/containers")
 async def get_docker_containers(
-    page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=1000)
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=1000),
+    search: Optional[str] = Query(None, description="搜索容器名称或镜像"),
+    state: Optional[str] = Query(
+        None, description="过滤容器状态: running, exited, paused"
+    ),
 ):
-    """获取容器列表（支持分页）"""
+    """获取容器列表（支持后台分页和过滤）"""
     try:
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
 
         if not DOCKER_AVAILABLE or not docker_builder:
-            return JSONResponse({"containers": [], "total": 0})
+            return JSONResponse(
+                {
+                    "containers": [],
+                    "total": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": 0,
+                }
+            )
 
         if not hasattr(docker_builder, "client") or not docker_builder.client:
-            return JSONResponse({"containers": [], "total": 0})
+            return JSONResponse(
+                {
+                    "containers": [],
+                    "total": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": 0,
+                }
+            )
 
         containers_data = []
         try:
@@ -4158,13 +4240,30 @@ async def get_docker_containers(
                 except:
                     pass
 
+                container_name = c.name
+                container_image = c.image.tags[0] if c.image.tags else c.image.id[:12]
+                container_state = c.attrs.get("State", {}).get("Status", "unknown")
+
+                # 应用搜索过滤
+                if search:
+                    search_lower = search.lower()
+                    if not (
+                        search_lower in container_name.lower()
+                        or search_lower in container_image.lower()
+                    ):
+                        continue
+
+                # 应用状态过滤
+                if state and container_state != state:
+                    continue
+
                 containers_data.append(
                     {
                         "id": c.id,
-                        "name": c.name,
-                        "image": c.image.tags[0] if c.image.tags else c.image.id[:12],
+                        "name": container_name,
+                        "image": container_image,
                         "status": c.status,
-                        "state": c.attrs.get("State", {}).get("Status", "unknown"),
+                        "state": container_state,
                         "created": c.attrs.get("Created", ""),
                         "ports": ports_str,
                     }
@@ -4172,10 +4271,25 @@ async def get_docker_containers(
         except Exception as e:
             print(f"⚠️ 获取容器列表失败: {e}")
 
+        # 按创建时间倒序排列
+        containers_data.sort(key=lambda x: x.get("created", ""), reverse=True)
+
+        # 后台分页
         total = len(containers_data)
         start = (page - 1) * page_size
         end = start + page_size
-        return JSONResponse({"containers": containers_data[start:end], "total": total})
+        paginated_containers = containers_data[start:end]
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+
+        return JSONResponse(
+            {
+                "containers": paginated_containers,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取容器列表失败: {str(e)}")
 
