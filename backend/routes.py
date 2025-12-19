@@ -952,15 +952,62 @@ async def get_current_user_permissions(request: Request):
 
 @router.get("/operation-logs")
 async def get_operation_logs(
-    limit: int = Query(100, description="返回日志数量"),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(10, ge=1, le=1000, description="每页数量"),
     username: Optional[str] = Query(None, description="过滤用户名"),
     operation: Optional[str] = Query(None, description="过滤操作类型"),
 ):
-    """获取操作日志"""
+    """获取操作日志（支持分页）"""
     try:
-        logger = OperationLogger()
-        logs = logger.get_logs(limit=limit, username=username, operation=operation)
-        return JSONResponse({"logs": logs, "total": len(logs)})
+        from backend.database import get_db_session
+        from backend.models import OperationLog
+
+        db = get_db_session()
+        try:
+            # 构建查询
+            query = db.query(OperationLog)
+
+            if username:
+                query = query.filter(OperationLog.username == username)
+            if operation:
+                query = query.filter(OperationLog.action == operation)
+
+            # 获取总数
+            total = query.count()
+
+            # 计算分页
+            offset = (page - 1) * page_size
+            logs_query = (
+                query.order_by(OperationLog.timestamp.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            logs = logs_query.all()
+
+            # 转换为字典列表
+            logs_list = [
+                {
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                    "username": log.username,
+                    "operation": log.action,
+                    "details": log.details or {},
+                }
+                for log in logs
+            ]
+
+            total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+
+            return JSONResponse(
+                {
+                    "logs": logs_list,
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": total_pages,
+                }
+            )
+        finally:
+            db.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取操作日志失败: {str(e)}")
 
@@ -2065,7 +2112,7 @@ async def get_all_tasks(
         None, description="任务类型过滤: build, build_from_source, export, deploy"
     ),
     page: int = Query(1, ge=1, description="页码，从1开始"),
-    page_size: int = Query(20, ge=1, le=1000, description="每页数量"),
+    page_size: int = Query(10, ge=1, le=1000, description="每页数量"),
 ):
     """获取所有任务（构建任务 + 导出任务 + 部署任务），支持后台分页"""
     try:
@@ -2188,6 +2235,133 @@ async def get_all_tasks(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取任务列表失败: {str(e)}")
+
+
+@router.get("/tasks/running")
+async def get_running_tasks():
+    """获取所有运行中的任务（running 或 pending 状态）"""
+    try:
+        all_running_tasks = []
+
+        # 获取构建任务和部署任务（running 或 pending）
+        build_manager = BuildTaskManager()
+        
+        # 查询 running 状态的构建任务
+        running_build_tasks = build_manager.list_tasks(status="running")
+        for task in running_build_tasks:
+            # 排除部署任务
+            if task.get("task_type") != "deploy":
+                task["task_category"] = "build"
+                all_running_tasks.append(task)
+        
+        # 查询 pending 状态的构建任务
+        pending_build_tasks = build_manager.list_tasks(status="pending")
+        for task in pending_build_tasks:
+            # 排除部署任务
+            if task.get("task_type") != "deploy":
+                task["task_category"] = "build"
+                # 避免重复添加
+                if not any(t.get("task_id") == task.get("task_id") for t in all_running_tasks):
+                    all_running_tasks.append(task)
+        
+        # 查询部署任务（running 或 pending）
+        running_deploy_tasks = build_manager.list_tasks(status="running", task_type="deploy")
+        for task in running_deploy_tasks:
+            task["task_category"] = "deploy"
+            # 为部署任务添加显示名称
+            try:
+                task_config = task.get("task_config", {})
+                if isinstance(task_config, str):
+                    try:
+                        task_config = json.loads(task_config)
+                    except (json.JSONDecodeError, TypeError):
+                        task_config = {}
+                if isinstance(task_config, dict):
+                    config = task_config.get("config", {})
+                    if isinstance(config, str):
+                        try:
+                            config = json.loads(config)
+                        except (json.JSONDecodeError, TypeError):
+                            config = {}
+                    if isinstance(config, dict):
+                        app = config.get("app", {})
+                        if isinstance(app, dict):
+                            app_name = app.get("name")
+                            if app_name:
+                                task["image"] = app_name
+            except Exception:
+                pass
+            all_running_tasks.append(task)
+        
+        pending_deploy_tasks = build_manager.list_tasks(status="pending", task_type="deploy")
+        for task in pending_deploy_tasks:
+            task["task_category"] = "deploy"
+            # 避免重复添加
+            if not any(t.get("task_id") == task.get("task_id") for t in all_running_tasks):
+                # 为部署任务添加显示名称
+                try:
+                    task_config = task.get("task_config", {})
+                    if isinstance(task_config, str):
+                        try:
+                            task_config = json.loads(task_config)
+                        except (json.JSONDecodeError, TypeError):
+                            task_config = {}
+                    if isinstance(task_config, dict):
+                        config = task_config.get("config", {})
+                        if isinstance(config, str):
+                            try:
+                                config = json.loads(config)
+                            except (json.JSONDecodeError, TypeError):
+                                config = {}
+                        if isinstance(config, dict):
+                            app = config.get("app", {})
+                            if isinstance(app, dict):
+                                app_name = app.get("name")
+                                if app_name:
+                                    task["image"] = app_name
+                except Exception:
+                    pass
+                all_running_tasks.append(task)
+
+        # 获取导出任务（running 或 pending）
+        export_manager = ExportTaskManager()
+        running_export_tasks = export_manager.list_tasks(status="running")
+        for task in running_export_tasks:
+            task["task_category"] = "export"
+            all_running_tasks.append(task)
+        
+        pending_export_tasks = export_manager.list_tasks(status="pending")
+        for task in pending_export_tasks:
+            task["task_category"] = "export"
+            # 避免重复添加
+            if not any(t.get("task_id") == task.get("task_id") for t in all_running_tasks):
+                all_running_tasks.append(task)
+
+        # 只返回必要的字段以减少数据传输量
+        result_tasks = []
+        for task in all_running_tasks:
+            result_task = {
+                "task_id": task.get("task_id"),
+                "status": task.get("status"),
+                "task_category": task.get("task_category"),
+                "completed_at": task.get("completed_at"),
+                "error": task.get("error"),
+                "file_size": task.get("file_size"),
+                "created_at": task.get("created_at"),
+                "started_at": task.get("started_at"),
+            }
+            # 保留一些可能有用的字段
+            if task.get("image"):
+                result_task["image"] = task.get("image")
+            if task.get("tag"):
+                result_task["tag"] = task.get("tag")
+            result_tasks.append(result_task)
+
+        return JSONResponse({"tasks": result_tasks})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取运行中任务列表失败: {str(e)}")
 
 
 @router.get("/build-tasks/{task_id}")
@@ -3507,8 +3681,12 @@ async def get_template_params(
 
 
 @router.get("/templates")
-async def get_template(name: Optional[str] = Query(None)):
-    """获取模板详情或列表"""
+async def get_template(
+    name: Optional[str] = Query(None),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(10, ge=1, le=1000, description="每页数量"),
+):
+    """获取模板详情或列表（支持分页）"""
     try:
         if name:
             # 获取单个模板内容
@@ -3532,7 +3710,7 @@ async def get_template(name: Optional[str] = Query(None)):
                 }
             )
         else:
-            # 返回模板列表（前端兼容格式）
+            # 返回模板列表（支持分页）
             templates = get_all_templates()
             details = []
 
@@ -3557,11 +3735,21 @@ async def get_template(name: Optional[str] = Query(None)):
 
             details.sort(key=lambda item: natural_sort_key(item["name"]))
 
+            # 后端分页
+            total = len(details)
+            start = (page - 1) * page_size
+            end = start + page_size
+            paginated_items = details[start:end]
+            total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+
             # 返回前端期望的格式
             return JSONResponse(
                 {
-                    "items": details,
-                    "total": len(details),
+                    "items": paginated_items,
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": total_pages,
                     "builtin": sum(1 for d in details if d["type"] == "builtin"),
                     "user": sum(1 for d in details if d["type"] == "user"),
                 }
@@ -4528,9 +4716,8 @@ async def get_pipeline(pipeline_id: str):
 async def get_pipeline_tasks(
     pipeline_id: str,
     status: Optional[str] = Query(None, description="过滤任务状态"),
-    # 默认每页返回 10 条历史记录
-    limit: Optional[int] = Query(10, description="每页任务数量", ge=1, le=200),
-    offset: Optional[int] = Query(0, description="偏移量（分页）", ge=0),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(10, ge=1, le=200, description="每页数量"),
     trigger_source: Optional[str] = Query(
         None, description="过滤触发来源: webhook, manual, cron"
     ),
@@ -4669,15 +4856,18 @@ async def get_pipeline_tasks(
         total = len(tasks_with_details)
 
         # 应用分页
-        paginated_tasks = tasks_with_details[offset : offset + limit]
+        offset = (page - 1) * page_size
+        paginated_tasks = tasks_with_details[offset : offset + page_size]
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
 
         return JSONResponse(
             {
                 "tasks": paginated_tasks,
                 "total": total,
-                "limit": limit,
-                "offset": offset,
-                "has_more": offset + limit < total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "has_more": offset + page_size < total,
                 "pipeline_id": pipeline_id,
                 "pipeline_name": pipeline.get("name"),
             }

@@ -6989,11 +6989,8 @@ async function loadHistory(page = null) {
       params.append("status", historyFilter.value.status);
     }
 
-    const offset =
-      (historyPagination.value.currentPage - 1) *
-      historyPagination.value.pageSize;
-    params.append("limit", historyPagination.value.pageSize.toString());
-    params.append("offset", offset.toString());
+    params.append("page", historyPagination.value.currentPage.toString());
+    params.append("page_size", historyPagination.value.pageSize.toString());
 
     const url = `/api/pipelines/${pipelineId}/tasks?${params.toString()}`;
     const res = await axios.get(url);
@@ -7004,6 +7001,10 @@ async function loadHistory(page = null) {
       // 更新分页信息
       historyPagination.value.total = res.data.total || 0;
       historyPagination.value.hasMore = res.data.has_more || false;
+      // 如果后端返回了 total_pages，可以使用它来更新分页显示
+      if (res.data.total_pages !== undefined) {
+        // total_pages 已由后端计算，前端可以直接使用
+      }
     } else if (Array.isArray(res.data)) {
       // 兼容旧格式：如果直接返回数组
       historyTasks.value = res.data;

@@ -8,8 +8,11 @@
         <div>
           <i class="fas fa-server"></i>
           <strong class="ms-1">Docker 服务信息</strong>
-          <small v-if="dockerInfo && dockerInfo.cached_at" class="ms-3 opacity-75">
-            <i class="fas fa-clock"></i> 
+          <small
+            v-if="dockerInfo && dockerInfo.cached_at"
+            class="ms-3 opacity-75"
+          >
+            <i class="fas fa-clock"></i>
             缓存时间: {{ formatTime(dockerInfo.cached_at) }}
             <span v-if="dockerInfo.cache_age_minutes" class="ms-1">
               ({{ dockerInfo.cache_age_minutes }}分钟前)
@@ -235,8 +238,9 @@
                 </li>
                 <li>
                   <strong>远程 Docker：</strong>
-                  通过 TCP 或 TLS 连接远程 Docker 服务器进行构建。
-                  TCP 模式（默认端口 2375）为明文传输，TLS 模式（默认端口 2376）为加密传输。
+                  通过 TCP 或 TLS 连接远程 Docker 服务器进行构建。 TCP
+                  模式（默认端口 2375）为明文传输，TLS 模式（默认端口
+                  2376）为加密传输。
                   支持完整的编译功能，适用于复杂项目构建和生产环境
                 </li>
               </ul>
@@ -471,14 +475,15 @@
           class="d-flex justify-content-between align-items-center p-2 border-top"
         >
           <div class="text-muted small">
-            显示第 {{ (containerPage - 1) * containerPageSize + 1 }} -
+            显示第
             {{
-              Math.min(
-                containerPage * containerPageSize,
-                filteredContainers.length
-              )
+              containerTotal > 0
+                ? (containerPage - 1) * containerPageSize + 1
+                : 0
             }}
-            条，共 {{ filteredContainers.length }} 条
+            -
+            {{ Math.min(containerPage * containerPageSize, containerTotal) }}
+            条，共 {{ containerTotal }} 条
           </div>
           <nav>
             <ul class="pagination pagination-sm mb-0">
@@ -658,11 +663,10 @@
           class="d-flex justify-content-between align-items-center p-2 border-top"
         >
           <div class="text-muted small">
-            显示第 {{ (imagePage - 1) * imagePageSize + 1 }} -
-            {{
-              Math.min(imagePage * imagePageSize, filteredImages.length)
-            }}
-            条，共 {{ filteredImages.length }} 条
+            显示第
+            {{ imageTotal > 0 ? (imagePage - 1) * imagePageSize + 1 : 0 }} -
+            {{ Math.min(imagePage * imagePageSize, imageTotal) }}
+            条，共 {{ imageTotal }} 条
           </div>
           <nav>
             <ul class="pagination pagination-sm mb-0">
@@ -728,7 +732,7 @@
 
 <script setup>
 import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 // === Tab 控制 ===
 const activeTab = ref("containers");
@@ -744,7 +748,7 @@ async function refreshDockerInfo(force = false) {
   try {
     // 使用新的缓存API，force参数控制是否强制刷新
     const res = await axios.get("/api/docker/info", {
-      params: { force_refresh: force }
+      params: { force_refresh: force },
     });
     dockerInfo.value = res.data;
     infoLastSync.value = dockerInfo.value.cached_at || new Date().toISOString();
@@ -763,7 +767,8 @@ async function forceRefreshDockerInfo() {
     const res = await axios.post("/api/docker/info/refresh");
     if (res.data.success && res.data.info) {
       dockerInfo.value = res.data.info;
-      infoLastSync.value = dockerInfo.value.cached_at || new Date().toISOString();
+      infoLastSync.value =
+        dockerInfo.value.cached_at || new Date().toISOString();
       alert("Docker信息已强制刷新");
     }
   } catch (error) {
@@ -780,8 +785,9 @@ const containers = ref([]);
 const loadingContainers = ref(false);
 const containerLastSync = ref(null);
 const containerPage = ref(1);
-const containerPageSize = 10;
+const containerPageSize = ref(10);
 const containerTotal = ref(0);
+const containerTotalPages = ref(0);
 const containerCacheTimeout = 5 * 60 * 1000;
 const containerSearch = ref("");
 const containerStatusFilter = ref("");
@@ -803,13 +809,9 @@ const filteredContainers = computed(() => {
 });
 
 const paginatedContainers = computed(() => {
-  const start = (containerPage.value - 1) * containerPageSize;
-  return filteredContainers.value.slice(start, start + containerPageSize);
+  const start = (containerPage.value - 1) * containerPageSize.value;
+  return filteredContainers.value.slice(start, start + containerPageSize.value);
 });
-
-const containerTotalPages = computed(() =>
-  Math.ceil(filteredContainers.value.length / containerPageSize)
-);
 
 // 容器可见页码列表
 const visibleContainerPages = computed(() => {
@@ -846,17 +848,25 @@ const visibleContainerPages = computed(() => {
 
 // 切换容器页码
 function changeContainerPage(page) {
-  if (
-    page < 1 ||
-    page > containerTotalPages.value ||
-    page === containerPage.value
-  )
-    return;
+  const totalPages = Math.ceil(
+    filteredContainers.value.length / containerPageSize.value
+  );
+  if (page < 1 || page > totalPages || page === containerPage.value) return;
   containerPage.value = page;
+  updateContainerPagination();
 }
 
 function filterContainers() {
   containerPage.value = 1;
+  updateContainerPagination();
+}
+
+function updateContainerPagination() {
+  const filtered = filteredContainers.value;
+  containerTotal.value = filtered.length;
+  containerTotalPages.value = Math.ceil(
+    filtered.length / containerPageSize.value
+  );
 }
 
 async function loadContainers(force = false) {
@@ -865,19 +875,24 @@ async function loadContainers(force = false) {
     containerLastSync.value &&
     Date.now() - new Date(containerLastSync.value).getTime() <
       containerCacheTimeout
-  )
+  ) {
+    updateContainerPagination();
     return;
+  }
   loadingContainers.value = true;
   try {
+    // 获取所有容器数据（由于需要支持前端过滤，先获取所有数据）
+    // 使用较大的 page_size 获取所有数据
     const res = await axios.get("/api/docker/containers", {
-      params: { page: 1, page_size: 1000 },
+      params: { page: 1, page_size: 10000 },
     });
     allContainers.value = res.data.containers || [];
-    containerTotal.value = res.data.total || allContainers.value.length;
     containerLastSync.value = new Date().toISOString();
+    updateContainerPagination();
   } catch (error) {
     console.error("加载容器列表失败:", error);
     allContainers.value = [];
+    updateContainerPagination();
   } finally {
     loadingContainers.value = false;
   }
@@ -940,8 +955,9 @@ const images = ref([]);
 const loadingImages = ref(false);
 const imageLastSync = ref(null);
 const imagePage = ref(1);
-const imagePageSize = 10;
+const imagePageSize = ref(10);
 const imageTotal = ref(0);
+const imageTotalPages = ref(0);
 const imageCacheTimeout = 5 * 60 * 1000;
 const imageSearch = ref("");
 const imageTagFilter = ref("");
@@ -965,13 +981,9 @@ const filteredImages = computed(() => {
 });
 
 const paginatedImages = computed(() => {
-  const start = (imagePage.value - 1) * imagePageSize;
-  return filteredImages.value.slice(start, start + imagePageSize);
+  const start = (imagePage.value - 1) * imagePageSize.value;
+  return filteredImages.value.slice(start, start + imagePageSize.value);
 });
-
-const imageTotalPages = computed(() =>
-  Math.ceil(filteredImages.value.length / imagePageSize)
-);
 
 // 镜像可见页码列表
 const visibleImagePages = computed(() => {
@@ -1008,13 +1020,23 @@ const visibleImagePages = computed(() => {
 
 // 切换镜像页码
 function changeImagePage(page) {
-  if (page < 1 || page > imageTotalPages.value || page === imagePage.value)
-    return;
+  const totalPages = Math.ceil(
+    filteredImages.value.length / imagePageSize.value
+  );
+  if (page < 1 || page > totalPages || page === imagePage.value) return;
   imagePage.value = page;
+  updateImagePagination();
 }
 
 function filterImages() {
   imagePage.value = 1;
+  updateImagePagination();
+}
+
+function updateImagePagination() {
+  const filtered = filteredImages.value;
+  imageTotal.value = filtered.length;
+  imageTotalPages.value = Math.ceil(filtered.length / imagePageSize.value);
 }
 
 async function loadImages(force = false) {
@@ -1023,22 +1045,26 @@ async function loadImages(force = false) {
     !force &&
     imageLastSync.value &&
     Date.now() - new Date(imageLastSync.value).getTime() < imageCacheTimeout
-  )
+  ) {
+    updateImagePagination();
     return;
+  }
   loadingImages.value = true;
   try {
+    // 获取所有镜像数据（由于需要支持前端过滤，先获取所有数据）
+    // 使用较大的 page_size 获取所有数据
     const res = await axios.get("/api/docker/images", {
-      params: { page: 1, page_size: 1000 },
+      params: { page: 1, page_size: 10000 },
     });
     console.log("🖼️ 镜像列表响应:", res.data);
     allImages.value = res.data.images || [];
-    imageTotal.value = res.data.total || allImages.value.length;
     imageLastSync.value = new Date().toISOString();
     console.log(`✅ 已加载 ${allImages.value.length} 个镜像`);
+    updateImagePagination();
   } catch (error) {
     console.error("加载镜像列表失败:", error);
     allImages.value = [];
-    imageTotal.value = 0;
+    updateImagePagination();
   } finally {
     loadingImages.value = false;
   }
@@ -1148,6 +1174,17 @@ function getCurrentBuildMode() {
     return remoteHost ? `远程 Docker (${remoteHost})` : "远程 Docker";
   }
 }
+
+// 监听过滤条件变化，更新分页信息
+watch([containerSearch, containerStatusFilter], () => {
+  containerPage.value = 1;
+  updateContainerPagination();
+});
+
+watch([imageSearch, imageTagFilter], () => {
+  imagePage.value = 1;
+  updateImagePagination();
+});
 
 onMounted(() => {
   refreshDockerInfo();
