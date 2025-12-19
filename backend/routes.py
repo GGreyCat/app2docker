@@ -8285,13 +8285,20 @@ async def list_deploy_tasks(request: Request):
 
 @router.get("/deploy-tasks/{task_id}")
 async def get_deploy_task(request: Request, task_id: str):
-    """获取部署任务详情"""
+    """获取部署任务详情（支持配置任务和执行任务）"""
     try:
         username = get_current_username(request)
         build_manager = BuildTaskManager()
 
         task = build_manager.get_task(task_id)
-        if not task or task.get("task_type") != "deploy":
+        
+        # 调试信息
+        if not task:
+            print(f"🔍 [get_deploy_task] 未找到任务: task_id={task_id}")
+            raise HTTPException(status_code=404, detail="部署任务不存在")
+        
+        if task.get("task_type") != "deploy":
+            print(f"🔍 [get_deploy_task] 任务类型不匹配: task_id={task_id}, task_type={task.get('task_type')}")
             raise HTTPException(status_code=404, detail="部署任务不存在")
 
         task_config = task.get("task_config", {})

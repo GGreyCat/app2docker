@@ -4608,11 +4608,16 @@ class BuildTaskManager:
             # 如果不是config_id，尝试作为task_id查询Task
             task = db.query(Task).filter(Task.task_id == task_id).first()
             if not task:
+                # 调试：检查是否是执行任务的task_id
+                print(f"🔍 [get_task] 未找到task_id={task_id}的任务记录")
                 return {}
+
+            # 先转换为字典（获取基础任务信息）
+            result = self._to_dict(task)
 
             # 如果是部署任务，关联查询DeployConfig
             if task.task_type == "deploy":
-                task_config = task.task_config or {}
+                task_config = result.get("task_config", {}) or {}
                 # 可能是配置任务（有config_id）或执行任务（有source_config_id）
                 config_id = task_config.get("config_id")
                 source_config_id = task_config.get("source_config_id")
@@ -4655,6 +4660,9 @@ class BuildTaskManager:
                                 else None
                             )
 
+                # 更新result中的task_config
+                result["task_config"] = task_config
+
             # 获取日志（单个任务查询时加载日志）
             logs = (
                 db.query(TaskLog)
@@ -4663,9 +4671,13 @@ class BuildTaskManager:
                 .all()
             )
             log_messages = [log.log_message for log in logs]
-
-            result = self._to_dict(task)
             result["logs"] = log_messages  # 覆盖 _to_dict 中的空日志列表
+
+            # 调试：确认返回的任务类型
+            print(
+                f"🔍 [get_task] 查询到任务: task_id={task_id}, task_type={result.get('task_type')}, status={result.get('status')}"
+            )
+
             return result
         finally:
             db.close()
