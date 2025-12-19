@@ -4673,18 +4673,31 @@ class BuildTaskManager:
                 )
 
                 result = []
+
+                # 一次性查询所有部署任务（包括配置任务和执行任务）
+                all_deploy_tasks = (
+                    db.query(Task).filter(Task.task_type == "deploy").all()
+                )
+
+                # 分离配置任务和执行任务
+                config_task_map = {}  # config_id -> Task
+                execution_tasks = []
+
+                for t in all_deploy_tasks:
+                    task_config = t.task_config or {}
+                    config_id = task_config.get("config_id")
+                    source_config_id = task_config.get("source_config_id")
+
+                    if config_id:
+                        # 这是配置任务
+                        config_task_map[config_id] = t
+                    elif source_config_id:
+                        # 这是执行任务
+                        execution_tasks.append(t)
+
+                # 处理配置任务
                 for config in deploy_configs:
-                    # 找到对应的Task记录（配置任务）
-                    # 在Python层面过滤，因为SQLite的JSON查询支持有限
-                    config_tasks = (
-                        db.query(Task).filter(Task.task_type == "deploy").all()
-                    )
-                    config_task = None
-                    for t in config_tasks:
-                        task_config = t.task_config or {}
-                        if task_config.get("config_id") == config.config_id:
-                            config_task = t
-                            break
+                    config_task = config_task_map.get(config.config_id)
 
                     if config_task:
                         # 构建任务字典（保持兼容格式）
@@ -4745,9 +4758,34 @@ class BuildTaskManager:
                             }
                         )
 
+                # 处理执行任务
+                for exec_task in execution_tasks:
+                    exec_task_config = exec_task.task_config or {}
+                    source_config_id = exec_task_config.get("source_config_id")
+                    if source_config_id:
+                        task_dict = self._to_dict(exec_task)
+                        # 关联查询DeployConfig获取配置信息
+                        deploy_config = (
+                            db.query(DeployConfig)
+                            .filter(DeployConfig.config_id == source_config_id)
+                            .first()
+                        )
+                        if deploy_config:
+                            # 用DeployConfig的信息增强task_config
+                            task_dict["task_config"][
+                                "config_content"
+                            ] = deploy_config.config_content
+                            task_dict["task_config"][
+                                "config"
+                            ] = deploy_config.config_json
+                        result.append(task_dict)
+
                 # 如果指定了status，过滤结果
                 if status:
                     result = [t for t in result if t.get("status") == status]
+
+                # 按创建时间倒序排列
+                result.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
                 return result
 
