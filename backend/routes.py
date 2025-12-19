@@ -1089,10 +1089,22 @@ async def save_git_config_route(
 # === 配置相关 ===
 @router.get("/get-config")
 async def get_config():
-    """获取配置"""
+    """获取配置（不返回密码）"""
     try:
         config = load_config()
-        docker_config = config.get("docker", {})
+        docker_config = config.get("docker", {}).copy()
+
+        # 移除 registries 中的密码字段
+        if "registries" in docker_config:
+            safe_registries = []
+            for registry in docker_config["registries"]:
+                safe_registry = registry.copy()
+                safe_registry["has_password"] = bool(registry.get("password"))
+                if "password" in safe_registry:
+                    del safe_registry["password"]
+                safe_registries.append(safe_registry)
+            docker_config["registries"] = safe_registries
+
         return JSONResponse({"docker": docker_config})
     except HTTPException:
         raise
@@ -1132,6 +1144,43 @@ async def save_registries(request: SaveRegistriesRequest, http_request: Request)
         has_active = any(reg.get("active", False) for reg in registries_data)
         if not has_active and registries_data:
             registries_data[0]["active"] = True
+
+        # 获取现有配置以处理密码占位符
+        from backend.config import get_all_registries as get_all_registries_safe
+
+        existing_registries = get_all_registries_safe()
+        existing_registry_map = {r.get("name"): r for r in existing_registries}
+
+        # 加载完整配置以获取现有密码
+        config_full = load_config()
+        existing_registries_full = config_full.get("docker", {}).get("registries", [])
+        existing_registry_full_map = {
+            r.get("name"): r for r in existing_registries_full
+        }
+
+        for registry in registries_data:
+            registry_name = registry.get("name")
+            password = registry.get("password", "")
+
+            # 如果密码是占位符或空，使用现有密码
+            if (
+                password in ["******", "***", ""]
+                and registry_name in existing_registry_full_map
+            ):
+                existing_password = existing_registry_full_map[registry_name].get(
+                    "password"
+                )
+                if existing_password:
+                    registry["password"] = existing_password
+                else:
+                    registry["password"] = ""
+            elif password and password not in ["******", "***"]:
+                # 新密码，需要加密
+                from backend.crypto_utils import encrypt_password
+
+                registry["password"] = encrypt_password(password)
+            else:
+                registry["password"] = ""
 
         # 更新配置（只更新 docker.registries，不影响其他配置如 server、git、users 等）
         if "docker" not in config:
@@ -1216,8 +1265,17 @@ async def save_registries(request: SaveRegistriesRequest, http_request: Request)
             print(f"⚠️ 记录操作日志失败: {log_error}")
             # 不抛出异常，因为主要操作已成功
 
+        # 返回时移除密码字段
+        safe_registries_data = []
+        for reg in registries_data:
+            safe_reg = reg.copy()
+            safe_reg["has_password"] = bool(reg.get("password"))
+            if "password" in safe_reg:
+                del safe_reg["password"]
+            safe_registries_data.append(safe_reg)
+
         return JSONResponse(
-            {"message": "仓库配置保存成功", "registries": registries_data}
+            {"message": "仓库配置保存成功", "registries": safe_registries_data}
         )
     except HTTPException:
         raise
@@ -1234,7 +1292,7 @@ class TestRegistryRequest(BaseModel):
     name: str
     registry: str
     username: str
-    password: str
+    password: Optional[str] = None  # 可选，如果不提供则从配置中获取
 
 
 @router.post("/registries/test")
@@ -1245,10 +1303,23 @@ async def test_registry_login(request: TestRegistryRequest, http_request: Reques
     - 需要系统 token 认证才能使用此功能（安全考虑）
     - 但测试的是仓库的登录信息（request.username 和 request.password），与系统用户无关
     - 如果系统 token 无效，返回 400 而不是 401，避免前端退出登录
+    - 如果未提供密码，则从配置中获取解密后的密码
     """
     try:
         # 验证系统 token（需要系统认证才能使用此功能）
         username = require_auth(http_request)
+
+        # 如果未提供密码，从配置中获取
+        test_password = request.password
+        if not test_password:
+            from backend.config import get_registry_password
+
+            test_password = get_registry_password(request.name)
+            if not test_password:
+                return JSONResponse(
+                    {"success": False, "message": "仓库密码未配置，请先配置密码"},
+                    status_code=400,
+                )
 
         # 系统认证通过后，使用传入的仓库用户名和密码测试仓库连接
         # 注意：这里的 username 和 password 是仓库的认证信息，不是系统的
@@ -1262,7 +1333,7 @@ async def test_registry_login(request: TestRegistryRequest, http_request: Reques
 
         registry_host = request.registry
         username = request.username
-        password = request.password
+        password = test_password  # 使用从配置获取的密码或传入的密码
 
         if not username or not password:
             return JSONResponse(
@@ -4033,10 +4104,26 @@ async def get_docker_images(
         from backend.handlers import docker_builder, DOCKER_AVAILABLE
 
         if not DOCKER_AVAILABLE or not docker_builder:
-            return JSONResponse({"images": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0})
+            return JSONResponse(
+                {
+                    "images": [],
+                    "total": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": 0,
+                }
+            )
 
         if not hasattr(docker_builder, "client") or not docker_builder.client:
-            return JSONResponse({"images": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0})
+            return JSONResponse(
+                {
+                    "images": [],
+                    "total": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": 0,
+                }
+            )
 
         # 获取镜像列表
         images_data = []
@@ -4047,13 +4134,16 @@ async def get_docker_images(
                 if not tags:
                     repository = "<none>"
                     tag_name = "<none>"
-                    
+
                     # 应用搜索过滤
                     if search:
                         search_lower = search.lower()
-                        if not (search_lower in repository.lower() or search_lower in tag_name.lower()):
+                        if not (
+                            search_lower in repository.lower()
+                            or search_lower in tag_name.lower()
+                        ):
                             continue
-                    
+
                     # 应用标签过滤
                     if tag_filter == "latest":
                         continue  # <none> 标签不匹配 latest
@@ -4061,7 +4151,7 @@ async def get_docker_images(
                         pass  # <none> 标签匹配 none
                     elif tag_filter:
                         continue  # 其他过滤条件不匹配
-                    
+
                     images_data.append(
                         {
                             "id": img.id,
@@ -4077,13 +4167,16 @@ async def get_docker_images(
                             repo, tag_name = tag.rsplit(":", 1)
                         else:
                             repo, tag_name = tag, "latest"
-                        
+
                         # 应用搜索过滤
                         if search:
                             search_lower = search.lower()
-                            if not (search_lower in repo.lower() or search_lower in tag_name.lower()):
+                            if not (
+                                search_lower in repo.lower()
+                                or search_lower in tag_name.lower()
+                            ):
                                 continue
-                        
+
                         # 应用标签过滤
                         if tag_filter == "latest":
                             if tag_name != "latest":
@@ -4093,7 +4186,7 @@ async def get_docker_images(
                                 continue
                         elif tag_filter:
                             continue  # 其他过滤条件不匹配
-                        
+
                         images_data.append(
                             {
                                 "id": img.id,
@@ -4116,13 +4209,15 @@ async def get_docker_images(
         paginated_images = images_data[start:end]
         total_pages = (total + page_size - 1) // page_size if total > 0 else 0
 
-        return JSONResponse({
-            "images": paginated_images,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": total_pages,
-        })
+        return JSONResponse(
+            {
+                "images": paginated_images,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+            }
+        )
     except Exception as e:
         import traceback
 
