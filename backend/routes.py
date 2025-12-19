@@ -1114,10 +1114,27 @@ async def get_config():
 
 
 @router.get("/registries")
-async def get_registries():
-    """获取所有仓库配置"""
+async def get_registries(
+    query: Optional[str] = Query(None, description="模糊搜索关键词，匹配仓库名称、registry地址、前缀")
+):
+    """获取所有仓库配置，支持模糊查询"""
     try:
         registries = get_all_registries()
+        
+        # 如果提供了查询关键词，进行模糊搜索
+        if query:
+            query_lower = query.lower().strip()
+            registries = [
+                reg for reg in registries
+                if query_lower in reg.get("name", "").lower() or
+                   query_lower in reg.get("registry", "").lower() or
+                   query_lower in reg.get("registry_prefix", "").lower()
+            ]
+        
+        # 限制返回结果数量（最多50条）
+        if len(registries) > 50:
+            registries = registries[:50]
+        
         return JSONResponse({"registries": registries})
     except HTTPException:
         raise
@@ -3778,8 +3795,9 @@ async def get_template(
     name: Optional[str] = Query(None),
     page: int = Query(1, ge=1, description="页码，从1开始"),
     page_size: int = Query(10, ge=1, le=1000, description="每页数量"),
+    query: Optional[str] = Query(None, description="模糊搜索关键词，匹配模板名称、项目类型"),
 ):
-    """获取模板详情或列表（支持分页）"""
+    """获取模板详情或列表（支持分页和模糊查询）"""
     try:
         if name:
             # 获取单个模板内容
@@ -3803,7 +3821,7 @@ async def get_template(
                 }
             )
         else:
-            # 返回模板列表（支持分页）
+            # 返回模板列表（支持分页和模糊查询）
             templates = get_all_templates()
             details = []
 
@@ -3826,7 +3844,20 @@ async def get_template(
                 except OSError:
                     continue
 
+            # 如果提供了查询关键词，进行模糊搜索
+            if query:
+                query_lower = query.lower().strip()
+                details = [
+                    item for item in details
+                    if query_lower in item["name"].lower() or 
+                       query_lower in item.get("project_type", "").lower()
+                ]
+
             details.sort(key=lambda item: natural_sort_key(item["name"]))
+
+            # 限制搜索结果数量（最多50条）
+            if len(details) > 50:
+                details = details[:50]
 
             # 后端分页
             total = len(details)
@@ -6229,12 +6260,15 @@ class UpdateGitSourceRequest(BaseModel):
 
 
 @router.get("/git-sources")
-async def list_git_sources(http_request: Request):
-    """获取所有 Git 数据源"""
+async def list_git_sources(
+    http_request: Request,
+    query: Optional[str] = Query(None, description="模糊搜索关键词，匹配名称、URL、描述")
+):
+    """获取所有 Git 数据源，支持模糊查询"""
     try:
         get_current_username(http_request)  # 验证登录
         manager = GitSourceManager()
-        sources = manager.list_sources()
+        sources = manager.list_sources(query=query)
         return JSONResponse({"sources": sources, "total": len(sources)})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取数据源列表失败: {str(e)}")

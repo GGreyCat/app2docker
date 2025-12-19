@@ -137,12 +137,30 @@ class GitSourceManager:
         finally:
             db.close()
 
-    def list_sources(self, include_password: bool = False) -> List[Dict]:
-        """列出所有数据源配置"""
+    def list_sources(self, include_password: bool = False, query: Optional[str] = None) -> List[Dict]:
+        """列出所有数据源配置，支持模糊查询"""
         db = get_db_session()
         try:
-            sources = db.query(GitSource).order_by(GitSource.created_at.desc()).all()
-            return [self._to_dict(s, include_password) for s in sources]
+            query_obj = db.query(GitSource)
+            
+            # 如果提供了查询关键词，进行模糊搜索
+            if query:
+                query_lower = query.lower().strip()
+                # 对名称、Git URL、描述进行模糊匹配
+                query_obj = query_obj.filter(
+                    (GitSource.name.ilike(f"%{query_lower}%")) |
+                    (GitSource.git_url.ilike(f"%{query_lower}%")) |
+                    (GitSource.description.ilike(f"%{query_lower}%"))
+                )
+            
+            sources = query_obj.order_by(GitSource.created_at.desc()).all()
+            result = [self._to_dict(s, include_password) for s in sources]
+            
+            # 限制返回结果数量（最多50条）
+            if len(result) > 50:
+                result = result[:50]
+            
+            return result
         finally:
             db.close()
 
