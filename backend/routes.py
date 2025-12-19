@@ -43,6 +43,7 @@ from backend.handlers import (
     validate_and_clean_image_name,
 )
 from backend.stats_cache import StatsCacheManager
+from backend.dashboard_cache import dashboard_cache
 from backend.resource_package_manager import ResourcePackageManager
 from backend.host_manager import HostManager
 from backend.agent_host_manager import AgentHostManager
@@ -2514,6 +2515,17 @@ async def get_exports_stats(request: Request):
         return cache_manager.get_export_dir_stats()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取导出目录统计失败: {str(e)}")
+
+
+@router.get("/dashboard/stats")
+async def get_dashboard_stats(
+    request: Request, force_refresh: bool = Query(False, description="是否强制刷新缓存")
+):
+    """获取仪表盘统计数据（带缓存）"""
+    try:
+        return dashboard_cache.get_stats(force_refresh=force_refresh)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取仪表盘统计失败: {str(e)}")
 
 
 @router.post("/exports/cleanup")
