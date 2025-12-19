@@ -168,7 +168,7 @@
                 placeholder="搜索数据源..."
                 @input="searchGitSources($event.target.value)"
                 @focus="gitSourceDropdownOpen = true"
-                @blur="setTimeout(() => gitSourceDropdownOpen = false, 200)"
+                @blur="handleGitSourceBlur"
                 required
               />
               <span v-if="gitSourceSearchLoading" class="input-group-text">
@@ -448,7 +448,7 @@
                       placeholder="搜索模板..."
                       @input="searchTemplates($event.target.value)"
                       @focus="templateDropdownOpen = true"
-                      @blur="setTimeout(() => templateDropdownOpen = false, 200)"
+                      @blur="handleTemplateBlur"
                       required
                     />
                     <span v-if="templateSearchLoading" class="input-group-text">
@@ -683,7 +683,7 @@
                           placeholder="搜索仓库或手动输入..."
                           @input="searchRegistries($event.target.value)"
                           @focus="registryDropdownOpen = true"
-                          @blur="setTimeout(() => registryDropdownOpen = false, 200)"
+                          @blur="handleRegistryBlur"
                         />
                         <span v-if="registrySearchLoading" class="input-group-text">
                           <span class="spinner-border spinner-border-sm"></span>
@@ -865,7 +865,7 @@
                             placeholder="搜索仓库或手动输入..."
                             @input="searchBatchRegistries($event.target.value)"
                             @focus="batchRegistryDropdownOpen = true"
-                            @blur="setTimeout(() => batchRegistryDropdownOpen = false, 200)"
+                            @blur="handleBatchRegistryBlur"
                           />
                           <span v-if="batchRegistrySearchLoading" class="input-group-text">
                             <span class="spinner-border spinner-border-sm"></span>
@@ -2059,6 +2059,12 @@ function selectGitSource(source) {
   onSourceSelected();
 }
 
+function handleGitSourceBlur() {
+  setTimeout(() => {
+    gitSourceDropdownOpen.value = false;
+  }, 200);
+}
+
 async function onSourceSelected() {
   if (!buildConfig.value.sourceId) {
     repoVerified.value = false;
@@ -2317,6 +2323,12 @@ function selectTemplate(template) {
   templateSearchQuery.value = selectedTemplateDisplay.value;
   templateDropdownOpen.value = false;
   loadTemplateParams();
+}
+
+function handleTemplateBlur() {
+  setTimeout(() => {
+    templateDropdownOpen.value = false;
+  }, 200);
 }
 
 function changeProjectType(type) {
@@ -3697,6 +3709,12 @@ function selectRegistry(registry) {
   onImagePrefixChange();
 }
 
+function handleRegistryBlur() {
+  setTimeout(() => {
+    registryDropdownOpen.value = false;
+  }, 200);
+}
+
 // 批量设置仓库搜索
 let batchRegistrySearchTimeout = null;
 async function loadBatchRegistries(query = "") {
@@ -3752,6 +3770,12 @@ function selectBatchRegistry(registry) {
   batchRegistrySearchQuery.value = `${registry.name} (${prefix})`;
   batchRegistryDropdownOpen.value = false;
   onBatchPrefixChange();
+}
+
+function handleBatchRegistryBlur() {
+  setTimeout(() => {
+    batchRegistryDropdownOpen.value = false;
+  }, 200);
 }
 
 async function loadDockerInfo() {
