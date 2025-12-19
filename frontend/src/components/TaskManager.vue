@@ -548,10 +548,7 @@
               >
                 <i class="fas fa-link"></i> Webhook
               </span>
-              <span
-                v-else-if="task.source === '手动'"
-                class="badge bg-success"
-              >
+              <span v-else-if="task.source === '手动'" class="badge bg-success">
                 <i class="fas fa-rocket"></i> 手动
               </span>
               <span v-else class="badge bg-secondary">
@@ -825,11 +822,11 @@
       class="d-flex justify-content-between align-items-center mt-3"
     >
       <div class="text-muted small">
-        显示第 {{ (currentPage - 1) * pageSize + 1 }} -
+        显示第 {{ totalTasks > 0 ? (currentPage - 1) * pageSize + 1 : 0 }} -
         {{ Math.min(currentPage * pageSize, totalTasks) }} 条，共
         {{ totalTasks }} 条
       </div>
-      <nav v-if="totalPages > 1">
+      <nav v-if="totalPages > 1 && totalTasks > 0">
         <ul class="pagination pagination-sm mb-0">
           <li class="page-item" :class="{ disabled: currentPage === 1 }">
             <button
@@ -886,7 +883,9 @@
         </ul>
       </nav>
       <div v-else class="text-muted small">
-        <span v-if="totalTasks <= pageSize">全部显示</span>
+        <span v-if="totalTasks <= pageSize"
+          >全部显示（共 {{ totalTasks }} 条）</span
+        >
       </div>
     </div>
 
@@ -1048,7 +1047,9 @@ const showLogModal = ref(false);
 const selectedTask = ref(null);
 // 错误弹窗已移除，错误信息现在显示在日志顶部
 const currentPage = ref(1); // 当前页码
-const pageSize = ref(10); // 每页显示数量
+const pageSize = ref(20); // 每页显示数量（默认20，与后台一致）
+const totalTasks = ref(0); // 总任务数（从后台获取）
+const totalPages = ref(0); // 总页数（从后台获取）
 const cleaning = ref(false); // 清理中状态
 const buildDirSize = ref("0 MB"); // 编译目录容量
 const buildDirCount = ref(0); // 编译目录数量
@@ -1114,15 +1115,15 @@ function startRefreshInterval() {
   }
 }
 
-// 筛选已在后端完成，直接返回任务列表
-const filteredTasks = computed(() => {
+// 当前页的任务列表（后台已分页，直接使用）
+const paginatedTasks = computed(() => {
   return tasks.value;
 });
 
-// 任务统计信息
+// 任务统计信息（基于当前页的任务）
 const taskStats = computed(() => {
   const stats = {
-    total: tasks.value.length,
+    total: totalTasks.value, // 使用后台返回的总数
     pending: 0,
     running: 0,
     completed: 0,
@@ -1134,6 +1135,7 @@ const taskStats = computed(() => {
     successRate: 0,
   };
 
+  // 只统计当前页的任务（用于显示当前页的分布情况）
   tasks.value.forEach((task) => {
     // 统计状态
     const status = task.status || "pending";
@@ -1162,22 +1164,9 @@ const taskStats = computed(() => {
   return stats;
 });
 
-// 总任务数
-const totalTasks = computed(() => filteredTasks.value.length);
-
-// 总页数
-const totalPages = computed(() => Math.ceil(totalTasks.value / pageSize.value));
-
-// 当前页的任务列表
-const paginatedTasks = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  const end = start + pageSize.value;
-  return filteredTasks.value.slice(start, end);
-});
-
 // 可见的页码列表
 const visiblePages = computed(() => {
-  const total = totalPages.value;
+  const total = totalPages.value || 0;
   const current = currentPage.value;
   const pages = [];
 
@@ -1217,11 +1206,15 @@ const visiblePages = computed(() => {
 function changePage(page) {
   if (page < 1 || page > totalPages.value || page === currentPage.value) return;
   currentPage.value = page;
+  // 切换页码时重新加载数据
+  loadTasks(false);
 }
 
 // 重置到第1页（切换过滤条件时）
 function resetPage() {
-  currentPage.value = 1;
+  if (currentPage.value !== 1) {
+    currentPage.value = 1;
+  }
 }
 
 // handleLogsOrError 函数已移除，统一使用 viewLogs 函数
@@ -1314,8 +1307,11 @@ async function loadTasks(includeStats = true) {
   error.value = null;
 
   try {
-    // 构建请求参数，在后端进行筛选（更快速）
-    const params = {};
+    // 构建请求参数，在后端进行筛选和分页
+    const params = {
+      page: currentPage.value,
+      page_size: pageSize.value,
+    };
     if (statusFilter.value) params.status = statusFilter.value;
     if (categoryFilter.value) params.task_type = categoryFilter.value;
 
@@ -1327,6 +1323,8 @@ async function loadTasks(includeStats = true) {
 
     const res = await axios.get("/api/tasks", { params });
     tasks.value = res.data.tasks || [];
+    totalTasks.value = res.data.total || 0;
+    totalPages.value = res.data.total_pages || 0;
 
     // 加载任务后，检查是否需要启动定时刷新
     startRefreshInterval();
@@ -1334,6 +1332,9 @@ async function loadTasks(includeStats = true) {
     error.value =
       err.response?.data?.error || err.message || "加载任务列表失败";
     console.error("加载任务列表失败:", err);
+    tasks.value = [];
+    totalTasks.value = 0;
+    totalPages.value = 0;
   } finally {
     loading.value = false;
     filtering.value = false;

@@ -2064,8 +2064,10 @@ async def get_all_tasks(
     task_type: Optional[str] = Query(
         None, description="任务类型过滤: build, build_from_source, export, deploy"
     ),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(20, ge=1, le=1000, description="每页数量"),
 ):
-    """获取所有任务（构建任务 + 导出任务 + 部署任务）"""
+    """获取所有任务（构建任务 + 导出任务 + 部署任务），支持后台分页"""
     try:
         all_tasks = []
 
@@ -2167,7 +2169,23 @@ async def get_all_tasks(
         # 按创建时间倒序排列
         all_tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
-        return JSONResponse({"tasks": all_tasks})
+        # 计算总数
+        total = len(all_tasks)
+
+        # 后台分页
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_tasks = all_tasks[start:end]
+
+        return JSONResponse(
+            {
+                "tasks": paginated_tasks,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (total + page_size - 1) // page_size if total > 0 else 0,
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取任务列表失败: {str(e)}")
 
