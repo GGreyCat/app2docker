@@ -8565,9 +8565,33 @@ async def delete_deploy_task(request: Request, task_id: str):
         username = get_current_username(request)
         build_manager = BuildTaskManager()
 
+        # 先检查任务是否存在
+        task = build_manager.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="部署任务不存在")
+        
+        # 检查任务类型
+        if task.get("task_type") != "deploy":
+            raise HTTPException(status_code=404, detail="部署任务不存在")
+
+        # 检查任务状态，如果是执行任务且正在运行，提供更友好的错误信息
+        task_config = task.get("task_config", {})
+        task_status = task.get("status")
+        if task_config.get("source_config_id"):
+            # 这是执行任务
+            if task_status not in ("stopped", "completed", "failed"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"无法删除正在运行的任务（当前状态: {task_status}）。请先停止任务或等待任务完成。"
+                )
+
         success = build_manager.delete_task(task_id)
         if not success:
-            raise HTTPException(status_code=404, detail="部署任务不存在")
+            # 如果删除失败，可能是状态不允许或其他原因
+            raise HTTPException(
+                status_code=400,
+                detail=f"无法删除任务（当前状态: {task_status}）。只有停止、完成或失败的任务才能删除。"
+            )
 
         # 记录操作日志
         OperationLogger.log(username, "deploy_task_delete", {"task_id": task_id})
