@@ -1972,7 +1972,7 @@ class BuildManager:
 
             if should_push:
                 # 推送时直接使用构建好的镜像名，根据镜像名找到对应的registry获取认证信息
-                from backend.config import get_active_registry, get_all_registries
+                from backend.config import get_active_registry, get_all_registries, get_registry_by_name
 
                 # 根据镜像名找到对应的registry配置
                 def find_matching_registry_for_push(image_name):
@@ -1990,7 +1990,8 @@ class BuildManager:
                                 or image_registry.startswith(reg_address)
                                 or reg_address.startswith(image_registry)
                             ):
-                                return reg
+                                # 使用get_registry_by_name获取包含解密密码的完整配置
+                                return get_registry_by_name(reg.get("name"))
                     return None
 
                 # 尝试根据镜像名找到匹配的registry
@@ -3302,7 +3303,8 @@ logs/
                                 or reg_address.startswith(image_registry)
                             ):
                                 log(f"✅ 找到匹配的registry: {reg_name}\n")
-                                return reg
+                                # 使用get_registry_by_name获取包含解密密码的完整配置
+                                return get_registry_by_name(reg_name)
                     return None
 
                 # 尝试根据镜像名找到匹配的registry
