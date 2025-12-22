@@ -42,8 +42,8 @@
     <!-- 主机列表标签页 -->
     <div v-show="activeTab === 'hosts'">
       <!-- 主机类型筛选器和添加按钮 -->
-      <div class="card mb-3">
-        <div class="card-body py-2">
+      <div class="card mb-3 filter-card">
+        <div class="card-body py-2 filter-card-body">
           <div class="d-flex justify-content-between align-items-center">
             <div class="btn-group" role="group">
               <input
@@ -79,7 +79,7 @@
                 <i class="fas fa-network-wired me-1"></i> Agent主机
               </label>
             </div>
-            <div class="btn-group">
+            <div class="btn-group filter-dropdown-group">
               <button 
                 type="button" 
                 class="btn btn-primary btn-sm dropdown-toggle" 
@@ -2185,6 +2185,31 @@ docker stack deploy -c docker-compose.yml app2docker-agent`
 .card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* 筛选器卡片 - 确保下拉菜单不被遮挡 */
+.filter-card {
+  overflow: visible !important;
+  position: relative;
+  z-index: 1;
+}
+
+.filter-card-body {
+  overflow: visible !important;
+  position: relative;
+}
+
+.filter-dropdown-group {
+  position: relative;
+  z-index: 1000;
+}
+
+.filter-dropdown-group .dropdown-menu {
+  z-index: 1050 !important;
+  position: absolute !important;
+  top: 100% !important;
+  right: 0 !important;
+  margin-top: 0.125rem !important;
 }
 
 .card-header {
