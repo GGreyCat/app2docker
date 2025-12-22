@@ -2272,6 +2272,16 @@ pre code {
   color: white;
 }
 
+/* 下拉菜单层级 */
+.agent-host-manager-panel .btn-group {
+  position: relative;
+}
+
+.agent-host-manager-panel .dropdown-menu {
+  z-index: 1050 !important;
+  position: absolute !important;
+}
+
 /* 响应式 */
 @media (max-width: 768px) {
   .modal-dialog {
