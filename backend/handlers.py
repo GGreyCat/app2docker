@@ -3169,7 +3169,8 @@ logs/
                                                 log(
                                                     f"✅ 找到完全匹配的registry: {reg_name} (地址: {reg_address})\n"
                                                 )
-                                                return reg
+                                                # 使用 get_registry_by_name 获取包含解密密码的配置
+                                                return get_registry_by_name(reg_name)
 
                                         # 次优匹配：包含关系
                                         for reg in all_registries:
@@ -3184,7 +3185,8 @@ logs/
                                                 log(
                                                     f"✅ 找到部分匹配的registry: {reg_name} (地址: {reg_address})\n"
                                                 )
-                                                return reg
+                                                # 使用 get_registry_by_name 获取包含解密密码的配置
+                                                return get_registry_by_name(reg_name)
 
                                         log(f"⚠️  未找到匹配的registry配置\n")
                                     return None
@@ -3194,16 +3196,15 @@ logs/
                                     log(
                                         f"🔍 使用服务指定的 registry: {service_registry}\n"
                                     )
-                                    all_registries = get_all_registries()
-                                    registry_config = None
-                                    for reg in all_registries:
-                                        if reg.get("name") == service_registry:
-                                            registry_config = reg
-                                            log(
-                                                f"✅ 找到指定的 registry 配置: {service_registry}\n"
-                                            )
-                                            break
-                                    if not registry_config:
+                                    # 使用 get_registry_by_name 获取包含解密密码的配置
+                                    registry_config = get_registry_by_name(
+                                        service_registry
+                                    )
+                                    if registry_config:
+                                        log(
+                                            f"✅ 找到指定的 registry 配置: {service_registry}\n"
+                                        )
+                                    else:
                                         log(
                                             f"⚠️  未找到指定的 registry: {service_registry}，将尝试从镜像名匹配\n"
                                         )
