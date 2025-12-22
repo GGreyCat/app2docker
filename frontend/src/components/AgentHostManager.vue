@@ -3,39 +3,68 @@
     <!-- 标签页切换 -->
     <div class="card mb-3">
       <div class="card-body p-2">
-        <ul class="nav nav-tabs nav-tabs-custom mb-0" role="tablist">
-          <li class="nav-item" role="presentation">
+        <div class="d-flex justify-content-between align-items-center">
+          <ul class="nav nav-tabs nav-tabs-custom mb-0" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button 
+                class="nav-link" 
+                :class="{ active: activeTab === 'hosts' }"
+                @click="activeTab = 'hosts'"
+                type="button"
+              >
+                <i class="fas fa-server me-1"></i> 主机列表
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button 
+                class="nav-link" 
+                :class="{ active: activeTab === 'secrets' }"
+                @click="activeTab = 'secrets'"
+                type="button"
+              >
+                <i class="fas fa-key me-1"></i> 密钥管理
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button 
+                class="nav-link" 
+                :class="{ active: activeTab === 'pending' }"
+                @click="activeTab = 'pending'"
+                type="button"
+              >
+                <i class="fas fa-clock me-1"></i> 待加入主机
+                <span v-if="pendingHostsCount > 0" class="badge bg-danger ms-1">{{ pendingHostsCount }}</span>
+              </button>
+            </li>
+          </ul>
+          <div class="btn-group">
             <button 
-              class="nav-link" 
-              :class="{ active: activeTab === 'hosts' }"
-              @click="activeTab = 'hosts'"
-              type="button"
+              type="button" 
+              class="btn btn-primary btn-sm dropdown-toggle" 
+              data-bs-toggle="dropdown" 
+              aria-expanded="false"
             >
-              <i class="fas fa-server me-1"></i> 主机列表
+              <i class="fas fa-plus me-1"></i> 添加主机
             </button>
-          </li>
-          <li class="nav-item" role="presentation">
-            <button 
-              class="nav-link" 
-              :class="{ active: activeTab === 'secrets' }"
-              @click="activeTab = 'secrets'"
-              type="button"
-            >
-              <i class="fas fa-key me-1"></i> 密钥管理
-            </button>
-          </li>
-          <li class="nav-item" role="presentation">
-            <button 
-              class="nav-link" 
-              :class="{ active: activeTab === 'pending' }"
-              @click="activeTab = 'pending'"
-              type="button"
-            >
-              <i class="fas fa-clock me-1"></i> 待加入主机
-              <span v-if="pendingHostsCount > 0" class="badge bg-danger ms-1">{{ pendingHostsCount }}</span>
-            </button>
-          </li>
-        </ul>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li>
+                <a class="dropdown-item" href="#" @click.prevent="showSshAddModal">
+                  <i class="fas fa-server me-2"></i> SSH主机
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item" href="#" @click.prevent="openAddModal('agent')">
+                  <i class="fas fa-network-wired me-2"></i> Agent主机
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item" href="#" @click.prevent="openAddModal('portainer')">
+                  <i class="fab fa-docker me-2"></i> Portainer主机
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -78,41 +107,6 @@
               <label class="btn btn-outline-secondary btn-sm" for="filter-agent">
                 <i class="fas fa-network-wired me-1"></i> Agent主机
               </label>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 添加主机按钮 -->
-      <div class="card mb-3">
-        <div class="card-body py-2">
-          <div class="d-flex justify-content-end">
-            <div class="btn-group">
-              <button 
-                type="button" 
-                class="btn btn-primary btn-sm dropdown-toggle" 
-                data-bs-toggle="dropdown" 
-                aria-expanded="false"
-              >
-                <i class="fas fa-plus me-1"></i> 添加主机
-              </button>
-              <ul class="dropdown-menu dropdown-menu-end">
-                <li>
-                  <a class="dropdown-item" href="#" @click.prevent="showSshAddModal">
-                    <i class="fas fa-server me-2"></i> SSH主机
-                  </a>
-                </li>
-                <li>
-                  <a class="dropdown-item" href="#" @click.prevent="openAddModal('agent')">
-                    <i class="fas fa-network-wired me-2"></i> Agent主机
-                  </a>
-                </li>
-                <li>
-                  <a class="dropdown-item" href="#" @click.prevent="openAddModal('portainer')">
-                    <i class="fab fa-docker me-2"></i> Portainer主机
-                  </a>
-                </li>
-              </ul>
             </div>
           </div>
         </div>
