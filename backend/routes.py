@@ -1644,7 +1644,7 @@ async def verify_git_repo(
     import subprocess
     import tempfile
     import shutil
-    from urllib.parse import urlparse, urlunparse
+    from urllib.parse import urlparse, urlunparse, quote
 
     try:
         # 如果提供了 source_id，从数据源获取认证信息
@@ -1662,10 +1662,13 @@ async def verify_git_repo(
         verify_url = git_url
         if username and password and git_url.startswith("https://"):
             parsed = urlparse(git_url)
+            # 对用户名和密码进行URL编码，避免特殊字符（如@）导致URL格式错误
+            encoded_username = quote(username, safe="")
+            encoded_password = quote(password, safe="")
             verify_url = urlunparse(
                 (
                     parsed.scheme,
-                    f"{username}:{password}@{parsed.netloc}",
+                    f"{encoded_username}:{encoded_password}@{parsed.netloc}",
                     parsed.path,
                     parsed.params,
                     parsed.query,
@@ -6494,7 +6497,7 @@ async def scan_dockerfiles(
     import tempfile
     import shutil
     import os
-    from urllib.parse import urlparse, urlunparse
+    from urllib.parse import urlparse, urlunparse, quote
 
     try:
         get_current_username(http_request)  # 验证登录
@@ -6514,10 +6517,13 @@ async def scan_dockerfiles(
         clone_url = git_url
         if username and password and git_url.startswith("https://"):
             parsed = urlparse(git_url)
+            # 对用户名和密码进行URL编码，避免特殊字符（如@）导致URL格式错误
+            encoded_username = quote(username, safe="")
+            encoded_password = quote(password, safe="")
             clone_url = urlunparse(
                 (
                     parsed.scheme,
-                    f"{username}:{password}@{parsed.netloc}",
+                    f"{encoded_username}:{encoded_password}@{parsed.netloc}",
                     parsed.path,
                     parsed.params,
                     parsed.query,
@@ -6690,7 +6696,7 @@ async def commit_dockerfile(
     import subprocess
     import tempfile
     import shutil
-    from urllib.parse import urlparse, urlunparse
+    from urllib.parse import urlparse, urlunparse, quote
 
     try:
         username = get_current_username(http_request)  # 验证登录
@@ -6716,10 +6722,13 @@ async def commit_dockerfile(
         verify_url = git_url
         if username_auth and password_auth and git_url.startswith("https://"):
             parsed = urlparse(git_url)
+            # 对用户名和密码进行URL编码，避免特殊字符（如@）导致URL格式错误
+            encoded_username = quote(username_auth, safe="")
+            encoded_password = quote(password_auth, safe="")
             verify_url = urlunparse(
                 (
                     parsed.scheme,
-                    f"{username_auth}:{password_auth}@{parsed.netloc}",
+                    f"{encoded_username}:{encoded_password}@{parsed.netloc}",
                     parsed.path,
                     parsed.params,
                     parsed.query,

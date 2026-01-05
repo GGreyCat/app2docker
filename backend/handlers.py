@@ -3897,13 +3897,16 @@ logs/
                 and git_config.get("password")
             ):
                 # 将用户名密码嵌入 URL
-                from urllib.parse import urlparse, urlunparse
+                from urllib.parse import urlparse, urlunparse, quote
 
                 parsed = urlparse(git_url)
+                # 对用户名和密码进行URL编码，避免特殊字符（如@）导致URL格式错误
+                encoded_username = quote(git_config['username'], safe="")
+                encoded_password = quote(git_config['password'], safe="")
                 auth_url = urlunparse(
                     (
                         parsed.scheme,
-                        f"{git_config['username']}:{git_config['password']}@{parsed.netloc}",
+                        f"{encoded_username}:{encoded_password}@{parsed.netloc}",
                         parsed.path,
                         parsed.params,
                         parsed.query,
