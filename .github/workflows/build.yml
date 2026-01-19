@@ -1,9 +1,9 @@
 name: Build multi-arch image
 
-on:
+于:
   workflow_dispatch:   # 手动触发
   push:
-    branches: [ main ]
+    分支: [ main ]
 
 jobs:
   build:
@@ -31,4 +31,4 @@ jobs:
           context: .
           platforms: linux/arm64,linux/amd64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/app2docker:arm64
+          标签: ghcr.io/ggreycat/app2docker:arm64
