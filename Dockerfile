@@ -36,7 +36,7 @@ RUN npm run build
 
 # ============ 阶段 2: Python 后端基础镜像 ============
 # 使用阿里云 Python 镜像加速下载
-FROM registry.cn-shanghai.aliyuncs.com/51jbm/docker:27.2.0-cli AS backend-base
+FROM docker:27.2.0-cli AS backend-base
 
 # ✅ 替换 apk 源为阿里云镜像（关键！提速 5–10×）
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
