@@ -1,9 +1,9 @@
 name: Build multi-arch image
 
-于:
+on:
   workflow_dispatch:   # 手动触发
   push:
-    分支: [ main ]
+    branches: [ main ]
 
 jobs:
   build:
@@ -23,7 +23,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}   # 自动授权，无需手动配置
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push arm64 + amd64
         uses: docker/build-push-action@v5
@@ -31,4 +31,4 @@ jobs:
           context: .
           platforms: linux/arm64,linux/amd64
           push: true
-          标签: ghcr.io/ggreycat/app2docker:arm64
+          tags: ghcr.io/ggreycat/app2docker:arm64
